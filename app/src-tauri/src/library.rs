@@ -769,5 +769,6 @@ mod tests {
         Meeting::export_all(&config).unwrap();
         SearchHit::export_all(&config).unwrap();
         motetto_core::events::Event::export_all(&config).unwrap();
+        crate::catalog::Catalog::export_all(&config).unwrap();
     }
 }

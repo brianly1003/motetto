@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod bookmarks;
 mod calls;
+mod catalog;
 mod companion;
 mod controller;
 mod desktop;
