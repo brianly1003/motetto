@@ -3,6 +3,7 @@
 use std::{
     ffi::OsString,
     io::{self, Read, Write},
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Output, Stdio},
     sync::{
         OnceLock,
@@ -12,6 +13,48 @@ use std::{
 };
 
 static DESKTOP_PATH: OnceLock<OsString> = OnceLock::new();
+static BUNDLED_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// The programs the desktop ships next to the app; with a bundled folder set they never come
+/// from PATH.
+pub const BUNDLED: [&str; 4] = [
+    "whisper-server",
+    "whisper-cli",
+    "whisper-vad-speech-segments",
+    "llama-server",
+];
+
+/// Desktop only: run the `BUNDLED` programs from `dir`.
+pub fn configure_bundled(dir: PathBuf) {
+    let _ = BUNDLED_DIR.set(dir);
+}
+
+fn bundled_path(dir: &Path, program: &str) -> PathBuf {
+    dir.join(if cfg!(windows) {
+        format!("{program}.exe")
+    } else {
+        program.to_string()
+    })
+}
+
+/// Where `program` runs from. A bundled program is never looked up on PATH: a missing one is an
+/// error, not a fallback to whatever else is installed.
+fn resolve(program: &str, bundled: Option<&Path>) -> Result<PathBuf, io::Error> {
+    match bundled {
+        Some(dir) if BUNDLED.contains(&program) => {
+            let path = bundled_path(dir, program);
+            if path.is_file() {
+                Ok(path)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Motet's bundled {program} is missing; reinstall Motet"),
+                ))
+            }
+        }
+        _ => Ok(PathBuf::from(program)),
+    }
+}
 
 /// Finder launches omit Homebrew. Extend only desktop child environments, never global PATH.
 pub fn configure_desktop() {
@@ -33,7 +76,11 @@ fn search_path(existing: OsString) -> OsString {
 }
 
 pub fn command(program: &str) -> Command {
-    let mut command = Command::new(program);
+    let bundled = BUNDLED_DIR.get().map(PathBuf::as_path);
+    // A missing bundled file still gets its path, so spawning fails with NotFound.
+    let path = resolve(program, bundled)
+        .unwrap_or_else(|_| bundled_path(bundled.unwrap_or(Path::new("")), program));
+    let mut command = Command::new(path);
     if let Some(path) = DESKTOP_PATH.get() {
         command.env("PATH", path);
     }
@@ -133,7 +180,30 @@ fn wait(child: &mut Child, cancel: &AtomicBool) -> io::Result<ExitStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::fs;
+    #[test]
+    fn resolve_prefers_bundled_and_never_falls_back() {
+        let dir = std::env::temp_dir().join(format!("motet-bundled-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = bundled_path(&dir, "whisper-cli");
+        fs::write(&file, "").unwrap();
+        assert_eq!(resolve("whisper-cli", Some(&dir)).unwrap(), file);
+        let error = resolve("llama-server", Some(&dir)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            error.to_string(),
+            "Motet's bundled llama-server is missing; reinstall Motet"
+        );
+        assert_eq!(
+            resolve("ffmpeg", Some(&dir)).unwrap(),
+            PathBuf::from("ffmpeg")
+        );
+        assert_eq!(
+            resolve("whisper-cli", None).unwrap(),
+            PathBuf::from("whisper-cli")
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
     #[test]
     #[cfg(target_os = "macos")]
     #[ignore = "requires installed whisper-cli, whisper-server and Ollama; run with Finder PATH"]
