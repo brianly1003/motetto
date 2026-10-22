@@ -13,6 +13,7 @@ mod live;
 mod meeting_actions;
 mod meeting_media;
 mod microphone;
+mod model_store;
 mod my_notes;
 mod note_items;
 mod notifications;

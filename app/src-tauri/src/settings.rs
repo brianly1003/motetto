@@ -1,4 +1,5 @@
 //! Saved desktop preferences, separate from the CLI environment configuration.
+use crate::catalog::{FileKind, SpeedResult, TierId, catalog};
 use motetto_core::{
     events::Mode,
     watch::{self, AppRule},
@@ -31,7 +32,7 @@ pub struct Spelling {
     pub spelling: String,
     pub heard: String,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Settings {
     pub version: u32,
@@ -43,8 +44,24 @@ pub struct Settings {
     pub apps: Vec<AppRule>,
     pub idle_stop_s: u32,
     pub discard_short_s: u32,
+    /// Catalog ids (empty until chosen); the `*_path` fields are what the engines read.
     pub speech_model: String,
     pub notes_model: String,
+    pub onboarding_done: bool,
+    pub onboarding_step: u8,
+    pub consent_confirmed_at: Option<String>,
+    pub tier: Option<TierId>,
+    pub speed_test: Option<SpeedResult>,
+    pub live_transcription: bool,
+    /// The tier a pending `speed_slow` notice would offer.
+    pub slow_question: Option<TierId>,
+    pub screen_requested: bool,
+    /// Catalog id -> path of a verified file the user already had.
+    pub adopted: BTreeMap<String, String>,
+    /// Resolved and written only by Rust after verification; empty means not ready.
+    pub speech_path: String,
+    pub vad_path: String,
+    pub notes_path: String,
     pub call_language: String,
     pub part_chars: u32,
     pub keep_audio: String,
@@ -74,6 +91,18 @@ impl Default for Settings {
                 .filter(|m| !m.is_empty())
                 .or_else(crate::settings_models::installed_suggestion)
                 .unwrap_or_default(),
+            onboarding_done: false,
+            onboarding_step: 0,
+            consent_confirmed_at: None,
+            tier: None,
+            speed_test: None,
+            live_transcription: true,
+            slow_question: None,
+            screen_requested: false,
+            adopted: BTreeMap::new(),
+            speech_path: String::new(),
+            vad_path: String::new(),
+            notes_path: String::new(),
             call_language: "detect".into(),
             part_chars: motetto_core::config::var("SUMMARY_CHUNK_CHARS")
                 .and_then(|n| n.parse().ok())
@@ -104,6 +133,9 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn read(dir: &Path) -> Result<Self, String> {
+        Self::read_with(dir, std::env::home_dir())
+    }
+    fn read_with(dir: &Path, home: Option<PathBuf>) -> Result<Self, String> {
         match std::fs::read_to_string(dir.join("settings.json")) {
             Ok(text) => {
                 let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
@@ -115,11 +147,37 @@ impl Settings {
                 if value.get("keep_audio").is_none() {
                     settings.keep_audio = "forever".into();
                 }
+                settings.migrate(home);
                 settings.validate()?;
                 Ok(settings)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(format!("Couldn't read settings: {e}")),
+        }
+    }
+    /// M4 stored a speech model path and an Ollama name; both are catalog ids now. A path to a
+    /// verified catalog file is adopted (so it isn't downloaded again); anything else is cleared.
+    fn migrate(&mut self, home: Option<PathBuf>) {
+        let cat = catalog();
+        if cat.file(&self.speech_model).is_none() {
+            let old = std::mem::take(&mut self.speech_model);
+            let name = Path::new(&old).file_name().and_then(|n| n.to_str());
+            if let Some(file) = cat
+                .files
+                .iter()
+                .find(|f| f.kind == FileKind::Speech && Some(f.file.as_str()) == name)
+            {
+                let mut candidates = vec![PathBuf::from(&old)];
+                candidates.extend(home.map(|h| h.join(".cache/whisper").join(&file.file)));
+                if let Some(found) = crate::model_store::adopt(file, &candidates) {
+                    self.adopted
+                        .insert(file.id.clone(), found.to_string_lossy().into_owned());
+                    self.speech_model = file.id.clone();
+                }
+            }
+        }
+        if cat.file(&self.notes_model).is_none() {
+            self.notes_model.clear();
         }
     }
     // Read-only callers can fall back; writes always use the validated Store.
@@ -295,14 +353,16 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
         }
         let mut result = (|| {
             if settings.speech_model != old.speech_model
-                && !Path::new(&settings.speech_model).is_file()
+                && !Path::new(&settings.speech_path).is_file()
             {
                 return Err(
                     "Download the speech model first. The current model is still in use.".into(),
                 );
             }
-            if settings.notes_model != old.notes_model {
-                crate::settings_models::check_notes_model(&settings.notes_model)?;
+            if settings.notes_model != old.notes_model
+                && catalog().file(&settings.notes_model).is_none()
+            {
+                return Err("Choose a notes model from the list.".into());
             }
             if settings.open_at_login != old.open_at_login {
                 crate::settings_system::login(&app, settings.open_at_login)?;
@@ -482,6 +542,24 @@ mod tests {
             std::fs::read_to_string(root.join("settings.json")).unwrap(),
             "{broken"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn migrates_m4_settings() {
+        let root = std::env::temp_dir().join(format!("motet-settings-m4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(
+            root.join("settings.json"),
+            r#"{"speech_model":"/Users/x/.cache/whisper/ggml-large-v3-q5_0.bin","notes_model":"qwen3:8b","ask_on_call":false}"#,
+        )
+        .unwrap();
+        let settings = Settings::read_with(&root, None).unwrap();
+        assert_eq!(settings.speech_model, "");
+        assert_eq!(settings.notes_model, "");
+        assert!(!settings.onboarding_done);
+        assert!(settings.live_transcription && settings.adopted.is_empty());
+        assert!(!settings.ask_on_call);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

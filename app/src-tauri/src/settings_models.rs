@@ -109,8 +109,8 @@ pub async fn installed_models(app: tauri::AppHandle) -> Result<Models, String> {
                 }
             }
         }
-        if !settings.speech_model.is_empty() {
-            speech.push(settings.speech_model);
+        if !settings.speech_path.is_empty() {
+            speech.push(settings.speech_path);
         }
         speech.sort();
         speech.dedup();

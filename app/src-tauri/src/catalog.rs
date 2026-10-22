@@ -29,6 +29,15 @@ pub struct ModelFile {
     pub sha256: String,
 }
 
+/// One speed test: `rtf` is processing time over audio time, so below 1.0 keeps up with a call.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct SpeedResult {
+    pub tier: TierId,
+    pub rtf: f32,
+    pub keeps_up: bool,
+    pub measured_at: String,
+}
+
 /// `speech` and `notes` are `ModelFile` ids; the suits strings are shown as-is.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct Tier {

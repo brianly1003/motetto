@@ -317,8 +317,13 @@ async fn act(app: tauri::AppHandle, action: Action) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-fn get_state(controller: tauri::State<'_, Controller>) -> Result<AppState, String> {
-    controller.state()
+fn get_state(
+    controller: tauri::State<'_, Controller>,
+    settings: tauri::State<'_, crate::settings::Store>,
+) -> Result<AppState, String> {
+    let mut state = controller.state()?;
+    state.onboarding_done = settings.get()?.onboarding_done;
+    Ok(state)
 }
 #[tauri::command]
 async fn start_recording(app: tauri::AppHandle, notes_only: Option<bool>) -> Result<(), String> {
