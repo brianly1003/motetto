@@ -6,6 +6,7 @@ mod catalog;
 mod companion;
 mod controller;
 mod desktop;
+mod download;
 mod library;
 mod library_commands;
 mod live;
