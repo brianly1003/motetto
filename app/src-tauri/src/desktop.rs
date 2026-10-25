@@ -112,6 +112,10 @@ pub fn run() {
             }
             settings.save(&config)?;
             motetto_core::config::configure_desktop(config.join("settings.json"));
+            motetto_core::summarize::configure_engine(motetto_core::summarize::Engine {
+                ask: crate::notes_engine::ask,
+                context_tokens: crate::notes_engine::CONTEXT_TOKENS,
+            });
             app.manage(crate::settings::Store {
                 dir: config.clone(),
                 value: std::sync::Mutex::new(settings),
@@ -299,6 +303,7 @@ pub fn run() {
                     }
                 } else {
                     crate::speech::shutdown();
+                    crate::notes_engine::shutdown();
                 }
             }
         });

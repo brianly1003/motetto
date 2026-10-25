@@ -16,6 +16,7 @@ mod microphone;
 mod model_store;
 mod my_notes;
 mod note_items;
+mod notes_engine;
 mod notifications;
 mod permissions;
 mod recording;

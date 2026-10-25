@@ -14,6 +14,12 @@ fn desktop_value(key: &str) -> Option<serde_json::Value> {
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
     value.get(key).cloned()
 }
+/// The notes model file the desktop resolved and verified; None until one is ready.
+pub fn notes_path() -> Option<String> {
+    desktop_value("notes_path")
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|p| !p.is_empty())
+}
 pub fn call_language() -> Option<String> {
     desktop_value("call_language").and_then(|v| {
         v.as_str()
