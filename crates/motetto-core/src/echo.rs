@@ -1,4 +1,5 @@
-//! Suppress duplicated microphone text from speaker playback (SPEC 6.2), and whisper's loops.
+//! Text filters shared by the transcript and live captions: microphone text duplicated from speaker
+//! playback (SPEC 6.2), whisper's loops, and the subtitle credits whisper invents.
 use std::collections::HashSet;
 
 fn words(text: &str) -> impl Iterator<Item = String> + '_ {
@@ -30,6 +31,20 @@ pub fn loops(rows: &[(u64, u64, String)]) -> Vec<bool> {
         dropped.push(looped);
     }
     dropped
+}
+
+/// Subtitle credits whisper learned from YouTube and writes over music, applause or silence:
+/// "Hãy subscribe cho kênh Ghiền Mì Gõ..." came out twice over a song on 2026-10-25, live and
+/// after the call, and "...kênh lalaschool..." on another clip. Matched by the outro's shape, so a
+/// channel never seen before is caught too: subscribe + channel + video in one row, or the
+/// Amara.org subtitle credit. "Like and subscribe" alone is left in: people say it. Live captions
+/// drop every match; after the call `transcribe` keeps one the VAD heard spoken.
+pub fn credit(text: &str) -> bool {
+    // Spaces dropped: whisper writes both "La La School" and "lalaschool".
+    let text: String = text.to_lowercase().split_whitespace().collect();
+    let has = |any: &[&str]| any.iter().any(|word| text.contains(word));
+    (has(&["subscribe", "đăngký", "đăngkí"]) && has(&["kênh", "channel"]) && has(&["video"]))
+        || text.contains("amara.org")
 }
 
 /// Segment index mask: only microphone rows matching system audio within 1.5 s are removed.
@@ -99,6 +114,28 @@ mod tests {
             duplicates(&[(0, 1000, "same words", true), (0, 1000, "same words", true)]),
             [false, false]
         );
+    }
+    #[test]
+    fn subtitle_credits_are_whisper_not_speech() {
+        for outro in [
+            "Hãy subscribe cho kênh Ghiền Mì Gõ Để không bỏ lỡ những video hấp dẫn",
+            "Mọi người hãy subscribe cho kênh Ghiền Mì Gõ để nhận những video hấp dẫn",
+            "Hãy subscribe cho kênh lalaschool Để không bỏ lỡ những video hấp dẫn",
+            "Hãy đăng ký kênh Team X để xem thêm nhiều video mới",
+            "Please subscribe to my channel for more videos",
+            "Subtitles by the Amara.org community",
+        ] {
+            assert!(credit(outro), "{outro}");
+        }
+        for said in [
+            "Please subscribe to the release notes channel",
+            "Don't forget to like and subscribe!",
+            "Mình cần thêm người đăng ký kênh bán hàng",
+            "Video demo này ai làm vậy?",
+            "Cảm ơn các bạn đã theo dõi",
+        ] {
+            assert!(!credit(said), "{said}");
+        }
     }
     #[test]
     fn drops_whisper_loops_but_keeps_real_repeats() {

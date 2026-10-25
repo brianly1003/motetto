@@ -146,12 +146,15 @@ pub fn transcript_parts(
                 track_language.as_deref(),
                 quiet,
             )?;
-            // A short loop can still slip through the 64-token context; drop it here.
+            // A short loop can still slip through the 64-token context; drop it here, with
+            // invented subtitle credits (after the split, so a credit piece doesn't keep a row
+            // whole).
             let loops = crate::echo::loops(&rows);
+            let invented = invented_credits(&wav16, &rows);
             let rows: Vec<_> = rows
                 .into_iter()
-                .zip(loops)
-                .filter_map(|(row, looped)| (!looped).then_some(row))
+                .zip(loops.into_iter().zip(invented))
+                .filter_map(|(row, (looped, invented))| (!looped && !invented).then_some(row))
                 .map(|(start, end, text)| {
                     (heard_from(Path::new(&wav16), start, end, &text), end, text)
                 })
@@ -546,6 +549,36 @@ fn merge(mut segments: Vec<Segment>) -> String {
         .collect()
 }
 
+/// Rows shaped like a YouTube outro (`echo::credit`) that are mostly not speech. whisper writes
+/// the outro over music: Silero heard speech in 9 % and 21 % of the two rows on 2026-10-25,
+/// while someone reading it aloud is speech nearly all through, so their line stays. Without
+/// VAD, or if the check fails, every outro row goes: an invented line is the likelier case.
+fn invented_credits(wav16: &str, rows: &[Row]) -> Vec<bool> {
+    let credits: Vec<bool> = rows.iter().map(|row| crate::echo::credit(&row.2)).collect();
+    if !credits.contains(&true) {
+        return credits;
+    }
+    let Some(speech) = config::var("WHISPER_VAD_MODEL")
+        .filter(|vad| !vad.is_empty())
+        .and_then(|vad| slice::speech(Path::new(wav16), &vad).ok())
+    else {
+        return credits;
+    };
+    rows.iter()
+        .zip(credits)
+        .map(|((start, end, _), credit)| credit && mostly_silent(*start, *end, &speech))
+        .collect()
+}
+
+/// Speech (ms intervals) covers less than half of `start..end`.
+fn mostly_silent(start: u64, end: u64, speech: &[(u64, u64)]) -> bool {
+    let heard: u64 = speech
+        .iter()
+        .map(|&(s, e)| e.min(end).saturating_sub(s.max(start)))
+        .sum();
+    heard * 2 < end.saturating_sub(start)
+}
+
 /// whisper-cli `-ocsv` rows: `start_ms,end_ms,"text"` (header row skipped).
 fn parse_csv(csv: &str) -> Vec<(u64, u64, String)> {
     csv.lines()
@@ -568,6 +601,15 @@ fn parse_csv(csv: &str) -> Vec<(u64, u64, String)> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_outro_over_music_goes_but_one_read_aloud_stays() {
+        // 2026-10-25, Silero on the system track around the 02:59 outro row.
+        let speech = [(150_000, 163_000), (181_350, 181_790), (187_070, 189_050)];
+        assert!(mostly_silent(179_000, 184_000, &speech));
+        assert!(mostly_silent(184_000, 197_000, &speech));
+        assert!(!mostly_silent(150_500, 155_300, &speech));
+        assert!(!mostly_silent(5_000, 5_000, &speech));
+    }
     #[test]
     fn a_row_is_cut_in_each_long_silence_inside_it() {
         // 2026-10-23, Silero on the mic: speech until 30.3 s, typing only, speech from 124.87 s;

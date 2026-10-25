@@ -126,7 +126,7 @@ fn parse(bytes: &[u8], offset: u64) -> Result<Vec<Segment>, Box<dyn Error>> {
     reply
         .segments
         .into_iter()
-        .filter(|s| !s.text.trim().is_empty())
+        .filter(|s| !s.text.trim().is_empty() && !crate::echo::credit(&s.text))
         .map(|s| {
             if !s.start.is_finite()
                 || !s.end.is_finite()
