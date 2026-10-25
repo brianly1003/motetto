@@ -2272,6 +2272,7 @@ dependencies = [
  "clap",
  "hound",
  "motetto-core",
+ "serde_json",
 ]
 
 [[package]]

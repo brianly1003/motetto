@@ -17,6 +17,7 @@ import { strings as s } from "@/lib/strings";
 import type { Meeting } from "@/lib/bindings/Meeting";
 import type { MeetingSummary } from "@/lib/bindings/MeetingSummary";
 import type { Stage } from "@/lib/bindings/Stage";
+import { markStage, startRun } from "@/lib/stageClock";
 import type { SearchHit } from "@/lib/bindings/SearchHit";
 
 const GROUPS=["Today","This week","Earlier"];
@@ -45,8 +46,9 @@ export default function Main(){
   useEffect(()=>{
     setJobStage(null);
     if(!rewritingId||!ipc.desktopAvailable())return;
+    startRun(rewritingId);
     let active=true,off:(()=>void)|undefined;
-    void ipc.onSessionEvent(event=>{if(active&&event.type==="Stage"&&event.meeting_id===rewritingId)setJobStage(event.stage);}).then(stop=>{if(active)off=stop;else stop();});
+    void ipc.onSessionEvent(event=>{if(active&&event.type==="Stage"&&event.meeting_id===rewritingId){markStage(rewritingId,event.stage.type);setJobStage(event.stage);}}).then(stop=>{if(active)off=stop;else stop();});
     return ()=>{active=false;off?.();};
   },[rewritingId]);
   // Cancel import: the tool stops in Rust, then the import resolves with nothing and the toast says so.

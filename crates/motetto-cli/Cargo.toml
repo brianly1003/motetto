@@ -14,3 +14,4 @@ motetto-core = { path = "../motetto-core" }
 
 [dev-dependencies]
 hound = "3"
+serde_json = "1"

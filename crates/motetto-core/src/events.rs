@@ -328,6 +328,11 @@ pub enum Command {
         meeting_id: String,
         reason: String,
     },
+    /// The user stopped the notes being written (Stop on the steps page): nothing failed, so no
+    /// problem is raised; the meeting waits with its recording and transcript.
+    FinishStopped {
+        meeting_id: String,
+    },
     AudioInterrupted,
     Recoverable {
         meeting_ids: Vec<String>,

@@ -13,11 +13,14 @@ const SHORTCUTS:Record<string,string>={S:'Start or stop',M:'Mark this moment',J:
 function Row({label,help,children}:{label:string;help?:string;children:ReactNode}){return <div className="formrow"><span className="lbl">{label}</span><div>{children}{help&&<div className="help">{help}</div>}</div></div>;}
 function Switch({label,on,change}:{label:string;on:boolean;change:(value:boolean)=>void}){return <label className="switch"><input type="checkbox" aria-label={label} checked={on} onChange={e=>change(e.target.checked)}/><span/></label>;}
 const LANGUAGES=[['en','English'],['vi','Tiếng Việt'],['zh','中文'],['ja','日本語']] as const;
+// The model tiers (SPEC, mockup Settings › Models): Rust suggests one from this Mac's memory.
+const TIERS:Record<string,string>={'qwen3:8b':'Best','qwen3.5:4b':'Balanced','qwen3:1.7b':'Light'};
+
 export default function SettingsPage(){
   const [tab,setTab]=useState('General');
   const [settings,setSettings]=useState<Settings|null>(null);
   const [apps,setApps]=useState<ipc.CallApp[]>([]);
-  const [models,setModels]=useState<{speech:string[];notes:string[];warning:string|null}>({speech:[],notes:[],warning:null});
+  const [models,setModels]=useState<{speech:string[];notes:string[];warning:string|null;suggested:string|null;memory_gb:number|null}>({speech:[],notes:[],warning:null,suggested:null,memory_gb:null});
   const [storage,setStorage]=useState<ipc.StorageSummary|null>(null);
   const [info,setInfo]=useState<{version:string;licences:string;platform:string}|null>(null);
   const [pending,setPending]=useState(false);
@@ -113,10 +116,10 @@ export default function SettingsPage(){
       </>}
       {tab==='Models'&&<>
         <Row label="Speech"><div className="field"><select className="speech-model" aria-label="Speech model" value={settings.speech_model} onChange={e=>void save({speech_model:e.target.value})}><option value="">Choose an installed model</option>{Array.from(new Set([settings.speech_model,...models.speech])).filter(Boolean).map(path=><option key={path} value={path}>{path.split(/[\\/]/).at(-1)}</option>)}</select><span className="chip plain">Local</span><button className="btn sm" onClick={()=>void action(async()=>{const path=await ipc.pickSpeechModel();if(path)await ipc.saveSettings({...settings,speech_model:path});})}>Choose…</button></div></Row>
-        <Row label="Notes"><div className="field"><select className="notes-model" aria-label="Notes model" value={settings.notes_model} onChange={e=>void save({notes_model:e.target.value})}><option value="">Choose an installed model</option>{Array.from(new Set([settings.notes_model,...models.notes])).filter(Boolean).map(name=><option key={name}>{name}</option>)}</select></div>{models.warning&&<div className="help" role="status">{models.warning}</div>}</Row>
+        <Row label="Notes"><div className="field"><select className="notes-model" aria-label="Notes model" value={settings.notes_model} onChange={e=>void save({notes_model:e.target.value})}><option value="">Choose an installed model</option>{Array.from(new Set([settings.notes_model,...models.notes])).filter(Boolean).map(name=><option key={name} value={name}>{TIERS[name]?`${name} · ${TIERS[name]}`:name}</option>)}</select></div>{models.warning&&<div className="help" role="status">{models.warning}</div>}{!models.warning&&models.suggested&&<div className="help">This Mac has {models.memory_gb} GB of memory. Motetto suggests {TIERS[models.suggested]} ({models.suggested}).{!models.notes.includes(models.suggested)&&<> Install it with <code>ollama pull {models.suggested}</code>; Motetto never downloads models.</>}</div>}</Row>
         <Row label="Call language" help="Detect handles mixed-language calls; pick one if detection guesses wrong."><div className="field"><select className="call-language" aria-label="Call language" value={settings.call_language} onChange={e=>void save({call_language:e.target.value})}><option value="detect">Detect</option>{LANGUAGES.map(([id,label])=><option key={id} value={id}>{{en:'English',vi:'Vietnamese',zh:'Chinese',ja:'Japanese'}[id]??label}</option>)}</select></div></Row>
         <Row label="Long calls"><div className="field"><span>Summarize in parts of</span>{number('Part size in characters','part_chars',8000,48000)}<span>characters</span></div></Row>
-        <div className="note">{speed===null?'No speed test run in this window.':`Last speed test: ${speed.toFixed(2)}× real time. ${speed<=.5?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`} <button className="btn sm" onClick={()=>void action(async()=>setSpeed(await ipc.runSpeedTest()),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a generated local English sample, without recording. Model downloads and tier setup are not available in this build.</div></div>
+        <div className="note">{speed===null?'No speed test run in this window.':`Last speed test: ${speed.toFixed(2)}× real time. ${speed<=.5?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`} <button className="btn sm" onClick={()=>void action(async()=>setSpeed(await ipc.runSpeedTest()),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a generated local English sample, without recording. Model downloads are not available in this build; the notes model suggested above comes from this Mac's memory.</div></div>
       </>}
       {tab==='Spellings'&&<>
         <p className="settings-intro">Names and terms the models can&apos;t know. Add spellings here for future meetings. Motetto uses up to 40 names as data for local speech and notes models.</p>

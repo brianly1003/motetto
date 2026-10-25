@@ -647,6 +647,25 @@ fn completion_and_failure_return_idle_and_ignore_stale_workers() {
 }
 
 #[test]
+fn stopping_the_notes_returns_idle_without_a_problem() {
+    let s = step(start(fresh(), true), 1, Command::StopRecording).0;
+    let stop = |id: &str| Command::FinishStopped {
+        meeting_id: id.into(),
+    };
+    let (unchanged, effects) = step(s.clone(), 2, stop("old"));
+    assert_eq!(unchanged.app, s.app);
+    assert!(effects.is_empty());
+    let (stopped, effects) = step(s, 2, stop("m1"));
+    assert_eq!(stopped.app.state, SessionState::Idle);
+    assert!(stopped.app.problem.is_none());
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::Emit(Event::NotesReady { .. })))
+    );
+}
+
+#[test]
 fn extra_calls_are_added_once_without_starting_another_recording() {
     let s = recording();
     let mut other = call(Mode::Ask);

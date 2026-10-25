@@ -791,6 +791,22 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             session.app.quit_pending = false;
             session.ask_queued(now, &input.since, &mut effects);
         }
+        Command::FinishStopped { meeting_id }
+            if session.app.state
+                == (SessionState::Finishing {
+                    meeting_id: meeting_id.clone(),
+                }) =>
+        {
+            session
+                .problems
+                .retain(|p| !matches!(p.problem, Problem::Slow));
+            session.idle();
+            if session.app.quit_pending {
+                effects.push(Effect::PauseDownload);
+                effects.push(Effect::Exit);
+            }
+            session.ask_queued(now, &input.since, &mut effects);
+        }
         Command::AudioInterrupted
             if session.app.state == SessionState::Recording && session.audio() =>
         {

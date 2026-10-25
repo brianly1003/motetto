@@ -13,6 +13,7 @@ pub use decode::to_wav as decode_audio;
 mod diarize;
 pub mod events;
 pub mod mics;
+pub mod ollama;
 pub mod session;
 pub mod slice;
 pub mod summarize;

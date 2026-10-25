@@ -2,7 +2,7 @@
 import { Alert } from "@/components/Alert";
 import { useEffect, useRef, useState } from "react";
 import type { Meeting } from "@/lib/bindings/Meeting";
-import { meetingAction } from "@/lib/ipc";
+import { meetingAction, STOPPED } from "@/lib/ipc";
 import { renderNotes } from "@/lib/md";
 import { withoutTranscript } from "@/lib/document";
 import { strings as s } from "@/lib/strings";
@@ -53,7 +53,11 @@ export default function MeetingActions({ meeting, hasAudio, onChanged, onError, 
     // The question is answered either way; a failure shows in the page's alert, not under it.
     // The menu is hidden while the job runs, so the parent shows what finished.
     try { await meetingAction(meeting.summary.id, action); if (action !== "reveal") await onChanged(false); if (action === "retranscribe") onToast?.(s.retranscribed); }
-    catch (error) { onError(String(error)); }
+    catch (error) {
+      // Stop on the steps page is not a failure: nothing was replaced (owner 2026-10-25).
+      if (String(error) === STOPPED) { await onChanged(false); onToast?.(action === "retranscribe" ? s.stoppedTranscript : s.stoppedNotes); }
+      else onError(String(error));
+    }
     finally { setBusy(false); setConfirm(null); }
   }
   return <div className="headacts" ref={root} onKeyDown={event => {

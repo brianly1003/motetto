@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {meetingGroup, meetingDate, recordedAt, noteSections, taskLine, timeLabel, durationLabel, myNoteTimes, withoutTranscript} from '../lib/document.ts';
+import {meetingGroup, meetingDate, recordedAt, noteSections, taskLine, timeLabel, durationLabel, notesTime, myNoteTimes, withoutTranscript} from '../lib/document.ts';
 test('My notes after the transcript block still show, and their times may seek',()=>{
  const md='### Action items\n- [ ] You: Brush [01:00]\n\n<details><summary>Transcript</summary>\n\n[00:12] Me: hi\n### Not a section\n\n</details>\n\n### My notes\n\n[00:28] > quote\n[01:00] [] Brush\n';
  const sections=noteSections(md);
@@ -21,6 +21,8 @@ test('calendar groups use local midnight and Monday week boundaries',()=>{
  assert.doesNotMatch(meetingDate(new Date(2026,9,14,9,30).getTime(),now),new RegExp(`^${weekday}`));
  assert.equal(timeLabel(87000),'01:27');
  assert.deepEqual([22900,87000,599999,2580000].map(durationLabel),['22 s','1 min 27 s','9 min 59 s','43 min']);
+ // Notes in: 820 s reads as 13 min 40 s; an hour or more drops the seconds.
+ assert.deepEqual([48000,819796,3900000].map(notesTime),['48 s','13 min 40 s','1 h 5 min']);
 });
 test('task positions preserve original Markdown line numbers and owners are explicit',()=>{
  const sections=noteSections('### Action items\n- [ ] You: Send it [01:20]\n\n### Overview\n- Text\n<details><summary>Transcript</summary>\n### Not a section');

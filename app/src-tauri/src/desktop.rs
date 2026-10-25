@@ -40,6 +40,7 @@ pub fn run() {
             library_commands::import_audio,
             library_commands::importing,
             library_commands::cancel_import,
+            library_commands::stop_processing,
             get_state,
             crate::my_notes::get_my_notes,
             crate::my_notes::save_my_notes,

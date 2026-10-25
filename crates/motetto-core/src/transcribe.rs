@@ -71,11 +71,6 @@ fn run(cmd: &mut Command) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Transcribes each track on its own and merges the lines into one `[mm:ss] Me: …` transcript.
-pub fn transcript(sources: &[String]) -> Result<String, Box<dyn Error>> {
-    Ok(transcript_parts(&[(sources.to_vec(), 0)], false)?.text)
-}
-
 /// The merged transcript and the call's language (SPEC 6.4 `meeting.json` `language`).
 pub struct Transcript {
     pub text: String,

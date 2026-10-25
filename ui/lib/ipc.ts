@@ -15,6 +15,9 @@ export const importAudio = () => invoke<MeetingSummary | null>("import_audio");
 export type Job = { id: string | null; import: boolean; transcribe: boolean };
 export const importing = () => invoke<Job | null>("importing");
 export const cancelImport = () => invoke<void>("cancel_import");
+/** Stop on a meeting's steps page; Write the notes again and Transcribe again then fail with STOPPED. */
+export const stopProcessing = (id: string) => invoke<void>("stop_processing", { id });
+export const STOPPED = "stopped";
 export async function subscribe(name: string, callback: () => void) {
   const { listen } = await import("@tauri-apps/api/event");
   return listen(name, callback);
@@ -130,7 +133,7 @@ export const setAppMode=(appId:string,mode:'ask'|'off')=>invoke<void>('set_app_m
 export const callApps=()=>invoke<CallApp[]>('call_apps');
 export const recentMicApps=()=>invoke<string[]>('recent_mic_apps');
 export const addApp=(appId:string)=>invoke<Settings>('add_app',{appId});
-export const installedModels=()=>invoke<{speech:string[];notes:string[];warning:string|null}>('installed_models');
+export const installedModels=()=>invoke<{speech:string[];notes:string[];warning:string|null;suggested:string|null;memory_gb:number|null}>('installed_models');
 export const pickSpeechModel=()=>invoke<string|null>('pick_speech_model');
 export const runSpeedTest=()=>invoke<number>('run_speed_test');
 import type {StorageSummary} from "./bindings/StorageSummary";

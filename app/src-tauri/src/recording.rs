@@ -113,8 +113,14 @@ pub fn spawn(
                                     .into(),
                             ),
                         };
+                        // Stopped on the steps page: the meeting says so and offers Write the notes.
+                        let failed = if motetto_core::tools::cancelled() {
+                            "NotesStopped"
+                        } else {
+                            "NeedsAttention"
+                        };
                         if let Err(reason) = &mut result
-                            && let Err(e) = status(&root, &id, "NeedsAttention")
+                            && let Err(e) = status(&root, &id, failed)
                         {
                             reason.push_str(&format!(" Status could not be saved: {e}"));
                         }
@@ -317,7 +323,13 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage)) -> Result<Stri
         } else {
             String::new()
         };
-        let title = summarize::notes(&dir.join("notes").to_string_lossy(), &text, &mine)?;
+        let title = summarize::notes(
+            &dir.join("notes").to_string_lossy(),
+            &text,
+            &mine,
+            heard.language.as_deref(),
+            &stage,
+        )?;
         let mut metadata = library::summary(root, &record.id)?;
         metadata.titled(title);
         metadata.language = heard.language;

@@ -134,7 +134,7 @@ pub(crate) fn regenerate(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result
     if meeting.transcript.trim().is_empty() {
         return Err("This meeting has no transcript to summarize".into());
     }
-    motetto_core::tools::reset(); // Cancel is for imports only
+    motetto_core::tools::reset(); // a Stop pressed for an earlier job doesn't stop this one
     let staging = staging(&folder)?;
     let result = (|| -> Result<(), String> {
         let started = std::time::Instant::now();
@@ -149,6 +149,8 @@ pub(crate) fn regenerate(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result
             &staging.join("notes").to_string_lossy(),
             &transcript,
             &notes,
+            language.as_deref(),
+            stage,
         )
         .map_err(|e| e.to_string())?;
         if !notes.trim().is_empty() {

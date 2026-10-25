@@ -8,10 +8,50 @@ pub struct Models {
     speech: Vec<String>,
     notes: Vec<String>,
     warning: Option<String>,
+    /// The notes model for this computer's memory (SPEC model tiers) and that memory in GB.
+    suggested: Option<String>,
+    memory_gb: Option<u64>,
+}
+
+/// SPEC model tiers by memory (owner 2026-10-25: the SPEC tiers, not a 4B ceiling): Best, 16 GB or
+/// more, Qwen3 8B; Balanced, 8 GB, Qwen3.5 4B (2 min for a 35-minute call against 14 for the 8B on
+/// an M1 Max, 5 GB, 2026-10-25); Light below that, Qwen3 1.7B.
+pub fn suggested_notes_model(memory_gb: u64) -> &'static str {
+    match memory_gb {
+        16.. => "qwen3:8b",
+        8.. => "qwen3.5:4b",
+        _ => "qwen3:1.7b",
+    }
+}
+
+/// Physical memory in whole GB from `sysctl hw.memsize`; None where it can't be read. Windows
+/// picks its tier from the GPU (SPEC), which isn't built yet.
+pub fn memory_gb() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        let bytes: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+        Some(bytes >> 30)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// The suggested notes model when Ollama already has it: a first run starts with it (no download).
+pub fn installed_suggestion() -> Option<String> {
+    let suggested = suggested_notes_model(memory_gb()?);
+    notes_models()
+        .ok()?
+        .iter()
+        .any(|name| name == suggested)
+        .then(|| suggested.to_string())
 }
 pub fn notes_models() -> Result<Vec<String>, String> {
     let output = motetto_core::tools::command("ollama")
-        .env("OLLAMA_HOST", "http://127.0.0.1:11434")
+        .env("OLLAMA_HOST", motetto_core::ollama::host())
         .arg("list")
         .output()
         .map_err(|e| format!("Start local Ollama and retry: {e}"))?;
@@ -78,10 +118,13 @@ pub async fn installed_models(app: tauri::AppHandle) -> Result<Models, String> {
             Ok(models) => (models, None),
             Err(e) => (vec![], Some(e)),
         };
+        let memory_gb = memory_gb();
         Ok(Models {
             speech,
             notes,
             warning,
+            suggested: memory_gb.map(|gb| suggested_notes_model(gb).to_string()),
+            memory_gb,
         })
     })
     .await
@@ -172,6 +215,18 @@ fn speed_test() -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_notes_model_follows_the_memory_tiers() {
+        for (gb, model) in [
+            (64, "qwen3:8b"),
+            (16, "qwen3:8b"),
+            (15, "qwen3.5:4b"),
+            (8, "qwen3.5:4b"),
+            (7, "qwen3:1.7b"),
+        ] {
+            assert_eq!(suggested_notes_model(gb), model, "{gb} GB");
+        }
+    }
     #[test]
     fn model_discovery_rejects_cloud_rows_and_option_names() {
         assert_eq!(

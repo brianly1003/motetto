@@ -33,6 +33,11 @@ export function durationLabel(ms: number) {
   const seconds = Math.floor(ms / 1000), minutes = Math.floor(seconds / 60);
   return seconds < 60 ? `${seconds} s` : minutes < 10 ? `${minutes} min ${seconds % 60} s` : `${minutes} min`;
 }
+/** How long the notes took: "48 s", "13 min 40 s", "1 h 5 min" (owner 2026-10-25: "820 s" said little). */
+export function notesTime(ms: number) {
+  const seconds = Math.round(ms / 1000), minutes = Math.floor(seconds / 60);
+  return seconds < 60 ? `${seconds} s` : minutes < 60 ? `${minutes} min ${seconds % 60} s` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
 export function fileSize(bytes: number) {
   return bytes >= 1e9 ? `${(bytes/1e9).toFixed(1)} GB` : bytes >= 1e6 ? `${(bytes/1e6).toFixed(1)} MB` : `${(bytes/1e3).toFixed(1)} KB`;
 }

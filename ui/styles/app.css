@@ -162,7 +162,7 @@ svg.duet path.them { stroke: var(--voice-them); } svg.duet circle.them { fill: v
 @media (prefers-reduced-motion: reduce) { .progress:after { animation: none; } }
 /* Cancel import (SPEC 7.7): one quiet button under the bar; while it stops, the bar holds still and greys. */
 .proc-cancel { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-.proc-cancel .btn { font-size: 12px; padding: 4px 10px; }
+.proc-cancel .btn { font-size: 12px; padding: 3px 9px; border-radius: 7px; } /* mockup .btn.sm */
 .proc-cancel .btn:disabled { color: var(--ink-3); cursor: default; }
 .proc-cancel .hint { color: var(--ink-3); font-size: 12px; }
 .processing.stopping .progress:after { animation-play-state: paused; background: var(--ink-3); transition: background-color .2s; }
@@ -508,6 +508,10 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 @media (prefers-reduced-motion: reduce) { .step.now .b { animation: none; } }
 .procbar { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .procbar i { display: block; height: 100%; background: var(--attention); border-radius: 99px; transition: width .4s ease; }
+/* Stop on the steps page (mockup .processing.stopping): the page holds still and greys while it stops. */
+.writing.stopping { color: var(--ink-3); transition: color .2s; }
+.writing.stopping .procbar i { background: var(--ink-3); transition: background-color .2s; }
+.writing.stopping .step.now .b, .writing.stopping .step > span:nth-child(2) { animation-play-state: paused; }
 .writing .tip { font-size: 12.5px; color: var(--ink-3); margin: 0; }
 .meeting-row i.rec { background: var(--rec-soft); color: var(--rec); } .meeting-row i.plain { background: var(--surface-3); color: var(--ink-2); }
 

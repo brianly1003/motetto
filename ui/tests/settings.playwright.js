@@ -30,7 +30,7 @@ async (page)=>{
     if(command==='set_app_mode'){apps.find(app=>app.app_id===args.appId).mode=args.mode;return;}
     if(command==='recent_mic_apps')return ['com.example.Discord'];
     if(command==='add_app'){apps.push({app_id:args.appId,name:args.appId,mode:'ask',single_signal:false,mac_ids:[args.appId],win_ids:[],title_patterns:[]});return structuredClone(settings);}
-    if(command==='installed_models')return {speech:[settings.speech_model,'/local/ggml-small.bin'],notes:['qwen3:8b','qwen3:4b'],warning:null};
+    if(command==='installed_models')return {speech:[settings.speech_model,'/local/ggml-small.bin'],notes:['qwen3:8b','qwen3.5:4b'],warning:null,suggested:'qwen3:8b',memory_gb:32};
     if(command==='run_speed_test')return .25;
     if(command==='storage_summary')return {meetings:window.deleted?0:5,audio_bytes:window.deleted?0:2100000000,notes_bytes:3400000,free_bytes:212000000000};
     if(command==='delete_all_meetings'){window.deleted=true;return;}
@@ -77,7 +77,11 @@ async (page)=>{
   // Audio follows General (owner 2026-10-23, DESIGN 4.15).
   if(await p.getByRole('tab',{name:'Audio',exact:true}).getAttribute('aria-selected')!=='true')throw Error('Arrow tab navigation failed');
   await p.getByRole('tab',{name:'Models',exact:true}).click();
-  await p.getByRole('combobox',{name:'Notes model',exact:true}).selectOption('qwen3:4b');
+  // The SPEC tiers by memory (owner 2026-10-25): each known model names its tier; the help says which suits this Mac.
+  const notesOptions=await p.getByRole('combobox',{name:'Notes model',exact:true}).locator('option').allTextContents();
+  if(!notesOptions.includes('qwen3:8b · Best')||!notesOptions.includes('qwen3.5:4b · Balanced'))throw Error('Tier labels: '+notesOptions);
+  await p.getByText('This Mac has 32 GB of memory. Motetto suggests Best (qwen3:8b).',{exact:true}).waitFor();
+  await p.getByRole('combobox',{name:'Notes model',exact:true}).selectOption('qwen3.5:4b');
   await p.getByRole('status').filter({hasText:'Saved'}).waitFor();
   await p.getByRole('button',{name:'Run the speed test again',exact:true}).click();
   await p.getByText(/Last speed test: 0.25/).waitFor();

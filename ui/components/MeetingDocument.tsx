@@ -5,7 +5,7 @@ import MeetingActions, { deletable } from './MeetingActions';
 import NotesView from './NotesView';
 import Transcript from './Transcript';
 import DocumentFind from './DocumentFind';
-import {meetingDate, meetingTitle, timeLabel, fileSize, durationLabel, myNoteTimes, withoutTranscript, taskLine} from '@/lib/document';
+import {meetingDate, meetingTitle, timeLabel, fileSize, durationLabel, notesTime, myNoteTimes, withoutTranscript, taskLine} from '@/lib/document';
 import {RecordingPage, ProcessingPage, RewritingPage, RetranscribingPage} from './RecordingPage';
 import type {AppState} from '@/lib/bindings/AppState';
 import type {Stage} from '@/lib/bindings/Stage';
@@ -14,6 +14,7 @@ import {transcriptLines} from '@/lib/transcript';
 import * as ipc from '@/lib/ipc';
 import {strings as s} from '@/lib/strings';
 import {MenuIcon} from './MenuIcon';
+import {Alert} from './Alert';
 
 const TITLE_MAX=80;
 
@@ -152,7 +153,16 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     const height=(peak:number)=>loudest>0?Math.sqrt(peak/loudest)*17:0;
     return `M${x(track.offset_ms)} 20 `+track.waveform.map((peak,index)=>`L${x(track.offset_ms+index/track.waveform.length*track.duration_ms)} ${20+sign*height(peak)}`).join(' ')+` L${x(track.offset_ms+track.duration_ms)} 20 Z`;
   }
+  // Stopped after the call (mockup stopJob): nothing failed, so a quiet warning with one way back.
+  const [writingNotes,setWritingNotes]=useState(false);
+  async function writeStopped(){
+    setWritingNotes(true);
+    try{await ipc.meetingAction(meeting.summary.id,'regenerate');await onChanged(false);}
+    catch(error){if(String(error)===ipc.STOPPED)await onChanged(false);else onError(String(error));}
+    finally{setWritingNotes(false);}
+  }
   return <article className="document">
+    {meeting.summary.status==='NotesStopped'&&!rewriting&&<Alert variant="warning" title={s.notesStopped} actions={<button className="doc-action" disabled={writingNotes||!ipc.desktopAvailable()} onClick={()=>void writeStopped()}>{s.writeNotes}</button>}>{s.notesStoppedBody}</Alert>}
     <header className={`dochead${editing?' editing':''}`}>
       <div className="titlerow"><div className="tedit"><h1 key={titleKey} ref={title} contentEditable={editing} suppressContentEditableWarning spellCheck={false}
         onClick={()=>{if(!editing)startRename();}} onInput={capTitle} onBlur={()=>endRename(true)}
@@ -162,7 +172,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
         {deletable(meeting.summary.status)&&!rewriting&&<MeetingActions meeting={meeting} hasAudio={tracks.length>0} onToast={onToast} onError={onError} onChanged={onChanged} onRename={startRename} onDelete={onDelete} onLock={on=>void lock(on)}/>}</div>
       <div className="edithint" aria-live="polite"><span><kbd>Enter</kbd> {s.renameSave}</span><span><kbd>Esc</kbd> {s.renameCancel}</span><span className={`count${count>=72?' near':''}`}>{count>=60?`${count}/${TITLE_MAX}`:''}</span></div>
       {live?<div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{session?.state?.app&&<><i className="sep"/><span>{session.state.app}</span></>}</div>:
-      <div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{duration>0&&<><i className="sep"/><span>{durationLabel(duration)}</span></>}{meeting.summary.notes_ms!=null&&<><i className="sep"/><span>Notes in {Math.round(meeting.summary.notes_ms/1000)} s</span></>}{locked&&<><i className="sep"/><button type="button" className="locked-mark" title={s.unlockTitle} aria-label={s.unlockTitle} onClick={()=>void lock(false)}><MenuIcon name="lock"/>{s.locked}</button></>}<span className="sr-only" role="status">{lockMessage}</span></div>}
+      <div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{duration>0&&<><i className="sep"/><span>{durationLabel(duration)}</span></>}{meeting.summary.notes_ms!=null&&<><i className="sep"/><span>Notes in {notesTime(meeting.summary.notes_ms)}</span></>}{locked&&<><i className="sep"/><button type="button" className="locked-mark" title={s.unlockTitle} aria-label={s.unlockTitle} onClick={()=>void lock(false)}><MenuIcon name="lock"/>{s.locked}</button></>}<span className="sr-only" role="status">{lockMessage}</span></div>}
       {!live&&!writing&&!rewriting&&<div className="tl">
         <div className="timeline-wave"><svg viewBox="0 0 1000 40" preserveAspectRatio="none" aria-label="Recorded audio: You above, Them below">
           {tracks.map(track=><path key={track.path} className={track.speaker==='You'?'tl-me':'tl-them'} d={envelope(track)}/>)}
@@ -175,7 +185,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
         <div className="tl-legend"><span className="lm">You</span><span className="lt">Them</span><span>{duration?timeLabel(duration):'No saved audio'}</span></div>
       </div>}
     </header>
-    {live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage stage={rewriting.stage}/>:rewriting?<RewritingPage stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
+    {live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage id={meeting.summary.id} stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage id={meeting.summary.id} stage={rewriting.stage}/>:rewriting?<RewritingPage id={meeting.summary.id} stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
     <div className="doctools"><div className="tabs" role="tablist" aria-label={s.meetingViews}>{['Notes','Transcript','Audio'].map((name,index)=><button key={name} id={`tab-${name}`} type="button" role="tab" aria-selected={tab===name} aria-controls="meeting-panel" tabIndex={tab===name?0:-1} onClick={()=>setTab(name)} onKeyDown={event=>{
       if(event.key===' ' && tab==='Transcript' && name==='Transcript' && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();event.stopPropagation();togglePlay();return;}
       const names=['Notes','Transcript','Audio'];let next=index;
@@ -185,7 +195,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     <div ref={body} className="docbody" id="meeting-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
       {tab==='Notes'?(meeting.notes_md?<NotesView id={meeting.summary.id} markdown={meeting.notes_md} locked={locked} durationMs={duration} onSeek={duration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError}/>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined}/>:<div className="notes"><section><h3>Audio</h3>{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
       <aside className="meeting-aside">
-        <div className="panel"><h5>This meeting</h5><dl className="kv"><dt>Length</dt><dd>{duration?timeLabel(duration):'Not recorded'}</dd><dt>Language</dt><dd>{languageName(meeting.summary.language)}</dd><dt>Notes in</dt><dd>{meeting.summary.notes_ms!=null?`${Math.round(meeting.summary.notes_ms/1000)} s`:"Not recorded"}</dd><dt>Marks</dt><dd>{meeting.summary.marks_ms.length}</dd></dl></div>
+        <div className="panel"><h5>This meeting</h5><dl className="kv"><dt>Length</dt><dd>{duration?timeLabel(duration):'Not recorded'}</dd><dt>Language</dt><dd>{languageName(meeting.summary.language)}</dd><dt>Notes in</dt><dd>{meeting.summary.notes_ms!=null?notesTime(meeting.summary.notes_ms):"Not recorded"}</dd><dt>Marks</dt><dd>{meeting.summary.marks_ms.length}</dd></dl></div>
         <div className="panel"><h5>Spellings used</h5>{meeting.summary.spellings?.length?<div className="spelling-chips">{meeting.summary.spellings.map(term=><span key={term} className="chip plain">{term}</span>)}</div>:<p className="tip">No saved spellings</p>}</div>
         <div className="panel"><h5>Stays on this computer</h5><p className="tip">No account, no upload. Folder: <span>{media?.folder??'Loading…'}</span></p></div>
       </aside>

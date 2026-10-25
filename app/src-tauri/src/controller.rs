@@ -153,6 +153,10 @@ impl Controller {
                                     title,
                                     action_items: vec![],
                                 },
+                                // Stop on the steps page: the worker failed because it was told to.
+                                Err(_) if motetto_core::tools::cancelled() => {
+                                    Command::FinishStopped { meeting_id: id }
+                                }
                                 Err(reason) => Command::FinishFailed {
                                     meeting_id: id,
                                     reason,

@@ -69,7 +69,11 @@ impl Default for Settings {
             idle_stop_s: 30,
             discard_short_s: 20,
             speech_model: motetto_core::config::var("WHISPER_MODEL").unwrap_or_default(),
-            notes_model: motetto_core::config::var("OLLAMA_MODEL").unwrap_or_default(),
+            // A first run with no model set starts with the one suggested for this memory, if installed.
+            notes_model: motetto_core::config::var("OLLAMA_MODEL")
+                .filter(|m| !m.is_empty())
+                .or_else(crate::settings_models::installed_suggestion)
+                .unwrap_or_default(),
             call_language: "detect".into(),
             part_chars: motetto_core::config::var("SUMMARY_CHUNK_CHARS")
                 .and_then(|n| n.parse().ok())

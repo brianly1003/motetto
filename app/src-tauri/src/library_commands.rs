@@ -26,7 +26,7 @@ pub(crate) struct Library {
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct Job {
     pub(crate) id: Option<String>,
-    /// An import can be cancelled; Write the notes again can't.
+    /// An import is cancelled (its meeting goes); the others are stopped (`stop_processing`).
     pub(crate) import: bool,
     /// Transcribe again rather than Write the notes again; the page shows its own steps.
     pub(crate) transcribe: bool,
@@ -201,6 +201,27 @@ pub(crate) async fn import_file(
         app.exit(0);
     }
     result
+}
+
+/// Stop on a meeting's steps page (owner 2026-10-25): the notes or transcript being written for
+/// `id` stop. Writing or transcribing again keeps what was there (its staging is dropped); after
+/// a call the meeting waits in Needs attention with its recording and transcript. Only that
+/// meeting's job is stopped: an id that isn't being processed does nothing.
+#[tauri::command]
+pub(crate) fn stop_processing(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let rewriting = app
+        .state::<Library>()
+        .job
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|job| !job.import && job.id.as_deref() == Some(id.as_str()));
+    let finishing = app.state::<crate::controller::Controller>().state()?.state
+        == motetto_core::events::SessionState::Finishing { meeting_id: id };
+    if rewriting || finishing {
+        motetto_core::tools::cancel();
+    }
+    Ok(())
 }
 
 /// Cancel on the import's progress page: the running tool stops and the half-made meeting goes.

@@ -86,7 +86,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         inputs
     };
 
-    let transcript = transcribe::transcript(&sources)?;
+    let heard = transcribe::transcript_parts(&[(sources, 0)], false)?;
+    let transcript = heard.text;
     fs::write(format!("{base}.txt"), &transcript)?;
     // The raw transcript stays in `.txt`; the corrected one feeds the notes.
     let transcript = match config::var("FIX_MODEL").filter(|m| !m.is_empty()) {
@@ -99,5 +100,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // The title is printed ("Title: ..."); the CLI's notes file keeps its layout.
-    summarize::notes(&base, &transcript, "").map(drop)
+    summarize::notes(&base, &transcript, "", heard.language.as_deref(), &|_| {}).map(drop)
 }

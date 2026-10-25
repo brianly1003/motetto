@@ -4,6 +4,9 @@ use motetto_core::events::{AppState, Event, SessionState};
 use std::{fs, path::Path, sync::atomic::Ordering};
 use tauri::{Emitter, Manager};
 
+/// The error Write the notes again and Transcribe again end with after Stop; the UI shows a toast.
+pub(crate) const STOPPED: &str = "stopped";
+
 pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), String> {
     // shortcut: retain deleted files until the planned 30-day retention scheduler is implemented.
     let deleted = root.join(".deleted");
@@ -190,7 +193,15 @@ pub async fn meeting_action(
     })
     .await
     .map_err(|e| e.to_string())
-    .and_then(|r| r);
+    .and_then(|r| r)
+    // Stop on the steps page: nothing was replaced; the page says so instead of an error.
+    .map_err(|e| {
+        if motetto_core::tools::cancelled() {
+            STOPPED.to_string()
+        } else {
+            e
+        }
+    });
     state.set_job(None);
     state.importing.store(false, Ordering::SeqCst);
     state.busy.store(false, Ordering::SeqCst);

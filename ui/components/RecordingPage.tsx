@@ -4,6 +4,7 @@ import * as ipc from "@/lib/ipc";
 import { elapsedLabel } from "@/lib/session";
 import { strings as s } from "@/lib/strings";
 import { gapLabel, transcriptLines } from "@/lib/transcript";
+import { stageTimes } from "@/lib/stageClock";
 import { MyNotes } from "./MyNotes";
 import { JumpToNow, useFollow } from "./JumpToNow";
 import { MicChip, MicMenu, MicNote, useMicReport } from "./Microphone";
@@ -100,34 +101,53 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
 }
 
 // The steps page (mockup procHtml): each step is [label, detail]; `at` is the one being done,
-// `bar` the progress width (%) for each step.
-function StepsPage({ title, steps, at, bar, tip }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string }) {
-  return <div className="writing" role="status">
+// `bar` the progress width (%) for each step. `began` reads when each step started (stageClock), on
+// every tick since the run's start is recorded just after the page first draws: a
+// step without a detail shows how long it took, and the one being done counts up (owner 2026-10-25).
+// `stop` is the meeting being processed and what Stop keeps (owner 2026-10-25, mockup stopJob): the
+// model stops at once and nothing is lost, so there is no question; the page greys while it stops.
+function StepsPage({ title, steps, at, bar, tip, began, stop }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string; began: () => (number | undefined)[]; stop: { id: string; hint: string } }) {
+  const [now, setNow] = useState(Date.now);
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
+  const times = began();
+  const took = (i: number) => {
+    const from = times[i], to = i < at ? times[i + 1] : i === at ? Math.max(now, from ?? 0) : undefined;
+    return from !== undefined && to !== undefined ? elapsedLabel(to - from) : "";
+  };
+  return <div className={`writing${stopping ? " stopping" : ""}`} role="status">
     <h4>{title}</h4>
-    <div className="steps">{steps.map(([label, detail], i) => <div key={i} className={`step${i < at ? " done" : i === at ? " now" : ""}`}><span className="b"/><span>{label}</span><small>{detail}</small></div>)}</div>
+    <div className="steps">{steps.map(([label, detail], i) => <div key={i} className={`step${i < at ? " done" : i === at ? " now" : ""}`}><span className="b"/><span>{label}</span><small>{detail || took(i)}</small></div>)}</div>
     <div className="procbar"><i style={{ width: `${bar[at]}%` }}/></div>
     <p className="tip">{tip}</p>
+    <div className="proc-cancel"><button className="btn" disabled={stopping || !ipc.desktopAvailable()} onClick={() => { setStopping(true); ipc.stopProcessing(stop.id).catch(() => setStopping(false)); }}>{stopping ? s.stoppingJob : s.stopJob}</button><span className="hint">{stop.hint}</span></div>
   </div>;
 }
 
+// A long call is summarized in parts, then merged: say which, since each part takes minutes.
+const summarizingLabel = (stage: Stage | null) =>
+  stage?.type === "Summarizing" && stage.of > 1 ? `Summarizing part ${stage.part} of ${stage.of}` : stage?.type === "Merging" ? "Summarizing: merging the parts" : "Summarizing";
+
 // After Stop: honest steps while the local models write the notes.
-export function ProcessingPage({ stage, durationMs }: { stage: Stage | null; durationMs: number }) {
+export function ProcessingPage({ id, stage, durationMs }: { id: string; stage: Stage | null; durationMs: number }) {
   const at = stage?.type === "Saving" ? 3 : stage?.type === "Summarizing" || stage?.type === "Merging" ? 2 : 1;
-  return <StepsPage title="Writing the notes" at={at} bar={[0, 35, 65, 90]} tip="You can close this window. A notification arrives when the notes are ready."
-    steps={[["Recorded both sides", durationMs ? elapsedLabel(durationMs) : ""], ["Transcribed", ""], [stage?.type === "Summarizing" && stage.of > 1 ? `Summarizing part ${stage.part} of ${stage.of}` : "Summarizing", ""], ["Saving", ""]]}/>;
+  return <StepsPage title="Writing the notes" at={at} bar={[0, 35, 65, 90]} began={() => { const t = stageTimes(id); return [undefined, t.start, t.Summarizing ?? t.Merging, t.Saving]; }} tip="You can close this window. A notification arrives when the notes are ready." stop={{ id, hint: s.stopAfterCallHint }}
+    steps={[["Recorded both sides", durationMs ? elapsedLabel(durationMs) : ""], ["Transcribed", ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
 }
 
 // Write the notes again (owner 2026-10-21): only the steps a rewrite does. A meeting with a
 // transcript starts at Summarizing; one without (Recover) transcribes first.
-export function RewritingPage({ stage, lines }: { stage: Stage | null; lines: number }) {
+export function RewritingPage({ id, stage, lines }: { id: string; stage: Stage | null; lines: number }) {
   const at = stage?.type === "Saving" ? 2 : stage?.type === "Summarizing" || stage?.type === "Merging" || (lines && !stage) ? 1 : 0;
   const first = lines ? "Transcript ready" : stage?.type === "Transcribing" ? "Transcribing the saved audio" : "Transcribed";
-  return <StepsPage title={s.rewriting} at={at} bar={[20, 55, 90]} tip={s.rewritingTip}
-    steps={[[first, lines ? `${lines} ${lines === 1 ? "line" : "lines"}` : ""], ["Summarizing", ""], ["Saving", ""]]}/>;
+  // With a transcript, summarizing starts with the run; without, it waits for the transcription.
+  const began = () => { const t = stageTimes(id); return [lines ? undefined : t.start, lines ? t.start : t.Summarizing ?? t.Merging, t.Saving]; };
+  return <StepsPage title={s.rewriting} at={at} bar={[20, 55, 90]} tip={s.rewritingTip} began={began} stop={{ id, hint: s.stopNotesHint }}
+    steps={[[first, lines ? `${lines} ${lines === 1 ? "line" : "lines"}` : ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
 }
 
 // Transcribe again (owner 2026-10-21): whisper reads the saved audio, then the transcript is saved.
-export function RetranscribingPage({ stage }: { stage: Stage | null }) {
-  return <StepsPage title={s.retranscribing} at={stage?.type === "Saving" ? 1 : 0} bar={[35, 90]} tip={s.retranscribingTip}
+export function RetranscribingPage({ id, stage }: { id: string; stage: Stage | null }) {
+  return <StepsPage title={s.retranscribing} at={stage?.type === "Saving" ? 1 : 0} bar={[35, 90]} tip={s.retranscribingTip} began={() => { const t = stageTimes(id); return [t.start, t.Saving]; }} stop={{ id, hint: s.stopTranscriptHint }}
     steps={[["Transcribing the saved audio", ""], ["Saving", ""]]}/>;
 }

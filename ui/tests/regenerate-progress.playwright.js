@@ -30,6 +30,9 @@ async (page) => {
   await p.getByRole('button', { name: /Again/ }).first().click();
   await p.getByRole('button', { name: 'More actions' }).click();
   await p.getByRole('menuitem', { name: 'Write the notes again' }).click();
+  // Only the question (owner 2026-10-25): the notes.prev.md file name meant nothing on screen.
+  if (!/Replace these notes\?$/.test((await p.getByRole('alertdialog').innerText()).split('\n').filter(l => /Replace/.test(l))[0] || '') || /notes\.prev/.test(await p.getByRole('alertdialog').innerText())) fails.push('the question is not just "Replace these notes?"');
+  await p.getByRole('alertdialog').screenshot({ path: '.playwright-out/regenerate-confirm.png' });
   await p.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click();
   const page_ = p.locator('.writing');
   await page_.getByText('Writing the notes again').waitFor();
@@ -37,15 +40,23 @@ async (page) => {
   if (!/Writing notes/.test(await p.locator('.meeting-row').first().innerText())) fails.push('the sidebar row does not say Writing notes');
   if (await p.getByRole('button', { name: 'More actions' }).count()) fails.push('meeting actions offered while the notes are written');
   const steps = async () => p.locator('.writing .step').evaluateAll(rows => rows.map(r => `${r.className.replace('step', '').trim() || 'todo'}:${r.children[1].textContent}${r.children[2].textContent ? ' ' + r.children[2].textContent : ''}`));
+  // Each step shows how long it took, and the one being done counts up (owner 2026-10-25).
+  await p.waitForTimeout(1100);
   const first = (await steps()).join(' | ');
-  if (first !== 'done:Transcript ready 2 lines | now:Summarizing | todo:Saving') fails.push('before any stage: ' + first);
+  if (first !== 'done:Transcript ready 2 lines | now:Summarizing 00:01 | todo:Saving') fails.push('before any stage: ' + first);
+  // A long call is summarized in parts: the step says which part, the time still runs from the start.
+  await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: { type: 'Summarizing', part: 2, of: 4 }, percent: 0, eta_s: null }));
+  await p.waitForTimeout(100);
+  const part = (await steps()).join(' | ');
+  if (part !== 'done:Transcript ready 2 lines | now:Summarizing part 2 of 4 00:01 | todo:Saving') fails.push('a part: ' + part);
   await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: { type: 'Saving' }, percent: 0, eta_s: null }));
   await p.waitForTimeout(100);
   const saving = (await steps()).join(' | ');
-  if (saving !== 'done:Transcript ready 2 lines | done:Summarizing | now:Saving') fails.push('after Saving: ' + saving);
+  if (saving !== 'done:Transcript ready 2 lines | done:Summarizing 00:01 | now:Saving 00:00') fails.push('after Saving: ' + saving);
   await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: 'other', stage: { type: 'Summarizing', part: 1, of: 1 }, percent: 0, eta_s: null }));
   await p.waitForTimeout(100);
   if ((await steps()).join(' | ') !== saving) fails.push("another meeting's stage moved these steps");
+  await p.locator('.writing').screenshot({ path: '.playwright-out/regenerate-times.png' });
   await p.evaluate(() => window.finish());
   await p.getByText('New notes.').waitFor();
   if (await p.locator('.writing').count()) fails.push('steps page still shown after the notes were saved');

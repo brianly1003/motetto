@@ -67,7 +67,7 @@ fn desktop_var_with(
 /// The only keys a `.env` file may set. Anything else (PATH, DYLD_*, OLLAMA_HOST…) is ignored,
 /// so a `.env` in a folder you happen to run motetto from can't redirect tools or send data off
 /// the Mac. The process environment is never changed; child tools see the shell's environment.
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "WHISPER_MODEL",
     "ALLOW_SCREENSHOTS",
     "WHISPER_VAD_MODEL",
@@ -77,13 +77,14 @@ const KEYS: [&str; 9] = [
     "FIX_MODEL",
     "SUMMARY_CHUNK_CHARS",
     "TERMS",
+    "OLLAMA_PORT",
 ];
 
-/// Keys that reach a model prompt, so a `./.env` in a folder you didn't write can't set them;
-/// they come only from `~/.config/motetto/.env` or the shell.
-const GLOBAL_ONLY: [&str; 1] = ["TERMS"];
+/// Keys that reach a model prompt or say where the transcript goes, so a `./.env` in a folder you
+/// didn't write can't set them; they come only from `~/.config/motetto/.env` or the shell.
+const GLOBAL_ONLY: [&str; 2] = ["TERMS", "OLLAMA_PORT"];
 
-/// Whether a `.env` line may set `key`: Motetto's keys only, and not prompt keys from `./.env`.
+/// Whether a `.env` line may set `key`: Motetto's keys only, and not `GLOBAL_ONLY` keys from `./.env`.
 fn allowed(key: &str, local: bool) -> bool {
     KEYS.contains(&key) && !(local && GLOBAL_ONLY.contains(&key))
 }
@@ -191,6 +192,8 @@ mod tests {
     fn local_env_cant_set_prompt_keys_or_foreign_keys() {
         assert!(allowed("WHISPER_MODEL", true) && allowed("TERMS", false));
         assert!(!allowed("TERMS", true));
+        // Where the transcript goes: the global .env or the shell only.
+        assert!(allowed("OLLAMA_PORT", false) && !allowed("OLLAMA_PORT", true));
         assert!(!allowed("PATH", false) && !allowed("OLLAMA_HOST", true));
     }
 
