@@ -66,6 +66,18 @@ export default function Companion() {
     void ipc.companionMenu(true, micMenu.top + height + 8 - 72).catch(() => {});
     return () => { void ipc.companionMenu(false).catch(() => {}); };
   }, [micMenu]);
+  // A click anywhere else closes it: in this window (the Pill, or the space the window grew for
+  // the menu) or in another app, which takes focus from the companion.
+  useEffect(() => {
+    if (!micMenu) return;
+    let active = true;
+    let off: (() => void) | undefined;
+    const close = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest?.(".micmenu-host, .micbtn")) setMicMenu(null); };
+    document.addEventListener("pointerdown", close);
+    ipc.onCompanionFocus(focused => { if (active && !focused) setMicMenu(null); })
+      .then(cleanup => { if (active) off = cleanup; else cleanup(); }).catch(() => {});
+    return () => { active = false; document.removeEventListener("pointerdown", close); off?.(); };
+  }, [micMenu]);
   const micDone = (text: string) => { setNotice(text); setTimeout(() => setNotice(""), 4000); void mic.refresh(); };
   const micWarn = !!mic.report?.issue && !micHidden;
   const openMicMenu = (anchor: HTMLElement) => { const box = anchor.getBoundingClientRect(); setMicMenu({ left: Math.max(6, Math.min(box.left - 12, innerWidth - 310)), top: box.bottom + 6 }); };

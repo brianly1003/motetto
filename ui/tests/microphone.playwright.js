@@ -21,6 +21,7 @@ async (page) => {
     };
     window.fixtureLoud = () => { loud = true; };
     let next = 0; const callbacks = {}, listeners = {};
+    window.fixtureEmit = (event, payload) => { if (!listeners[event]) throw Error(`No listener for ${event}`); callbacks[listeners[event]]({event, id: 0, payload}); };
     const now = Date.now();
     const rec = {id: 'rec1', title: 'Recorded meeting', created_ms: now - 74000, status: 'Recording', marks_ms: [], duration_ms: null, notes_ms: null, spellings: []};
     let state = {state: start, meeting_id: 'rec1', app: 'Zoom', elapsed_ms: 74000, started_by: {type: 'App', app: 'Zoom'}, auto_start: false, problem: null, more_problems: 0, quit_pending: false, dnd_active: false, onboarding_done: true, sharing: null, never_pending: null, companion: {visible: true, size: start.type === 'Asking' ? 'Ask' : 'Pill', pinned: false, peeking: false, display_id: ''}};
@@ -155,6 +156,24 @@ async (page) => {
     await c.screenshot({path: `.playwright-out/mic-app-pillmenu-${theme}.png`});
     await c.keyboard.press('Escape');
     await c.waitForFunction(() => window.calls.at(-1)?.c === 'companion_menu' ? !window.calls.at(-1).a.open : window.calls.some(x => x.c === 'companion_menu' && !x.a.open));
+    // A click outside closes it: in the space the window grew for the menu, and in another app.
+    const pillMenu = c.getByRole('menu', {name: 'Microphone'});
+    await c.locator('.duet .micbtn').click();
+    await pillMenu.waitFor();
+    await c.mouse.click(3, 450);
+    await pillMenu.waitFor({state: 'hidden', timeout: 2000});
+    await c.locator('.duet .micbtn').click();
+    await pillMenu.waitFor();
+    await c.waitForFunction(() => window.calls.some(x => x.c === 'plugin:event|listen' && x.a.event === 'tauri://blur'));
+    await c.evaluate(() => window.fixtureEmit('tauri://blur'));
+    await pillMenu.waitFor({state: 'hidden', timeout: 2000});
+    // You still toggles it, and a click inside the menu keeps it open.
+    await c.locator('.duet .micbtn').click();
+    await pillMenu.waitFor();
+    await pillMenu.getByText('Record from').click();
+    if (!await pillMenu.isVisible()) throw Error('A click inside the menu closed it');
+    await c.locator('.duet .micbtn').click();
+    await pillMenu.waitFor({state: 'hidden', timeout: 2000});
     await c.locator('.duet .micbtn').click();
     await c.getByRole('menu', {name: 'Microphone'}).getByRole('menuitemradio', {name: /MacBook Pro Microphone/}).click();
     await c.locator('.caption').waitFor();
