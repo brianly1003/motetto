@@ -146,3 +146,24 @@ export const openLogsFolder=()=>invoke<void>('open_logs_folder');
 export async function onSettingsTab(callback:(tab:string)=>void){
   const {listen}=await import('@tauri-apps/api/event');return listen<string>('motetto://settings-tab',event=>callback(event.payload));
 }
+
+// First run (SPEC 5.2, DESIGN 4.11): Rust owns the setup pipeline; this window only shows it.
+import type {Catalog} from "./bindings/Catalog";
+import type {Grant} from "./bindings/Grant";
+import type {Hardware} from "./bindings/Hardware";
+import type {Heard} from "./bindings/Heard";
+import type {Permissions} from "./bindings/Permissions";
+import type {SetupState} from "./bindings/SetupState";
+import type {TierId} from "./bindings/TierId";
+export const permissions=()=>invoke<Permissions>('permissions');
+export const requestPermission=(kind:PermissionKind)=>invoke<Grant>('request_permission',{kind});
+export const relaunch=()=>invoke<void>('relaunch');
+export const hardwareInfo=()=>invoke<Hardware>('hardware_info');
+export const modelCatalog=()=>invoke<Catalog>('model_catalog');
+export const startSetup=(tier:TierId)=>invoke<void>('start_setup',{tier});
+export const pauseDownload=()=>invoke<void>('pause_download');
+export const answerSlow=(useLower:boolean)=>invoke<void>('answer_slow',{useLower});
+export const setupState=()=>invoke<SetupState>('setup_state');
+export const testRecording=()=>invoke<Heard>('test_recording');
+export const setOnboardingStep=(step:number,consent?:boolean)=>invoke<void>('set_onboarding_step',{step,consent:consent??null});
+export const finishOnboarding=()=>invoke<void>('finish_onboarding');
