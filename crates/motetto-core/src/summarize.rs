@@ -114,8 +114,10 @@ pub struct Engine {
 }
 
 /// The error text of an engine with no notes model; the session turns it into a missing-model
-/// problem instead of a failed meeting.
-pub const NOTES_NOT_READY: &str = "notes model not ready";
+/// problem instead of a failed meeting, and an import or Write the notes again shows it as is
+/// (the desktop's `notes_model_pending` sentence).
+pub const NOTES_NOT_READY: &str =
+    "The notes model is still downloading; notes start working when it's done.";
 
 static ENGINE: OnceLock<Engine> = OnceLock::new();
 
@@ -1112,6 +1114,19 @@ mod tests {
         let unique: String = (0..5000).map(|i| format!("note {i:06}\n")).collect();
         let cut = loop_cut(&unique).unwrap();
         assert!(cut.len() <= MAX_ANSWER_BYTES && cut.ends_with(char::is_numeric));
+    }
+
+    #[test]
+    fn a_missing_notes_model_reads_as_the_pending_sentence() {
+        let engine = Engine {
+            ask: |_| Err(NOTES_NOT_READY.into()),
+            context_tokens: 16384,
+        };
+        let error = ask_with(Some(&engine), "ignored", "p").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "The notes model is still downloading; notes start working when it's done."
+        );
     }
 
     #[test]
