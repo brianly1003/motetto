@@ -3,7 +3,7 @@
 async (page)=>{
  const reference=await page.context().newPage();
  await reference.route('https://**/*',route=>route.abort());
- await reference.setViewportSize({width:1200,height:900});
+ await reference.setViewportSize({width:740,height:660});
  await reference.goto('http://127.0.0.1:3141/motetto-app-mockup.html?screen=onboarding');
  await reference.getByRole('button',{name:'macOS',exact:true}).click();
  await reference.getByRole('button',{name:'First run',exact:true}).first().click();
@@ -91,8 +91,23 @@ async (page)=>{
   await p.evaluate(()=>{fx.perms.microphone='NotAsked';window.dispatchEvent(new Event('focus'));});
   await row('Microphone').getByRole('button',{name:'Allow microphone'}).click();
   await row('Microphone').getByText('Allowed',{exact:true}).waitFor();
-  await row('Screen & System Audio Recording').getByRole('button',{name:'Open System Settings'}).click();
+  // The step is restored on open only: a focus never snaps it back.
+  await p.evaluate(()=>{fx.settings.onboarding_step=0;window.dispatchEvent(new Event('focus'));});
+  await p.waitForTimeout(100);
+  await p.getByRole('heading',{name:'Three quick permissions'}).waitFor();
+  await p.evaluate(()=>{fx.settings.onboarding_step=1;});
+  const screenRow=row('Screen & System Audio Recording');
+  await screenRow.getByRole('button',{name:'Open System Settings for Screen & System Audio Recording',exact:true}).click();
   await p.waitForFunction(()=>window.calls.some(x=>x.c==='open_permission_settings'&&x.a.kind==='SystemAudio'));
+  // Before any grant: no reopen copy, Open System Settings stays.
+  await p.waitForTimeout(100);
+  await expect(screenRow.getByText('Motetto needs to reopen to use this permission.').count().then(n=>n===0),'Reopen copy shown before a grant');
+  await expect(screenRow.getByRole('button',{name:'Open System Settings'}).isVisible(),'Open System Settings gone before a grant');
+  // Back without a grant the OS reports: Reopen is offered beside Open System Settings.
+  await p.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await screenRow.getByRole('button',{name:'Reopen Motetto'}).waitFor();
+  await expect(screenRow.getByRole('button',{name:'Open System Settings'}).isVisible(),'Open System Settings gone after returning');
+  await expect(screenRow.getByText('Motetto needs to reopen to use this permission.').count().then(n=>n===0),'Reopen copy shown without a grant');
   await p.evaluate(()=>{fx.perms.system_audio='Allowed';window.dispatchEvent(new Event('focus'));});
   await row('Screen & System Audio Recording').getByText('Motetto needs to reopen to use this permission.',{exact:true}).waitFor();
   await row('Screen & System Audio Recording').getByRole('button',{name:'Reopen Motetto'}).click();
@@ -111,6 +126,13 @@ async (page)=>{
   await compare(p,['.tiers','.tier','.tier[aria-checked="true"]','.tier b','.tier small','.tier .chip.ok','.dl','.dlrow','.dlrow .progress','.dlrow .progress i','.note','.controls'],diffs);
   await p.screenshot({path:`.playwright-out/onboarding-models-${theme}.png`});
   await reference.locator('.onb').screenshot({path:`.playwright-out/onboarding-models-reference-${theme}.png`});
+  // Radio group keys, and a picked tier survives a SetupChanged for the same setup tier.
+  await p.getByRole('radio',{name:/^Best/}).focus();await p.keyboard.press('ArrowRight');
+  await expect(p.getByRole('radio',{name:/^Balanced/}).evaluate(el=>el.getAttribute('aria-checked')==='true'&&document.activeElement===el&&el.tabIndex===0),'ArrowRight did not move the choice and focus');
+  await p.evaluate(()=>window.setup({}));await p.waitForTimeout(100);
+  await expect(p.getByRole('radio',{name:/^Balanced/}).getAttribute('aria-checked').then(v=>v==='true'),'SetupChanged discarded the picked tier');
+  await p.keyboard.press('ArrowLeft');
+  await expect(p.getByRole('radio',{name:/^Best/}).evaluate(el=>el.getAttribute('aria-checked')==='true'&&document.activeElement===el),'ArrowLeft did not move back');
   // Try it waits for the speech model.
   await p.locator('.onbnav button').nth(3).click();
   await expect(p.getByRole('button',{name:/Record test/}).isDisabled(),'Record test enabled before the speech model');
@@ -122,6 +144,7 @@ async (page)=>{
   const dlrow=name=>pane.locator('.dlrow').filter({hasText:name});
   await p.evaluate(()=>{window.setup({phase:{type:'Downloading',id:'speech-large-v3'}});window.emit({type:'DownloadProgress',id:'speech-large-v3',bytes:540570101,total:1081140203});});
   await dlrow('Speech model').getByText('50%',{exact:true}).waitFor();
+  await expect(p.getByRole('progressbar',{name:'Speech model'}).getAttribute('aria-valuenow').then(v=>v==='50'),'Progress bar value');
   await p.getByRole('button',{name:'Pause'}).click();
   await p.waitForFunction(()=>window.calls.some(x=>x.c==='pause_download'));
   await p.evaluate(()=>{fx.setup.files[0][1]=540570101;window.setup({phase:{type:'Paused'}});});

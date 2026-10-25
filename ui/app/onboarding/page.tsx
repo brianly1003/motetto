@@ -41,6 +41,7 @@ export default function Onboarding(){
   const [pressed,setPressed]=useState(false);
   const [failure,setFailure]=useState<{id:string;text:string}|null>(null);
   const [relaunch,setRelaunch]=useState(false);
+  const [returned,setReturned]=useState(false);
   const [heard,setHeard]=useState<string|null>(null);
   const [testing,setTesting]=useState(false);
   const [error,setError]=useState('');
@@ -62,7 +63,6 @@ export default function Onboarding(){
     const now=await ipc.permissions();
     // macOS applies Screen & System Audio Recording to a new process only: after a grant, reopen.
     if(now.system_audio==='Allowed'&&screenWas.current!==null&&screenWas.current!=='Allowed')setRelaunch(true);
-    else if(now.system_audio!=='Allowed'&&screenOpened.current)setRelaunch(true);
     screenWas.current=now.system_audio;setPerms(now);
   }
   async function readAll(restoreStep:boolean){
@@ -80,7 +80,9 @@ export default function Onboarding(){
     let active=true;const off:Array<()=>void>=[];
     void readAll(true);
     void ipc.hardwareInfo().then(value=>{if(active)setHw(value);}).catch(e=>setError(String(e)));
-    const focus=()=>{if(active)void readAll(true);};
+    // Back from System Settings: macOS may report a Screen grant only after a restart, so Reopen is
+    // offered beside Open System Settings. The step is restored on open only, never mid-save.
+    const focus=()=>{if(!active)return;if(screenOpened.current)setReturned(true);void readAll(false);};
     window.addEventListener('focus',focus);
     void ipc.onSessionEvent(event=>{
       if(!active)return;
@@ -94,7 +96,8 @@ export default function Onboarding(){
         else void readSetup().catch(e=>setError(String(e)));
       }
       else if(event.type==='SetupChanged'){
-        const {type:_,...state}=event;showSetup(state);setChosen(null);
+        // A tier picked but not downloaded stays picked unless setup moved to another tier.
+        const {type:_,...state}=event;const moved=state.tier!==setupTier.current;showSetup(state);if(moved)setChosen(null);
         void Promise.all([ipc.modelCatalog(),ipc.getSettings()]).then(([cat,saved])=>{if(active){setCatalog(cat);setSettings(saved);}}).catch(e=>setError(String(e)));
       }
     }).then(fn=>{if(active)off.push(fn);else fn();}).catch(e=>setError(String(e)));
@@ -133,6 +136,12 @@ export default function Onboarding(){
 
   async function download(t:TierId){setPressed(true);setChosen(null);setFailure(null);await act(()=>ipc.startSetup(t));}
   function choose(t:TierId){setChosen(t);if(running)void download(t);}
+  // Radio group keys: arrows move the choice and the focus, wrapping (WAI-ARIA radio group).
+  function radioKeys(e:React.KeyboardEvent<HTMLDivElement>){
+    const move={ArrowRight:1,ArrowDown:1,ArrowLeft:-1,ArrowUp:-1}[e.key];if(!move)return;
+    e.preventDefault();const next=TIERS[(TIERS.indexOf(tier)+move+TIERS.length)%TIERS.length];choose(next);
+    e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[TIERS.indexOf(next)]?.focus();
+  }
   async function record(){setTesting(true);setError('');try{setHeard((await ipc.testRecording()).text.trim());}catch(e){setError(String(e));}finally{setTesting(false);}}
 
   const stepLine=<div className="eyebrow">Step {step+1} of 4</div>;
@@ -144,12 +153,15 @@ export default function Onboarding(){
     <div className="foot"><span className="tip">About two minutes, plus the download.</span><button type="button" className="btn primary" disabled={!consent} onClick={()=>void proceed()}>Continue</button></div></>;
   if(step===1){
     const allowed=<span className="chip ok">Allowed</span>;
-    const control=(kind:PermissionKind,grant:string,allow:string)=>grant==='Allowed'?allowed:<button type="button" className="btn sm" onClick={()=>void ask(kind,grant)}>{grant==='NotAsked'&&kind!=='SystemAudio'?allow:'Open System Settings'}</button>;
+    const label={Microphone:'Microphone',SystemAudio:'Screen & System Audio Recording',Notifications:'Notifications'};
+    const control=(kind:PermissionKind,grant:string,allow:string)=>grant==='Allowed'?allowed:grant==='NotAsked'&&kind!=='SystemAudio'?<button type="button" className="btn sm" onClick={()=>void ask(kind,grant)}>{allow}</button>
+      :<button type="button" className="btn sm" aria-label={`Open System Settings for ${label[kind]}`} onClick={()=>void ask(kind,grant)}>Open System Settings</button>;
+    const reopen=<button type="button" className="btn sm" onClick={()=>void act(()=>ipc.relaunch())}>{s.permRelaunchButton}</button>;
     const mic=perms?.microphone??'Allowed',screen=perms?.system_audio??'Allowed',bell=perms?.notifications??'Allowed';
     const screenOff=screen!=='Allowed'&&!relaunch;
     pane=<>{stepLine}<h3>{pick(s.permTitle,mac)}</h3><p>{mac?'macOS asks you to approve each one.':'Windows only asks about the microphone and notifications.'} {s.permBody}</p>
       <div className={`perm ${mic==='Denied'?'denied':''}`}><div className="pi">{icMic}</div><div><b>Microphone</b><small>Your side of the call.</small></div>{control('Microphone',mic,'Allow microphone')}</div>
-      {mac?<div className={`perm ${screenOff?'denied':''}`}><div className="pi">{icScr}</div><div><b>Screen &amp; System Audio Recording</b><small>{relaunch?s.permRelaunch:screenOff?s.permScreenOff:'The other side of the call (Them). Only the audio is used.'}</small></div>{relaunch?<button type="button" className="btn sm" onClick={()=>void act(()=>ipc.relaunch())}>{s.permRelaunchButton}</button>:control('SystemAudio',screen,'')}</div>
+      {mac?<div className={`perm ${screenOff?'denied':''}`}><div className="pi">{icScr}</div><div><b>Screen &amp; System Audio Recording</b><small>{relaunch?s.permRelaunch:screenOff?s.permScreenOff:'The other side of the call (Them). Only the audio is used.'}</small></div>{relaunch?reopen:returned&&screenOff?<span className="controls">{control('SystemAudio',screen,'')}{reopen}</span>:control('SystemAudio',screen,'')}</div>
         :<div className="perm"><div className="pi">{icScr}</div><div><b>Computer sound</b><small>The other side of the call (Them). No permission needed on Windows.</small></div><span className="chip ok">Ready</span></div>}
       <div className={`perm ${bell==='Denied'?'denied':''}`}><div className="pi">{icBell}</div><div><b>Notifications</b><small>So you always see when a recording starts.</small></div>{control('Notifications',bell,s.allowNotifications)}</div>{errorLine}
       <div className="foot"><button type="button" className="btn ghost" onClick={()=>go(0)}>Back</button><button type="button" className="btn primary" onClick={()=>void proceed()}>Continue</button></div></>;
@@ -164,11 +176,11 @@ export default function Onboarding(){
       :phase==='Downloading'?<button type="button" className="btn ghost" onClick={()=>void act(()=>ipc.pauseDownload())}>{s.dlPause}</button>
       :!running&&!allVerified&&(phase==='Idle'||phase==='Paused')?<button type="button" className="btn" onClick={()=>void download(tier)}>{paused||(started&&!!settings?.tier)?s.dlResume:s.dlButton.replace('{size}',fileSize(tierBytes(tier)))}</button>:null;
     pane=<>{stepLine}<h3>{pick(s.modelsTitle,mac)}</h3><p>{fill(s.modelsBody,{hardware:machine,tier:<b>{hw?.suggested??tier}</b>})}</p>
-      <div className="tiers" role="radiogroup" aria-label="Model set">{TIERS.map(id=>{const t=catalog?.tiers.find(x=>x.id===id);return <button type="button" key={id} className="tier" role="radio" aria-checked={id===tier} onClick={()=>choose(id)}>
+      <div className="tiers" role="radiogroup" aria-label="Model set" onKeyDown={radioKeys}>{TIERS.map(id=>{const t=catalog?.tiers.find(x=>x.id===id);return <button type="button" key={id} className="tier" role="radio" aria-checked={id===tier} tabIndex={id===tier?0:-1} onClick={()=>choose(id)}>
         <b>{id}{id===hw?.suggested&&<> <span className="chip ok">Suggested</span></>}</b><small>{t?(mac?t.suits_mac:t.suits_pc):''}</small><small className="mono">{t?`${file(t.speech)?.label} · ${file(t.notes)?.label}`:''}</small><small>{fileSize(tierBytes(id))}</small></button>;})}</div>
       <div className="dl">{rows.map(([name,f])=>{const done=f!.on_disk,pct=done?100:Math.min(99,Math.round((bytes[f!.id]??0)/f!.bytes*100));
         const why=failure?.id===f!.id?failure.text:failed?.id===f!.id?s.dlFailed.replace('{reason}',failed.reason):paused&&firstOpen===f!.id?s.dlPaused:'';
-        return <div className="dlrow" key={name}><span>{name} <span className="tip">{fileSize(f!.bytes)}</span></span><span className="mono">{done?'✓':`${pct}%`}</span><div className="progress"><i style={{width:`${pct}%`}}/></div>{why&&<span className={`why ${why===s.dlPaused?'':'err'}`}>{why}</span>}</div>;})}</div>
+        return <div className="dlrow" key={name}><span>{name} <span className="tip">{fileSize(f!.bytes)}</span></span><span className="mono">{done?'✓':`${pct}%`}</span><div className="progress" role="progressbar" aria-label={name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{width:`${pct}%`}}/></div>{why&&<span className={`why ${why===s.dlPaused?'':'err'}`}>{why}</span>}</div>;})}</div>
       <div>{speedLine}{phase==='Done'&&allVerified&&<>{speedLine&&' '}<span className="chip ok">{s.modelsDone}</span></>}</div>
       {failed&&!rows.some(([,f])=>f!.id===failed.id)&&<div className="note warn" role="alert">{failed.reason}</div>}
       <div className="note">{s.dlNote}</div>{errorLine}
