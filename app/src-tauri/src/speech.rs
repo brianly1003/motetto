@@ -62,11 +62,12 @@ impl Server {
         if let Some(vad) = &vad {
             command.args(["--vad", "--vad-model", vad]);
         }
-        let mut child = command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let mut child = motetto_core::tools::spawn(
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped()),
+        )?;
         let empty_vad = Arc::new(AtomicBool::new(false));
         let detected = empty_vad.clone();
         let stderr = child

@@ -29,6 +29,11 @@ pub fn configure_bundled(dir: PathBuf) {
     let _ = BUNDLED_DIR.set(dir);
 }
 
+/// Where the bundled `program` runs from, when the desktop set a bundled folder.
+pub fn bundled(program: &str) -> Option<PathBuf> {
+    BUNDLED_DIR.get().map(|dir| bundled_path(dir, program))
+}
+
 fn bundled_path(dir: &Path, program: &str) -> PathBuf {
     dir.join(if cfg!(windows) {
         format!("{program}.exe")
@@ -48,7 +53,7 @@ fn resolve(program: &str, bundled: Option<&Path>) -> Result<PathBuf, io::Error> 
             } else {
                 Err(io::Error::new(
                     io::ErrorKind::NotFound,
-                    format!("Motet's bundled {program} is missing; reinstall Motet"),
+                    format!("Motetto's bundled {program} is missing; reinstall Motetto"),
                 ))
             }
         }
@@ -87,6 +92,26 @@ pub fn command(program: &str) -> Command {
     command
 }
 
+/// `Command::spawn`, but a bundled program that is missing says so instead of the bare OS error.
+pub fn spawn(command: &mut Command) -> io::Result<Child> {
+    command.spawn().map_err(|error| explain(command, error))
+}
+
+/// The `resolve` message for a bundled program `command` could not start; else `error` as is.
+pub fn explain(command: &Command, error: io::Error) -> io::Error {
+    explain_in(BUNDLED_DIR.get().map(PathBuf::as_path), command, error)
+}
+
+fn explain_in(bundled: Option<&Path>, command: &Command, error: io::Error) -> io::Error {
+    let name = Path::new(command.get_program()).file_stem();
+    match (bundled, name.and_then(|n| n.to_str())) {
+        (Some(dir), Some(name)) if error.kind() == io::ErrorKind::NotFound => {
+            resolve(name, Some(dir)).err().unwrap_or(error)
+        }
+        _ => error,
+    }
+}
+
 // One processing job runs at a time (the desktop's busy flag), so one flag is enough; each job
 // resets it before it starts, so a late Cancel can't stop the next one.
 // process-wide flag; pass a token per job if jobs ever run side by side.
@@ -114,7 +139,7 @@ fn stopped() -> io::Error {
 /// `Command::status`, but Cancel kills the child.
 pub fn status(command: &mut Command) -> io::Result<ExitStatus> {
     check()?;
-    wait(&mut command.spawn()?, &CANCELLED)
+    wait(&mut spawn(command)?, &CANCELLED)
 }
 
 /// `Command::output` with `input` on stdin, but Cancel kills the child.
@@ -125,11 +150,12 @@ pub fn output(command: &mut Command, input: Option<&[u8]>) -> io::Result<Output>
     } else {
         Stdio::null()
     };
-    let mut child = command
-        .stdin(stdin)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = spawn(
+        command
+            .stdin(stdin)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )?;
     // Pipes drain on their own threads so a chatty child can't fill one and stall.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
@@ -181,6 +207,9 @@ fn wait(child: &mut Child, cancel: &AtomicBool) -> io::Result<ExitStatus> {
 mod tests {
     use super::*;
     use std::fs;
+    fn missing_error() -> io::Error {
+        io::Error::from(io::ErrorKind::NotFound)
+    }
     #[test]
     fn resolve_prefers_bundled_and_never_falls_back() {
         let dir = std::env::temp_dir().join(format!("motet-bundled-{}", std::process::id()));
@@ -192,8 +221,21 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert_eq!(
             error.to_string(),
-            "Motet's bundled llama-server is missing; reinstall Motet"
+            "Motetto's bundled llama-server is missing; reinstall Motetto"
         );
+        let missing = Command::new(bundled_path(&dir, "llama-server"));
+        let error = explain_in(Some(&dir), &missing, missing_error());
+        assert_eq!(
+            error.to_string(),
+            "Motetto's bundled llama-server is missing; reinstall Motetto"
+        );
+        let other = Command::new("ffmpeg");
+        assert_eq!(
+            explain_in(Some(&dir), &other, missing_error()).to_string(),
+            missing_error().to_string()
+        );
+        let cli = explain_in(None, &missing, missing_error());
+        assert_eq!(cli.to_string(), missing_error().to_string());
         assert_eq!(
             resolve("ffmpeg", Some(&dir)).unwrap(),
             PathBuf::from("ffmpeg")

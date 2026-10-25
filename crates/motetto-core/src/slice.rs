@@ -73,10 +73,13 @@ pub fn cut(levels: &[f32], min: usize, max: usize, done: bool) -> Option<usize> 
 /// `whisper-vad-speech-segments` (installed with `whisper-server`). Gaps under 300 ms are merged.
 pub fn speech(path: &Path, model: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
     // Not `tools::output`: a Cancel of an after-call job must not stop live captions.
-    let output = crate::tools::command("whisper-vad-speech-segments")
+    let mut command = crate::tools::command("whisper-vad-speech-segments");
+    command
         .args(["-np", "-vsd", "300", "-vm", model, "-f"])
-        .arg(path)
-        .output()?;
+        .arg(path);
+    let output = command
+        .output()
+        .map_err(|e| crate::tools::explain(&command, e))?;
     if !output.status.success() {
         return Err(format!("whisper-vad-speech-segments failed ({})", output.status).into());
     }
