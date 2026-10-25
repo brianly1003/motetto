@@ -265,7 +265,10 @@ pub fn run() {
             }
             // SPEC 5.2: setup reopens at its step and its downloads continue in the background.
             if !app.state::<crate::settings::Store>().get()?.onboarding_done {
-                crate::setup::open_window(app.handle())?;
+                // A window that can't open mustn't stop the app; the tray still offers setup.
+                if let Err(error) = crate::setup::open_window(app.handle()) {
+                    eprintln!("Motetto: couldn't open setup: {error}");
+                }
                 crate::setup::resume(app.handle());
             }
             Ok(())
@@ -473,6 +476,13 @@ impl Host for Desktop {
     }
     fn readiness(&self, request: bool) -> Result<Readiness, String> {
         let (microphone, system_audio) = permissions::audio(request)?;
+        if request && !system_audio {
+            // That start showed the Screen & System Audio prompt: from now on it reads Denied.
+            let _ = self
+                .app
+                .state::<crate::settings::Store>()
+                .change(|s| s.screen_requested = true);
+        }
         let disk = std::process::Command::new("df")
             .arg("-Pk")
             .arg(&self.root)

@@ -82,6 +82,10 @@ pub fn speed_result(tier: TierId, seconds: f32) -> SpeedResult {
 
 /// Stores a speed test with its question; Light that can't keep up transcribes after Stop.
 pub fn record_speed(s: &mut Settings, result: SpeedResult) {
+    // Settings › Models can test another tier; that result isn't this setup's answer.
+    if s.tier.is_some_and(|tier| tier != result.tier) {
+        return;
+    }
     s.slow_question =
         (!result.keeps_up && result.tier != TierId::Light).then(|| result.tier.down());
     s.live_transcription = result.keeps_up || result.tier != TierId::Light;
@@ -211,6 +215,43 @@ fn samples(source: &Path, scratch: &Path) -> Result<Vec<f32>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// The runner's next step: queued files first, then the tier's pipeline if it was asked for.
+fn plan(inner: &Inner, s: &Settings, have: &dyn Fn(&str) -> bool) -> Phase {
+    if inner.paused {
+        Phase::Paused
+    } else if let Some(id) = inner.queue.first() {
+        Phase::Downloading { id: id.clone() }
+    } else if inner.tier_run && s.tier.is_some() {
+        next(&restore(s, TierId::Balanced), have)
+    } else {
+        Phase::Idle
+    }
+}
+
+/// A Settings download. A paused first-run download stays paused: the run that fetches this
+/// file stops when the queue is empty.
+fn enqueue(inner: &mut Inner, id: String) {
+    if !inner.queue.contains(&id) {
+        inner.queue.push(id);
+    }
+    if inner.paused {
+        inner.paused = false;
+        inner.tier_run = false;
+    }
+    if let Phase::Failed { .. } = inner.phase {
+        inner.phase = Phase::Idle;
+    }
+}
+
+/// Saved on every phase change; only a tier run makes the tier's verified files the models in
+/// use, so a queued download never undoes a model picked in Settings.
+fn persist(s: &mut Settings, cat: &Catalog, dir: &Path, tier_run: bool) {
+    match s.tier {
+        Some(tier) if tier_run => choose_tier_models(s, cat, dir, tier),
+        _ => refresh_paths(s, cat, dir),
+    }
+}
+
 /// What the runner is doing; the rest of setup lives in settings.
 pub struct Setup {
     inner: Mutex<Inner>,
@@ -220,6 +261,9 @@ pub struct Setup {
 struct Inner {
     running: bool,
     paused: bool,
+    /// The tier's pipeline was asked for (Download, Resume, an answer, or the next launch); a
+    /// run for queued files only ends with the queue and never touches the tier.
+    tier_run: bool,
     phase: Phase,
     /// Single files asked for in Settings › Models, before the tier's.
     queue: Vec<String>,
@@ -230,6 +274,7 @@ impl Default for Setup {
             inner: Mutex::new(Inner {
                 running: false,
                 paused: false,
+                tier_run: false,
                 phase: Phase::Idle,
                 queue: Vec::new(),
             }),
@@ -273,7 +318,6 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<SetupState, String> {
 fn kick(app: &tauri::AppHandle) -> Result<(), String> {
     let setup = app.state::<Setup>();
     let mut inner = setup.inner.lock().map_err(|_| "Setup unavailable")?;
-    inner.paused = false;
     if inner.running {
         return Ok(());
     }
@@ -300,12 +344,13 @@ pub fn resume(app: &tauri::AppHandle) {
     };
     let dir = model_store::dir(app);
     let unfinished = catalog().files.iter().any(|f| part(&dir, f).exists());
-    if !s.onboarding_done
-        && s.tier.is_some()
-        && unfinished
-        && let Err(error) = kick(app)
-    {
-        eprintln!("Motetto: couldn't resume setup: {error}");
+    if !s.onboarding_done && s.tier.is_some() && unfinished {
+        if let Ok(mut inner) = app.state::<Setup>().inner.lock() {
+            inner.tier_run = true;
+        }
+        if let Err(error) = kick(app) {
+            eprintln!("Motetto: couldn't resume setup: {error}");
+        }
     }
 }
 
@@ -317,29 +362,25 @@ fn run(app: &tauri::AppHandle) {
     let cache = std::env::home_dir().map(|h| h.join(".cache/whisper"));
     let mut last = None;
     while let Ok(s) = store.get() {
-        let phase = {
+        let (phase, tier_run) = {
             let Ok(mut inner) = setup.inner.lock() else {
                 break;
             };
             let have = |id: &str| installed(cat, &dir, &s.adopted, id);
             inner.queue.retain(|id| !have(id));
-            let phase = if inner.paused {
-                Phase::Paused
-            } else if let Some(id) = inner.queue.first() {
-                Phase::Downloading { id: id.clone() }
-            } else if s.tier.is_none() {
-                Phase::Idle
-            } else {
-                next(&restore(&s, TierId::Balanced), &have)
-            };
+            let phase = plan(&inner, &s, &have);
+            let tier_run = inner.tier_run;
             inner.running = matches!(phase, Phase::Downloading { .. } | Phase::SpeedTest);
+            if !inner.running {
+                inner.tier_run = false;
+            }
             inner.phase = phase.clone();
             // Under the lock, so a Pause between here and the download is never lost.
             setup.stop.store(inner.paused, Ordering::SeqCst);
-            phase
+            (phase, tier_run)
         };
         if last.as_ref() != Some(&phase) {
-            changed(app, &dir, &phase);
+            changed(app, &dir, &phase, tier_run);
             last = Some(phase.clone());
         }
         let failed = match &phase {
@@ -416,12 +457,14 @@ fn run(app: &tauri::AppHandle) {
         if let Some((id, reason)) = failed {
             if let Ok(mut inner) = setup.inner.lock() {
                 inner.running = false;
+                inner.tier_run = false;
                 inner.phase = Phase::Failed { id, reason };
             }
             changed(
                 app,
                 &dir,
                 &snapshot(app).map(|s| s.phase).unwrap_or(Phase::Idle),
+                tier_run,
             );
             break;
         }
@@ -429,11 +472,9 @@ fn run(app: &tauri::AppHandle) {
 }
 
 /// Every phase change is saved (the tier's verified models become the ones in use) and sent.
-fn changed(app: &tauri::AppHandle, dir: &Path, phase: &Phase) {
+fn changed(app: &tauri::AppHandle, dir: &Path, phase: &Phase, tier_run: bool) {
     let store = app.state::<Store>();
-    if let Ok(Some(tier)) = store.get().map(|s| s.tier) {
-        let _ = store.change(|s| choose_tier_models(s, catalog(), dir, tier));
-    }
+    let _ = store.change(|s| persist(s, catalog(), dir, tier_run));
     if let Ok(state) = snapshot(app) {
         emit(app, Event::SetupChanged(state));
     }
@@ -636,6 +677,8 @@ pub async fn start_setup(app: tauri::AppHandle, tier: TierId) -> Result<(), Stri
             if let Phase::Failed { .. } = inner.phase {
                 inner.phase = Phase::Idle;
             }
+            inner.paused = false;
+            inner.tier_run = true;
             // A download the new tier doesn't need stops; the runner moves on to the tier's.
             let wanted = cat.tier(tier);
             if let Phase::Downloading { id } = &inner.phase
@@ -671,7 +714,14 @@ pub async fn answer_slow(app: tauri::AppHandle, use_lower: bool) -> Result<(), S
             }
             s.slow_question = None;
         })?;
-        if s.tier.is_some() { kick(&app) } else { Ok(()) }
+        if s.tier.is_none() {
+            return Ok(());
+        }
+        if let Ok(mut inner) = app.state::<Setup>().inner.lock() {
+            inner.paused = false;
+            inner.tier_run = true;
+        }
+        kick(&app)
     })
     .await
 }
@@ -705,12 +755,7 @@ pub async fn download_model(app: tauri::AppHandle, id: String) -> Result<(), Str
         let setup = app.state::<Setup>();
         {
             let mut inner = setup.inner.lock().map_err(|_| "Setup unavailable")?;
-            if !inner.queue.contains(&id) {
-                inner.queue.push(id);
-            }
-            if let Phase::Failed { .. } = inner.phase {
-                inner.phase = Phase::Idle;
-            }
+            enqueue(&mut inner, id);
         }
         kick(&app)
     })
@@ -932,6 +977,85 @@ mod tests {
         assert!(!s.live_transcription);
         assert_eq!(s.slow_question, None);
         record_speed(&mut s, speed_result(TierId::Light, 3.0));
+        assert!(s.live_transcription);
+    }
+
+    fn inner() -> Inner {
+        Setup::default().inner.into_inner().unwrap()
+    }
+
+    #[test]
+    fn settings_download_never_restarts_the_tier() {
+        // Setup finished, the notes model was deleted, then another file is downloaded.
+        let s = Settings {
+            tier: Some(TierId::Best),
+            onboarding_done: true,
+            speed_test: Some(speed_result(TierId::Best, 2.0)),
+            ..Settings::default()
+        };
+        let mut runner = inner();
+        enqueue(&mut runner, "speech-small".into());
+        let deleted = |id: &str| id != "notes-qwen3-8b" && id != "speech-small";
+        assert_eq!(plan(&runner, &s, &deleted), downloading("speech-small"));
+        runner.queue.clear();
+        assert_eq!(plan(&runner, &s, &deleted), Phase::Idle);
+        // Only an asked-for tier run fetches the tier's files.
+        runner.tier_run = true;
+        assert_eq!(plan(&runner, &s, &deleted), downloading("notes-qwen3-8b"));
+    }
+
+    #[test]
+    fn queuing_keeps_a_pause() {
+        let s = Settings {
+            tier: Some(TierId::Best),
+            ..Settings::default()
+        };
+        let mut runner = inner();
+        runner.tier_run = true;
+        runner.paused = true;
+        assert_eq!(plan(&runner, &s, &|_| false), Phase::Paused);
+        enqueue(&mut runner, "vad-silero".into());
+        assert_eq!(plan(&runner, &s, &|_| false), downloading("vad-silero"));
+        // When the queued file is done, the paused first-run download does not resume.
+        runner.queue.clear();
+        assert_eq!(plan(&runner, &s, &|_| false), Phase::Idle);
+    }
+
+    #[test]
+    fn queue_only_run_keeps_models_picked_in_settings() {
+        let dir = folder("persist");
+        let cat = tiny_catalog();
+        std::fs::write(dir.join("s.bin"), b"speech").unwrap();
+        std::fs::write(dir.join("n.bin"), b"notes").unwrap();
+        let mut s = Settings {
+            tier: Some(TierId::Best),
+            speech_model: "picked".into(),
+            notes_model: "picked-notes".into(),
+            ..Settings::default()
+        };
+        persist(&mut s, &cat, &dir, false);
+        assert_eq!(
+            (s.speech_model.as_str(), s.notes_model.as_str()),
+            ("picked", "picked-notes")
+        );
+        persist(&mut s, &cat, &dir, true);
+        assert_eq!(
+            (s.speech_model.as_str(), s.notes_model.as_str()),
+            ("s", "n")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn another_tiers_speed_test_is_not_the_setup_answer() {
+        let mut s = Settings {
+            tier: Some(TierId::Light),
+            ..Settings::default()
+        };
+        record_speed(&mut s, speed_result(TierId::Light, 3.0));
+        record_speed(&mut s, speed_result(TierId::Best, 9.0));
+        assert_eq!(s.speed_test.as_ref().unwrap().tier, TierId::Light);
+        assert_eq!(s.slow_question, None);
         assert!(s.live_transcription);
     }
 
