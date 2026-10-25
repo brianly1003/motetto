@@ -12,9 +12,9 @@ async (page)=>{
   await p.setViewportSize({width:958,height:760});await p.emulateMedia({colorScheme:theme});
   await reference.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
   await p.addInitScript(()=>{
-   const settings={version:1,notes_folder:'/Users/test/Documents/Motetto/imports',open_at_login:false,notes_language:'same_as_call',ask_on_call:true,app_modes:{},apps:[],idle_stop_s:30,discard_short_s:20,speech_model:'/local/ggml-large-v3-q5_0.bin',notes_model:'qwen3:8b',call_language:'detect',part_chars:24000,keep_audio:'forever',recording_reminder:true,sounds:true,companion:{default_size:'pill',captions:true},spellings:[],shortcuts:Object.fromEntries(['S','M','J','N','Space','H','P'].map(k=>[k,`Ctrl+Alt+${k}`]))};
+   const settings={version:1,notes_folder:'/Users/test/Documents/Motetto/imports',open_at_login:false,notes_language:'same_as_call',ask_on_call:true,app_modes:{},apps:[],idle_stop_s:30,discard_short_s:20,speech_model:'speech-large-v3',notes_model:'notes-qwen3-8b',speed_test:null,call_language:'detect',part_chars:24000,keep_audio:'forever',recording_reminder:true,sounds:true,companion:{default_size:'pill',captions:true},spellings:[],shortcuts:Object.fromEntries(['S','M','J','N','Space','H','P'].map(k=>[k,`Ctrl+Alt+${k}`]))};
    const apps=[['zoom','Zoom',true,'ask'],['teams','Microsoft Teams',true,'ask'],['meet','Google Meet',false,'ask'],['whatsapp','WhatsApp',false,'ask'],['telegram','Telegram',false,'ask'],['browser','Browser',false,'ask'],['slack','Slack huddles',false,'off'],['webex','Webex',true,'off'],['facetime','FaceTime',true,'off']].map(([app_id,name,single_signal,mode])=>({app_id,name,single_signal,mode,mac_ids:[],win_ids:[],title_patterns:[]}));
-   let next=0;window.testCalls=[];window.failNextSave=false;window.deleted=false;
+   let next=0;window.testCalls=[];window.onDisk=['speech-large-v3','speech-small','vad-silero','notes-qwen3-8b'];window.failNextSave=false;window.deleted=false;
    window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
    window.__TAURI_INTERNALS__={transformCallback:()=>++next,unregisterCallback:()=>{},invoke:async(command,args)=>{
     window.testCalls.push({command,args});
@@ -30,18 +30,23 @@ async (page)=>{
     if(command==='set_app_mode'){apps.find(app=>app.app_id===args.appId).mode=args.mode;return;}
     if(command==='recent_mic_apps')return ['com.example.Discord'];
     if(command==='add_app'){apps.push({app_id:args.appId,name:args.appId,mode:'ask',single_signal:false,mac_ids:[args.appId],win_ids:[],title_patterns:[]});return structuredClone(settings);}
-    if(command==='installed_models')return {speech:[settings.speech_model,'/local/ggml-small.bin'],notes:['qwen3:8b','qwen3.5:4b'],warning:null,suggested:'qwen3:8b',memory_gb:32};
-    if(command==='run_speed_test')return .25;
+    if(command==='model_catalog')return {vad:'vad-silero',tiers:[{id:'Best',speech:'speech-large-v3',notes:'notes-qwen3-8b'},{id:'Balanced',speech:'speech-large-v3-turbo',notes:'notes-qwen3.5-4b'},{id:'Light',speech:'speech-small',notes:'notes-qwen3.5-2b'}],files:[['speech-large-v3','Speech','large-v3',1081140203],['speech-large-v3-turbo','Speech','large-v3-turbo',574041195],['speech-small','Speech','small',487601967],['vad-silero','Vad','Voice detection',885098],['notes-qwen3-8b','Notes','Qwen3 8B',5027783488],['notes-qwen3.5-4b','Notes','Qwen3.5 4B',2740937888],['notes-qwen3.5-2b','Notes','Qwen3.5 2B',1280835840]].map(([id,kind,label,bytes])=>({id,kind,label,bytes,file:id,url:'',sha256:'',on_disk:window.onDisk.includes(id)}))};
+    if(command==='hardware_info')return {chip:'M1 Max',memory_gb:32,suggested:'Best',label:'M1 Max, 32 GB'};
+    if(command==='run_speed_test')return {tier:args.tier,rtf:.25,keeps_up:true,measured_at:'1'};
+    if(command==='download_model'){window.downloads=[...(window.downloads||[]),args.id];return;}
+    if(command==='delete_unused_models')return 574041195;
+    if(command==='set_onboarding_step')return;
+    if(command==='open_setup'){window.setupOpened=true;return;}
     if(command==='storage_summary')return {meetings:window.deleted?0:5,audio_bytes:window.deleted?0:2100000000,notes_bytes:3400000,free_bytes:212000000000};
     if(command==='delete_all_meetings'){window.deleted=true;return;}
     if(command==='notification_permission')return true;
     if(command==='about')return {version:'0.1.0',platform:'macos',licences:'whisper.cpp (MIT) · Tauri (MIT or Apache-2.0)'};
     if(command==='open_logs_folder')return;
-    if(command==='pick_speech_model'||command==='move_notes_folder')return null;
+    if(command==='move_notes_folder')return null;
     throw Error(`Unexpected IPC: ${command}`);
    }};
   });
-  await p.goto('http://127.0.0.1:3002/settings/?tab=calls');
+  await p.goto('http://127.0.0.1:3004/settings/?tab=calls');
   await p.getByRole('checkbox',{name:'Ask when a call starts'}).waitFor();
   await p.getByRole('checkbox',{name:'Ask when a call starts'}).uncheck();
   await p.getByRole('status').filter({hasText:'Saved'}).waitFor();
@@ -49,6 +54,7 @@ async (page)=>{
   await p.waitForFunction(()=>window.testCalls.some(c=>c.command==='set_app_mode'&&c.args.mode==='off'));
   await p.getByRole('tab',{name:'Calls',exact:true}).click();
   const diffs=[];
+  await reference.getByRole('tab',{name:'Calls',exact:true}).click();
   for(const selector of ['.settabs','.settabs button','.setpane','.formrow','.formrow > .lbl','.help','.tbl','.tbl th','.tbl td','.tbl select','.switch']){
    const props=['padding','gap','fontSize','fontWeight','color','backgroundColor','borderRadius','gridTemplateColumns'].filter(key=>selector!=='.tbl select'||key!=='padding');
    const styles=await p.locator(selector).first().evaluate((el,props)=>Object.fromEntries(props.map(k=>[k,getComputedStyle(el)[k]])),props);
@@ -67,6 +73,11 @@ async (page)=>{
   await p.getByRole('button',{name:'Add com.example.Discord',exact:true}).click();
   await p.getByRole('combobox',{name:'When com.example.Discord starts a call',exact:true}).waitFor();
   await p.getByRole('tab',{name:'General',exact:true}).click();
+  await p.getByRole('button',{name:'Run setup again',exact:true}).click();
+  await p.waitForFunction(()=>window.setupOpened===true);
+  const calls=await p.evaluate(()=>window.testCalls.map(c=>c.command));
+  const stepCall=await p.evaluate(()=>window.testCalls.find(c=>c.command==='set_onboarding_step'));
+  if(stepCall.args.step!==0||calls.indexOf('set_onboarding_step')>calls.indexOf('open_setup')||calls.includes('delete_model'))throw Error('Run setup again: '+JSON.stringify(calls));
   await p.getByRole('combobox',{name:'Notes language',exact:true}).selectOption('vi');
   await p.getByRole('status').filter({hasText:'Saved'}).waitFor();
   await p.evaluate(()=>window.failNextSave=true);
@@ -77,14 +88,45 @@ async (page)=>{
   // Audio follows General (owner 2026-10-23, DESIGN 4.15).
   if(await p.getByRole('tab',{name:'Audio',exact:true}).getAttribute('aria-selected')!=='true')throw Error('Arrow tab navigation failed');
   await p.getByRole('tab',{name:'Models',exact:true}).click();
-  // The SPEC tiers by memory (owner 2026-10-25): each known model names its tier; the help says which suits this Mac.
+  // The catalog (SPEC 5.1): each file reads label, size, tier; the machine line comes from hardware_info.
+  const speechOptions=await p.getByRole('combobox',{name:'Speech model',exact:true}).locator('option').allTextContents();
+  if(speechOptions.join('|')!=='large-v3 · 1.1 GB · Best|large-v3-turbo · 574.0 MB · Balanced|small · 487.6 MB · Light')throw Error('Speech options: '+speechOptions);
   const notesOptions=await p.getByRole('combobox',{name:'Notes model',exact:true}).locator('option').allTextContents();
-  if(!notesOptions.includes('qwen3:8b · Best')||!notesOptions.includes('qwen3.5:4b · Balanced'))throw Error('Tier labels: '+notesOptions);
-  await p.getByText('This Mac has 32 GB of memory. Motetto suggests Best (qwen3:8b).',{exact:true}).waitFor();
-  await p.getByRole('combobox',{name:'Notes model',exact:true}).selectOption('qwen3.5:4b');
+  if(notesOptions.join('|')!=='Qwen3 8B · 5.0 GB · Best|Qwen3.5 4B · 2.7 GB · Balanced|Qwen3.5 2B · 1.3 GB · Light')throw Error('Notes options: '+notesOptions);
+  if(await p.getByText(/planned in M5/).count())throw Error('Placeholder text is still shown');
+  await p.getByText(/This Mac: M1 Max, 32 GB\. No speed test has run yet\./).waitFor();
+  // Mockup parity for the Models rows.
+  await reference.getByRole('tab',{name:'Models',exact:true}).click();
+  const modelDiffs=[];
+  for(const selector of ['.formrow','.formrow > .lbl','.field','.note','.note .btn']){
+   const props=['padding','gap','fontSize','fontWeight','color','backgroundColor','borderRadius','gridTemplateColumns'];
+   const styles=await p.locator(selector).first().evaluate((el,props)=>Object.fromEntries(props.map(k=>[k,getComputedStyle(el)[k]])),props);
+   const expected=await reference.locator(selector).first().evaluate((el,props)=>Object.fromEntries(props.map(k=>[k,getComputedStyle(el)[k]])),props);
+   for(const key of props)if(styles[key]!==expected[key])modelDiffs.push(`Models ${selector} ${key}: ${styles[key]} != ${expected[key]}`);
+  }
+  for(const name of ['Speech model','Notes model']){
+   const a=await p.getByRole('combobox',{name,exact:true}).boundingBox(),b=await reference.getByRole('combobox',{name,exact:true}).boundingBox();
+   if(Math.abs(a.width-b.width)>1||Math.abs(a.height-b.height)>1)modelDiffs.push(`${name} geometry ${a.width}x${a.height} != ${b.width}x${b.height}`);
+  }
+  await p.screenshot({path:`.playwright-out/settings-models-${theme}.png`});
+  await reference.locator('.set').screenshot({path:`.playwright-out/settings-models-reference-${theme}.png`});
+  diffs.push(...modelDiffs);
+  // A file that is not installed: the old model stays, nothing is saved, the download line appears.
+  await p.getByRole('combobox',{name:'Notes model',exact:true}).selectOption('notes-qwen3.5-4b');
+  await p.getByText('Not downloaded',{exact:true}).waitFor();
+  await p.getByRole('button',{name:'Download 2.7 GB',exact:true}).waitFor();
+  if(await p.evaluate(()=>window.testCalls.some(c=>c.command==='save_settings'&&c.args.settings.notes_model==='notes-qwen3.5-4b')))throw Error('An absent notes model was saved');
+  await p.getByRole('button',{name:'Download 2.7 GB',exact:true}).click();
+  await p.waitForFunction(()=>(window.downloads||[]).includes('notes-qwen3.5-4b'));
+  await p.getByRole('combobox',{name:'Speech model',exact:true}).selectOption('speech-small');
+  await p.waitForFunction(()=>window.testCalls.some(c=>c.command==='save_settings'&&c.args.settings.speech_model==='speech-small'));
   await p.getByRole('status').filter({hasText:'Saved'}).waitFor();
   await p.getByRole('button',{name:'Run the speed test again',exact:true}).click();
-  await p.getByText(/Last speed test: 0.25/).waitFor();
+  await p.getByText(/Last speed test: 0.25× real time\. This speech model keeps up live\./).waitFor();
+  if(!await p.evaluate(()=>window.testCalls.some(c=>c.command==='run_speed_test'&&c.args.tier==='Light')))throw Error('The speed test did not name the tier of the chosen speech model');
+  await p.getByRole('button',{name:'Delete unused models (1.1 GB)',exact:true}).click();
+  await p.getByRole('status').filter({hasText:'Unused models deleted'}).waitFor();
+  if(!await p.evaluate(()=>window.testCalls.some(c=>c.command==='delete_unused_models')))throw Error('Delete unused did not call the backend');
   await p.getByRole('tab',{name:'Spellings',exact:true}).click();
   await p.getByRole('button',{name:'Add spelling',exact:true}).click();
   await p.getByRole('textbox',{name:'Spelling',exact:true}).fill('FCM');await p.getByRole('textbox',{name:'Often heard as',exact:true}).fill('F C M');

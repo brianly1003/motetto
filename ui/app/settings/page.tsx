@@ -4,6 +4,11 @@ import {useEffect,useRef,useState,type CSSProperties,type ReactNode} from 'react
 import * as ipc from '@/lib/ipc';
 import type {Settings} from '@/lib/bindings/Settings';
 import {fileSize} from '@/lib/document';
+import {strings as str} from '@/lib/strings';
+import type {Catalog} from '@/lib/bindings/Catalog';
+import type {Hardware} from '@/lib/bindings/Hardware';
+import type {SpeedResult} from '@/lib/bindings/SpeedResult';
+import type {TierId} from '@/lib/bindings/TierId';
 import NotificationPermission from '@/components/NotificationPermission';
 import {MicLevel,MicNote,micSub,pickMic,useMicReport} from '@/components/Microphone';
 
@@ -13,14 +18,17 @@ const SHORTCUTS:Record<string,string>={S:'Start or stop',M:'Mark this moment',J:
 function Row({label,help,children}:{label:string;help?:string;children:ReactNode}){return <div className="formrow"><span className="lbl">{label}</span><div>{children}{help&&<div className="help">{help}</div>}</div></div>;}
 function Switch({label,on,change}:{label:string;on:boolean;change:(value:boolean)=>void}){return <label className="switch"><input type="checkbox" aria-label={label} checked={on} onChange={e=>change(e.target.checked)}/><span/></label>;}
 const LANGUAGES=[['en','English'],['vi','Tiếng Việt'],['zh','中文'],['ja','日本語']] as const;
-// The model tiers (SPEC, mockup Settings › Models): Rust suggests one from this Mac's memory.
-const TIERS:Record<string,string>={'qwen3:8b':'Best','qwen3.5:4b':'Balanced','qwen3:1.7b':'Light'};
 
 export default function SettingsPage(){
   const [tab,setTab]=useState('General');
   const [settings,setSettings]=useState<Settings|null>(null);
   const [apps,setApps]=useState<ipc.CallApp[]>([]);
-  const [models,setModels]=useState<{speech:string[];notes:string[];warning:string|null;suggested:string|null;memory_gb:number|null}>({speech:[],notes:[],warning:null,suggested:null,memory_gb:null});
+  const [catalog,setCatalog]=useState<Catalog|null>(null);
+  const [hw,setHw]=useState<Hardware|null>(null);
+  // A catalog file picked in Settings that is not on disk yet: nothing is saved until it is verified (SPEC 8.4).
+  const [pick,setPick]=useState<{speech?:string;notes?:string}>({});
+  const [bytes,setBytes]=useState<Record<string,[number,number]>>({});
+  const [failure,setFailure]=useState<Record<string,string>>({});
   const [storage,setStorage]=useState<ipc.StorageSummary|null>(null);
   const [info,setInfo]=useState<{version:string;licences:string;platform:string}|null>(null);
   const [pending,setPending]=useState(false);
@@ -31,7 +39,9 @@ export default function SettingsPage(){
   const [recent,setRecent]=useState<string[]|null>(null);
   const [spelling,setSpelling]=useState<string|null>(null);
   const [heard,setHeard]=useState('');
-  const [speed,setSpeed]=useState<number|null>(null);
+  const [speed,setSpeed]=useState<SpeedResult|null>(null);
+  const live=useRef<{settings:Settings|null;pick:{speech?:string;notes?:string}}>({settings:null,pick:{}});
+  live.current={settings,pick};
   const saving=useRef(false);
   const mic=useMicReport(tab==='Audio');
   const [volume,setVolume]=useState<number|null>(null);
@@ -53,9 +63,30 @@ export default function SettingsPage(){
   useEffect(()=>{
     if(!ipc.desktopAvailable())return;
     setWipe(false);setError('');
-    if(tab==='Models')void ipc.installedModels().then(setModels).catch(e=>setError(String(e)));
+    if(tab==='Models')void Promise.all([ipc.modelCatalog(),ipc.hardwareInfo()]).then(([c,h])=>{setCatalog(c);setHw(h);}).catch(e=>setError(String(e)));
     if(tab==='Privacy')void ipc.storageSummary().then(setStorage).catch(e=>setError(String(e)));
     if(tab==='About')void ipc.about().then(setInfo).catch(e=>setError(String(e)));
+  },[tab]);
+  useEffect(()=>{
+    if(tab!=='Models'||!ipc.desktopAvailable())return;
+    let active=true;const off:Array<()=>void>=[];
+    void ipc.onSessionEvent(event=>{
+      if(!active)return;
+      if(event.type==='DownloadProgress')setBytes(old=>({...old,[event.id]:[event.bytes,event.total]}));
+      else if(event.type==='DownloadFailed'){setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});setFailure(old=>({...old,[event.id]:event.checksum?str.dlChecksum:str.dlFailed.replace('{reason}',event.reason)}));}
+      else if(event.type==='DownloadDone'){
+        setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});
+        void ipc.modelCatalog().then(c=>{
+          if(!active)return;setCatalog(c);
+          // The file is verified: now the choice that waited for it is saved.
+          const {settings:current,pick:waiting}=live.current;
+          for(const key of ['speech','notes'] as const){
+            if(current&&waiting[key]===event.id){setPick(old=>({...old,[key]:undefined}));void action(()=>ipc.saveSettings({...current,[`${key}_model`]:event.id}));}
+          }
+        }).catch(e=>setError(String(e)));
+      }
+    }).then(fn=>{if(active)off.push(fn);else fn();}).catch(e=>setError(String(e)));
+    return()=>{active=false;off.forEach(fn=>fn());};
   },[tab]);
   async function action(run:()=>Promise<unknown>,message='Saved',workingMessage='Saving…'){
     if(saving.current)return;
@@ -83,7 +114,7 @@ export default function SettingsPage(){
         <Row label="During a call" help="The companion is always visible while recording; it can shrink to a dot or the screen edge, never disappear."><div className="field"><select aria-label="Companion size when a recording starts" value={settings.companion.default_size} onChange={e=>void save({companion:{...settings.companion,default_size:e.target.value}})}><option value="pill">Pill</option><option value="dot">Dot</option></select><Switch label="Show the latest line in the Pill" on={settings.companion.captions} change={captions=>void save({companion:{...settings.companion,captions}})}/><span>Show the latest line</span></div></Row>
         <Row label="Sounds" help="A short chime when a recording starts and stops."><Switch label="Start and stop sounds" on={settings.sounds} change={sounds=>void save({sounds})}/></Row>
         <Row label="Shortcuts" help="Edit a shortcut and leave the field to register it. A conflicting shortcut keeps the previous one."><dl className="kv settings-shortcuts">{Object.entries(SHORTCUTS).map(([key,label])=><div key={key}><dt>{label}</dt><dd><input aria-label={`${label} shortcut`} value={settings.shortcuts[key]} onChange={e=>setSettings({...settings,shortcuts:{...settings.shortcuts,[key]:e.target.value}})} onBlur={()=>void save({shortcuts:settings.shortcuts})} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/></dd></div>)}<dt>Command palette (in the app)</dt><dd>⌘K / Ctrl+K</dd></dl></Row>
-        <Row label="First run" help="First-run setup and model downloads are planned in M5 and are not available in this build."><button className="btn sm" disabled>Run setup again</button></Row>
+        <Row label="First run"><button className="btn sm" onClick={()=>void action(async()=>{await ipc.setOnboardingStep(0);await ipc.openSetup();},'')}>Run setup again</button></Row>
       </>}
       {tab==='Audio'&&(()=>{
         // The microphone (DESIGN 4.15): the level moves only while Motetto records; it never opens the mic just to show it.
@@ -114,13 +145,38 @@ export default function SettingsPage(){
         <Row label="Stop when the mic is quiet for"><div className="field">{number('Idle seconds','idle_stop_s',10,300)}<span>seconds</span></div></Row>
         <Row label="Discard recordings shorter than" help="0 keeps every recording."><div className="field">{number('Discard seconds','discard_short_s',0,120)}<span>seconds</span></div></Row>
       </>}
-      {tab==='Models'&&<>
-        <Row label="Speech"><div className="field"><select className="speech-model" aria-label="Speech model" value={settings.speech_model} onChange={e=>void save({speech_model:e.target.value})}><option value="">Choose an installed model</option>{Array.from(new Set([settings.speech_model,...models.speech])).filter(Boolean).map(path=><option key={path} value={path}>{path.split(/[\\/]/).at(-1)}</option>)}</select><span className="chip plain">Local</span><button className="btn sm" onClick={()=>void action(async()=>{const path=await ipc.pickSpeechModel();if(path)await ipc.saveSettings({...settings,speech_model:path});})}>Choose…</button></div></Row>
-        <Row label="Notes"><div className="field"><select className="notes-model" aria-label="Notes model" value={settings.notes_model} onChange={e=>void save({notes_model:e.target.value})}><option value="">Choose an installed model</option>{Array.from(new Set([settings.notes_model,...models.notes])).filter(Boolean).map(name=><option key={name} value={name}>{TIERS[name]?`${name} · ${TIERS[name]}`:name}</option>)}</select></div>{models.warning&&<div className="help" role="status">{models.warning}</div>}{!models.warning&&models.suggested&&<div className="help">This Mac has {models.memory_gb} GB of memory. Motetto suggests {TIERS[models.suggested]} ({models.suggested}).{!models.notes.includes(models.suggested)&&<> Install it with <code>ollama pull {models.suggested}</code>; Motetto never downloads models.</>}</div>}</Row>
+      {tab==='Models'&&(()=>{
+        // Options are the catalog's files: label · size · tier. Choosing one that is not on disk waits for its download.
+        const tierOf=(id:string)=>catalog?.tiers.find(t=>t.speech===id||t.notes===id)?.id;
+        const files=(kind:'Speech'|'Notes')=>catalog?.files.filter(f=>f.kind===kind)??[];
+        const choose=(kind:'speech'|'notes',id:string)=>{
+          const file=catalog?.files.find(f=>f.id===id);if(!file)return;
+          setFailure(old=>({...old,[id]:''}));
+          if(file.on_disk){setPick(old=>({...old,[kind]:undefined}));void save({[`${kind}_model`]:id});}else setPick(old=>({...old,[kind]:id}));
+        };
+        const model=(kind:'speech'|'notes',label:string,className:string,extra?:ReactNode)=>{
+          const current=settings[`${kind}_model`],shown=pick[kind]??current,waiting=pick[kind]?catalog?.files.find(f=>f.id===pick[kind]):undefined;
+          const progress=waiting&&bytes[waiting.id];
+          return <Row label={kind==='speech'?'Speech':'Notes'} help={waiting?'The current model stays in use until the new one is downloaded and checked.':undefined}>
+            <div className="field"><select className={className} aria-label={label} value={shown} onChange={e=>choose(kind,e.target.value)}>{!shown&&<option value="">Choose a model</option>}{files(kind==='speech'?'Speech':'Notes').map(f=>{const tier=tierOf(f.id);return <option key={f.id} value={f.id}>{f.label} · {fileSize(f.bytes)}{tier&&` · ${tier}`}</option>;})}</select>{extra}</div>
+            {waiting&&<div className="field model-wait"><span>{str.modelNeedsDownload}</span>{progress?<span className="mono" role="status">{Math.floor(progress[0]/Math.max(1,progress[1])*100)}%</span>:<button className="btn sm" onClick={()=>{setFailure(old=>({...old,[waiting.id]:''}));void ipc.downloadModel(waiting.id).catch(e=>setError(String(e)));}}>{str.dlButton.replace('{size}',fileSize(waiting.bytes))}</button>}</div>}
+            {waiting&&failure[waiting.id]&&<div className="help" role="status">{failure[waiting.id]}</div>}
+          </Row>;
+        };
+        const used=[settings.speech_model,settings.notes_model];
+        const unused=catalog?.files.filter(f=>f.on_disk&&f.id!==catalog.vad&&!used.includes(f.id)).reduce((sum,f)=>sum+f.bytes,0)??0;
+        const mac=info?.platform!=='windows';
+        const result=speed??settings.speed_test;
+        const testTier:TierId|undefined=tierOf(settings.speech_model)??hw?.suggested;
+        return <>
+        {model('speech','Speech model','speech-model',<span className="chip plain">Local</span>)}
+        {model('notes','Notes model','notes-model')}
         <Row label="Call language" help="Detect handles mixed-language calls; pick one if detection guesses wrong."><div className="field"><select className="call-language" aria-label="Call language" value={settings.call_language} onChange={e=>void save({call_language:e.target.value})}><option value="detect">Detect</option>{LANGUAGES.map(([id,label])=><option key={id} value={id}>{{en:'English',vi:'Vietnamese',zh:'Chinese',ja:'Japanese'}[id]??label}</option>)}</select></div></Row>
         <Row label="Long calls"><div className="field"><span>Summarize in parts of</span>{number('Part size in characters','part_chars',8000,48000)}<span>characters</span></div></Row>
-        <div className="note">{speed===null?'No speed test run in this window.':`Last speed test: ${speed.toFixed(2)}× real time. ${speed<=.5?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`} <button className="btn sm" onClick={()=>void action(async()=>setSpeed(await ipc.runSpeedTest()),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a generated local English sample, without recording. Model downloads are not available in this build; the notes model suggested above comes from this Mac's memory.</div></div>
-      </>}
+        <div className="note">{hw?`This ${mac?'Mac':'PC'}: ${hw.label}. `:''}{result?`Last speed test: ${result.rtf.toFixed(2)}× real time${result.tier!==tierOf(settings.speech_model)?` (${result.tier})`:''}. ${result.keeps_up?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`:'No speed test has run yet.'} <button className="btn sm" disabled={!testTier} onClick={()=>testTier&&void action(async()=>setSpeed(await ipc.runSpeedTest(testTier)),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a generated local English sample, without recording.</div></div>
+        {unused>0&&<Row label="Unused models" help="Downloaded files the chosen models don't use. They can be downloaded again."><button className="btn sm" onClick={()=>void action(async()=>{await ipc.deleteUnusedModels();setCatalog(await ipc.modelCatalog());},'Unused models deleted')}>{str.unusedModels.replace('{size}',fileSize(unused))}</button></Row>}
+        </>;
+      })()}
       {tab==='Spellings'&&<>
         <p className="settings-intro">Names and terms the models can&apos;t know. Add spellings here for future meetings. Motetto uses up to 40 names as data for local speech and notes models.</p>
         <div className="tbl"><table><thead><tr><th>Spelling</th><th>Often heard as</th><th>From</th><th>Used in</th><th/></tr></thead><tbody>{settings.spellings.map((entry,index)=><tr key={index}><td><b>{entry.spelling}</b></td><td>{entry.heard||'—'}</td><td><span className="chip plain">Added by you</span></td><td className="mono">Not tracked</td><td><button className="btn sm ghost" aria-label={`Remove ${entry.spelling}`} onClick={()=>void save({spellings:settings.spellings.filter((_,i)=>i!==index)})}>Remove</button></td></tr>)}{!settings.spellings.length&&<tr><td colSpan={5}>No spellings yet.</td></tr>}</tbody></table></div>

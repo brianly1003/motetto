@@ -560,7 +560,7 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 @media (prefers-color-scheme: dark) { .settings-window select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ecede7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 5 5 5 5-5'/%3E%3C/svg%3E"); } }
 
 .settings-window .btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-2); background: var(--surface-1); padding: 6px 12px; border-radius: 8px; font-weight: 500; font-size: 13px; white-space: nowrap; }
-.settings-window .btn.sm { font-size: 12px; padding: 3px 9px; }
+.settings-window .btn.sm { font-size: 12px; padding: 3px 9px; border-radius: 7px; }
 .settings-window .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
 .settings-window .btn.rec { background: var(--rec); color: #fff; border-color: var(--rec); }
 .settings-window .btn:hover { background: var(--surface-2); }

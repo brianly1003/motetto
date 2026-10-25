@@ -70,5 +70,6 @@ export const strings = {
   tryTitle: "Say something to test it", tryBody: "Press Record test and say a sentence. Motetto shows what it heard. Nothing is saved.",
   tryButton: "Record test (10 s)", tryAgain: "Record again", tryOk: "It heard you. The microphone and speech model work.", tryNothing: "Nothing was heard. Check the microphone and try again.", tryWait: "Available when the speech model has downloaded.",
   onbDoneBody: "From now on, when a call starts in Zoom, Microsoft Teams, Google Meet or another call app, Motetto asks whether to record it. Nothing is recorded until you choose Record.",
+  modelNeedsDownload: "Not downloaded", unusedModels: "Delete unused models ({size})",
   notesModelPending: "The notes model is still downloading; notes start working when it's done.",
 };

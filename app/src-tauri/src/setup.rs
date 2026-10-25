@@ -624,6 +624,17 @@ pub fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Settings › General › Run setup again: a fresh window at the saved step (the caller saves step 0
+/// first). Models on disk are kept.
+#[tauri::command]
+pub fn open_setup(app: tauri::AppHandle) -> Result<(), String> {
+    // A hidden window keeps its old page; a new one reads the saved step.
+    if let Some(window) = app.get_webview_window("onboarding") {
+        window.destroy().map_err(|e| e.to_string())?;
+    }
+    open_window(&app)
+}
+
 async fn blocking<T: Send + 'static>(
     job: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {

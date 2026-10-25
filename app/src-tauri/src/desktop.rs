@@ -77,6 +77,7 @@ pub fn run() {
             hold_ask,
             set_ask_on_call,
             crate::settings::open_settings,
+            crate::setup::open_setup,
             crate::settings::get_settings,
             crate::settings::save_settings,
             crate::settings::set_app_mode,
