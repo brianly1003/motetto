@@ -46,7 +46,15 @@ async (page)=>{
     if(c==='hardware_info')return {chip:'M1 Max',memory_gb:32,suggested:'Best',label:'M1 Max, 32 GB'};
     if(c==='model_catalog')return {...catalog,files:catalog.files.map(f=>({...f,on_disk:fx.onDisk.includes(f.id)}))};
     if(c==='setup_state')return structuredClone(fx.setup);
-    if(c==='start_setup'){fx.settings.tier=a.tier;return null;}
+    if(c==='start_setup'){
+     if(fx.failStart)throw 'This needs 7.1 GB free; 2.0 GB is available.';
+     fx.settings.tier=a.tier;
+     // The real runner reports only after connecting to the download host: events arrive late.
+     if(fx.delayStart){const t=catalog.tiers.find(x=>x.id===a.tier),size=id=>catalog.files.find(f=>f.id===id).bytes;
+      setTimeout(()=>{fx.setup={...fx.setup,tier:a.tier,phase:{type:'Downloading',id:t.speech},files:[[t.speech,0,size(t.speech)],[catalog.vad,0,size(catalog.vad)],[t.notes,0,size(t.notes)]]};
+       window.emit({type:'SetupChanged',...fx.setup});window.emit({type:'DownloadProgress',id:t.speech,bytes:Math.round(size(t.speech)/2),total:size(t.speech)});},1500);}
+     return null;
+    }
     if(c==='set_onboarding_step'){fx.settings.onboarding_step=a.step;if(a.consent)fx.settings.consent_confirmed_at='1';return null;}
     if(c==='test_recording')return {text:'Testing one two three.'};
     throw Error(`Unexpected IPC: ${c}`);
@@ -209,6 +217,34 @@ async (page)=>{
   await expect(dlrow('Notes model (in the background)').locator('.mono').textContent().then(t=>t!=='✓'),'Notes row shown as done');
   await p.getByRole('button',{name:'Resume download'}).waitFor();
   await expect(p.getByRole('button',{name:'Continue'}).isEnabled(),'Continue disabled after reopening a started setup');
+  // Picking another tier and pressing Download: the pick stays and the press shows at once.
+  await p.evaluate(()=>{fx.delayStart=true;fx.settings.tier=null;fx.onDisk=[];fx.setup={tier:'Best',phase:{type:'Idle'},files:[['speech-large-v3',0,1081140203],['vad-silero',0,885098],['notes-qwen3-8b',0,5027783488]],speed:null,keep_slow:false};window.saveFx();});
+  await p.reload();
+  await p.getByRole('heading',{name:'Models for this Mac'}).waitFor();
+  await p.getByRole('radio',{name:/^Balanced/}).click();
+  // A refused start puts the page back as it was and says why.
+  await p.evaluate(()=>{fx.failStart=true;});
+  await p.getByRole('button',{name:'Download 3.3 GB'}).click();
+  await p.getByRole('alert').filter({hasText:'This needs 7.1 GB free; 2.0 GB is available.'}).waitFor();
+  await p.getByRole('button',{name:'Download 3.3 GB'}).waitFor();
+  await expect(p.getByRole('button',{name:'Continue'}).isDisabled(),'Continue enabled after a refused start');
+  await expect(dlrow('Speech model').locator('.mono').textContent().then(t=>t==='0%'),'Row still starting after a refused start');
+  await p.evaluate(()=>{fx.failStart=false;});
+  await p.getByRole('button',{name:'Download 3.3 GB'}).click();
+  const checked=id=>p.getByRole('radio',{name:new RegExp('^'+id)}).getAttribute('aria-checked');
+  await expect(checked('Balanced').then(v=>v==='true'),'Balanced not kept right after Download');
+  await expect(checked('Best').then(v=>v==='false'),'Best selected right after Download');
+  await expect(p.getByRole('button',{name:'Starting…'}).isDisabled(),'Download press not shown as starting');
+  await expect(dlrow('Speech model').locator('.mono').textContent().then(t=>t==='Starting…'),'First row not starting');
+  await expect(p.getByRole('button',{name:'Continue'}).isEnabled(),'Continue disabled right after Download');
+  await p.waitForTimeout(700);
+  await expect(checked('Balanced').then(v=>v==='true'),'Balanced lost while waiting for the runner');
+  await dlrow('Speech model').getByText('50%',{exact:true}).waitFor({timeout:5000});
+  await dlrow('Speech model').getByText('574.0 MB',{exact:true}).waitFor();
+  await dlrow('Notes model (in the background)').getByText('2.7 GB',{exact:true}).waitFor();
+  await expect(checked('Balanced').then(v=>v==='true'),'Balanced lost after the runner reported');
+  await p.getByRole('button',{name:'Pause'}).waitFor();
+  await p.screenshot({path:`.playwright-out/onboarding-models-balanced-${theme}.png`});
   await p.evaluate(()=>sessionStorage.removeItem('fx'));
 
   if(errors.length)throw Error(errors.join('\n'));

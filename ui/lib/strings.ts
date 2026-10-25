@@ -60,7 +60,7 @@ export const strings = {
   permScreenOff: "Off, so Motetto can't hear the other side of the call. Turn it on; Motetto then reopens itself.",
   permRelaunch: "Motetto needs to reopen to use this permission.", permRelaunchButton: "Reopen Motetto",
   modelsTitle: "Models for this {Mac | PC}", modelsBody: "{hardware}. Motetto suggests {tier}. It downloads the speech model first, checks it keeps up with a short speed test, then fetches the notes model in the background while you carry on.",
-  dlButton: "Download {size}", dlPause: "Pause", dlResume: "Resume download", dlPaused: "Download paused. It continues from where it stopped.",
+  dlButton: "Download {size}", dlPause: "Pause", dlResume: "Resume download", dlPaused: "Download paused. It continues from where it stopped.", dlStarting: "Starting…",
   dlFailed: "Download stopped: {reason}.", dlChecksum: "The file didn't match its fingerprint and was removed.", dlDisk: "This needs {size} free; {free} is available.",
   dlNote: "Downloads come from Hugging Face and are checked against a fingerprint before use. This is the only time Motetto uses the network, and only after you press Download.",
   modelsDone: "Models downloaded and checked.",

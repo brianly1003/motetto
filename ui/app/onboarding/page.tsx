@@ -39,6 +39,7 @@ export default function Onboarding(){
   const [bytes,setBytes]=useState<Record<string,number>>({});
   const [chosen,setChosen]=useState<TierId|null>(null);
   const [pressed,setPressed]=useState(false);
+  const [starting,setStarting]=useState(false);
   const [failure,setFailure]=useState<{id:string;text:string}|null>(null);
   const [relaunch,setRelaunch]=useState(false);
   const [returned,setReturned]=useState(false);
@@ -49,7 +50,13 @@ export default function Onboarding(){
   const screenWas=useRef<string|null>(null);
   const screenOpened=useRef(false);
 
+  // The user's pick stays until setup reports that tier, or setup itself moved to another one;
+  // until then the old tier (or the suggested one) must not show through.
   function showSetup(state:SetupState){
+    const moved=setupTier.current!==null&&state.tier!==setupTier.current;
+    setChosen(pick=>pick===state.tier||moved?null:pick);
+    // Download pressed: "Starting…" until the runner reports work (connecting can take seconds).
+    if(['Downloading','SpeedTest','AwaitingAnswer','Failed','Done'].includes(state.phase.type))setStarting(false);
     setupTier.current=state.tier;setSetup(state);
     setBytes(old=>({...old,...Object.fromEntries(state.files.map(([id,have])=>[id,have]))}));
   }
@@ -86,7 +93,7 @@ export default function Onboarding(){
     window.addEventListener('focus',focus);
     void ipc.onSessionEvent(event=>{
       if(!active)return;
-      if(event.type==='DownloadProgress')setBytes(old=>({...old,[event.id]:event.bytes}));
+      if(event.type==='DownloadProgress'){setStarting(false);setBytes(old=>({...old,[event.id]:event.bytes}));}
       else if(event.type==='DownloadDone'){setFailure(null);void readSetup().catch(e=>setError(String(e)));}
       else if(event.type==='DownloadFailed'){setFailure({id:event.id,text:event.checksum?s.dlChecksum:s.dlFailed.replace('{reason}',event.reason)});void readSetup().catch(e=>setError(String(e)));}
       else if(event.type==='SpeedTest'){
@@ -96,8 +103,7 @@ export default function Onboarding(){
         else void readSetup().catch(e=>setError(String(e)));
       }
       else if(event.type==='SetupChanged'){
-        // A tier picked but not downloaded stays picked unless setup moved to another tier.
-        const {type:_,...state}=event;const moved=state.tier!==setupTier.current;showSetup(state);if(moved)setChosen(null);
+        const {type:_,...state}=event;showSetup(state);
         void Promise.all([ipc.modelCatalog(),ipc.getSettings()]).then(([cat,saved])=>{if(active){setCatalog(cat);setSettings(saved);}}).catch(e=>setError(String(e)));
       }
     }).then(fn=>{if(active)off.push(fn);else fn();}).catch(e=>setError(String(e)));
@@ -126,7 +132,7 @@ export default function Onboarding(){
   const phase=setup?.phase.type??'Idle';
   const running=phase==='Downloading'||phase==='SpeedTest';
   const started=rows.some(([,f])=>f!.on_disk||(bytes[f!.id]??0)>0);
-  const paused=!allVerified&&(phase==='Paused'||(phase==='Idle'&&started&&!!settings?.tier));
+  const paused=!starting&&!allVerified&&(phase==='Paused'||(phase==='Idle'&&started&&!!settings?.tier));
   const firstOpen=rows.find(([,f])=>!f!.on_disk)?.[1]?.id;
   const failed=setup?.phase.type==='Failed'?setup.phase:null;
   const speechReady=!!tierInfo&&!!file(tierInfo.speech)?.on_disk;
@@ -134,7 +140,10 @@ export default function Onboarding(){
   const speed=setup?.speed&&setup.speed.tier===setup.tier?setup.speed:null;
   const maxStep=consent?step+1:0;
 
-  async function download(t:TierId){setPressed(true);setChosen(null);setFailure(null);await act(()=>ipc.startSetup(t));}
+  async function download(t:TierId){
+    const was=pressed;setChosen(t);setPressed(true);setStarting(true);setFailure(null);setError('');
+    try{await ipc.startSetup(t);}catch(e){setStarting(false);setPressed(was);setError(String(e));}
+  }
   function choose(t:TierId){setChosen(t);if(running)void download(t);}
   // Radio group keys: arrows move the choice and the focus, wrapping (WAI-ARIA radio group).
   function radioKeys(e:React.KeyboardEvent<HTMLDivElement>){
@@ -172,7 +181,8 @@ export default function Onboarding(){
     const speedLine=speed?.keeps_up?<span className="chip ok mono">{s.speedOk.replace('{x}',times(speed.rtf))}</span>
       :speed?<p>{speed.tier==='Light'?s.speedLightSlow:s.speedSlow.replace('{x}',times(speed.rtf))}</p>
       :phase==='SpeedTest'?<span className="chip amber">{s.speedRunning}</span>:null;
-    const button=failed?<button type="button" className="btn" onClick={()=>void download(tier)}>Retry</button>
+    const button=starting?<button type="button" className="btn" disabled>{s.dlStarting}</button>
+      :failed?<button type="button" className="btn" onClick={()=>void download(tier)}>Retry</button>
       :phase==='Downloading'?<button type="button" className="btn ghost" onClick={()=>void act(()=>ipc.pauseDownload())}>{s.dlPause}</button>
       :!running&&!allVerified&&(phase==='Idle'||phase==='Paused')?<button type="button" className="btn" onClick={()=>void download(tier)}>{paused||(started&&!!settings?.tier)?s.dlResume:s.dlButton.replace('{size}',fileSize(tierBytes(tier)))}</button>:null;
     pane=<>{stepLine}<h3>{pick(s.modelsTitle,mac)}</h3><p>{fill(s.modelsBody,{hardware:machine,tier:<b>{hw?.suggested??tier}</b>})}</p>
@@ -180,7 +190,7 @@ export default function Onboarding(){
         <b>{id}{id===hw?.suggested&&<> <span className="chip ok">Suggested</span></>}</b><small>{t?(mac?t.suits_mac:t.suits_pc):''}</small><small className="mono">{t?`${file(t.speech)?.label} · ${file(t.notes)?.label}`:''}</small><small>{fileSize(tierBytes(id))}</small></button>;})}</div>
       <div className="dl">{rows.map(([name,f])=>{const done=f!.on_disk,pct=done?100:Math.min(99,Math.round((bytes[f!.id]??0)/f!.bytes*100));
         const why=failure?.id===f!.id?failure.text:failed?.id===f!.id?s.dlFailed.replace('{reason}',failed.reason):paused&&firstOpen===f!.id?s.dlPaused:'';
-        return <div className="dlrow" key={name}><span>{name} <span className="tip">{fileSize(f!.bytes)}</span></span><span className="mono">{done?'✓':`${pct}%`}</span><div className="progress" role="progressbar" aria-label={name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{width:`${pct}%`}}/></div>{why&&<span className={`why ${why===s.dlPaused?'':'err'}`}>{why}</span>}</div>;})}</div>
+        return <div className="dlrow" key={name}><span>{name} <span className="tip">{fileSize(f!.bytes)}</span></span><span className="mono">{done?'✓':starting&&firstOpen===f!.id?s.dlStarting:`${pct}%`}</span><div className="progress" role="progressbar" aria-label={name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{width:`${pct}%`}}/></div>{why&&<span className={`why ${why===s.dlPaused?'':'err'}`}>{why}</span>}</div>;})}</div>
       <div>{speedLine}{phase==='Done'&&allVerified&&<>{speedLine&&' '}<span className="chip ok">{s.modelsDone}</span></>}</div>
       {failed&&!rows.some(([,f])=>f!.id===failed.id)&&<div className="note warn" role="alert">{failed.reason}</div>}
       <div className="note">{s.dlNote}</div>{errorLine}
