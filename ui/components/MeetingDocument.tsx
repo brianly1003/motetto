@@ -206,10 +206,9 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   </article>;
 }
 
-/** "English" for "en"; a call in several languages shows their codes, "en, vi" (owner 2026-10-23,
- *  to fit the panel); older meetings saved no language. */
+/** The language codes whisper heard, "en" or "en, vi" (owner 2026-10-25: codes, also for one
+ *  language); older meetings saved no language. */
 function languageName(code?: string|null): string {
   if (!code) return 'Not recorded';
-  if (code.includes(',')) return code.split(',').join(', ');
-  try { return new Intl.DisplayNames(['en'], {type: 'language'}).of(code) ?? code; } catch { return code; }
+  return code.split(',').map(c => c.trim()).join(', ');
 }
