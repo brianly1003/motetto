@@ -137,6 +137,11 @@ impl Session {
         self.app.started_by != Some(StartReason::NotesOnly)
     }
 
+    /// Every open problem, the shown one first or not; the desktop resolves some by cause.
+    pub fn problems(&self) -> &[ProblemInfo] {
+        &self.problems
+    }
+
     fn idle(&mut self) {
         self.app.state = SessionState::Idle;
         self.app.meeting_id = None;

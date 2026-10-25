@@ -605,3 +605,31 @@ fn explicit_stop_restores_main_after_stopping_but_automatic_stop_does_not() {
     assert!(matches!(e.session.app.state, SessionState::Stopped { .. }));
     assert!(!e.host.log.lock().unwrap().iter().any(|s| s == "show-main"));
 }
+#[test]
+fn notes_model_ready_resolves_only_the_missing_notes_model() {
+    let mut e = engine();
+    e.apply(
+        Command::ProblemRaised(Problem::ModelMissing {
+            kind: ModelKind::Notes,
+        }),
+        0,
+    );
+    e.apply(
+        Command::ProblemRaised(Problem::DiskLow {
+            free_bytes: 2_000_000_000,
+        }),
+        0,
+    );
+    assert_eq!(e.session.problems().len(), 2);
+    e.action(Action::NotesModelReady, 1_000).unwrap();
+    let left: Vec<_> = e.session.problems().iter().map(|p| &p.problem).collect();
+    assert_eq!(
+        left,
+        [&Problem::DiskLow {
+            free_bytes: 2_000_000_000
+        }]
+    );
+    // Nothing pending: nothing changes.
+    e.action(Action::NotesModelReady, 2_000).unwrap();
+    assert_eq!(e.session.problems().len(), 1);
+}
