@@ -47,6 +47,8 @@ export default function Onboarding(){
   const [testing,setTesting]=useState(false);
   const [error,setError]=useState('');
   const setupTier=useRef<TierId|null>(null);
+  // The tier Download was pressed for: any SetupChanged for it ends "Starting…", whatever its phase.
+  const startedTier=useRef<TierId|null>(null);
   const screenWas=useRef<string|null>(null);
   const screenOpened=useRef(false);
 
@@ -95,7 +97,7 @@ export default function Onboarding(){
       if(!active)return;
       if(event.type==='DownloadProgress'){setStarting(false);setBytes(old=>({...old,[event.id]:event.bytes}));}
       else if(event.type==='DownloadDone'){setFailure(null);void readSetup().catch(e=>setError(String(e)));}
-      else if(event.type==='DownloadFailed'){setFailure({id:event.id,text:event.checksum?s.dlChecksum:s.dlFailed.replace('{reason}',event.reason)});void readSetup().catch(e=>setError(String(e)));}
+      else if(event.type==='DownloadFailed'){setFailure({id:event.id,text:event.checksum?s.dlChecksum:event.reason});void readSetup().catch(e=>setError(String(e)));}
       else if(event.type==='SpeedTest'){
         // Setup's answer only when it is for the setup tier (a Settings test of another tier isn't).
         const {type:_,...speed}=event;
@@ -103,7 +105,9 @@ export default function Onboarding(){
         else void readSetup().catch(e=>setError(String(e)));
       }
       else if(event.type==='SetupChanged'){
-        const {type:_,...state}=event;showSetup(state);
+        const {type:_,...state}=event;
+        if(state.tier===startedTier.current){startedTier.current=null;setStarting(false);}
+        showSetup(state);
         void Promise.all([ipc.modelCatalog(),ipc.getSettings()]).then(([cat,saved])=>{if(active){setCatalog(cat);setSettings(saved);}}).catch(e=>setError(String(e)));
       }
     }).then(fn=>{if(active)off.push(fn);else fn();}).catch(e=>setError(String(e)));
@@ -139,10 +143,17 @@ export default function Onboarding(){
   const notesReady=!!tierInfo&&!!file(tierInfo.notes)?.on_disk;
   const speed=setup?.speed&&setup.speed.tier===setup.tier?setup.speed:null;
   const maxStep=consent?step+1:0;
+  // `speed_slow` with its answer, on Models and on Try it: setup waits here before the notes model.
+  const offer=setup?.phase.type==='AwaitingAnswer'?setup.phase.offer:null;
+  const answerSlow=(useLower:boolean)=>void act(async()=>{await ipc.answerSlow(useLower);await readSetup();});
+  const slowAsk=offer&&setup&&<div className="note ask" role="alert"><span>{s.speedSlow.replace('{x}',times(setup.speed?.rtf??0))}</span><span className="controls">
+    <button type="button" className="btn primary sm" onClick={()=>answerSlow(true)}>{s.useTier.replace('{tier}',offer)}</button>
+    <button type="button" className="btn sm" onClick={()=>answerSlow(false)}>{s.keepTier.replace('{tier}',setup.tier)}</button></span></div>;
 
   async function download(t:TierId){
     const was=pressed;setChosen(t);setPressed(true);setStarting(true);setFailure(null);setError('');
-    try{await ipc.startSetup(t);}catch(e){setStarting(false);setPressed(was);setError(String(e));}
+    startedTier.current=t;
+    try{await ipc.startSetup(t);}catch(e){startedTier.current=null;setStarting(false);setPressed(was);setError(String(e));}
   }
   function choose(t:TierId){setChosen(t);if(running)void download(t);}
   // Radio group keys: arrows move the choice and the focus, wrapping (WAI-ARIA radio group).
@@ -179,7 +190,7 @@ export default function Onboarding(){
     const article=/^([aeiou]|M\d)/i.test(hw?.chip??'')?'an':'a';
     const machine=hw?.chip&&hw.memory_gb?<>This {mac?'Mac':'PC'} has {article} <b>{hw.chip} with {hw.memory_gb} GB</b> of memory</>:hw?.memory_gb?<>This {mac?'Mac':'PC'} has <b>{hw.memory_gb} GB</b> of memory</>:hw?.label??'';
     const speedLine=speed?.keeps_up?<span className="chip ok mono">{s.speedOk.replace('{x}',times(speed.rtf))}</span>
-      :speed?<p>{speed.tier==='Light'?s.speedLightSlow:s.speedSlow.replace('{x}',times(speed.rtf))}</p>
+      :offer?slowAsk:speed?<p>{speed.tier==='Light'?s.speedLightSlow:s.speedSlow.replace('{x}',times(speed.rtf))}</p>
       :phase==='SpeedTest'?<span className="chip amber">{s.speedRunning}</span>:null;
     const button=starting?<button type="button" className="btn" disabled>{s.dlStarting}</button>
       :failed?<button type="button" className="btn" onClick={()=>void download(tier)}>Retry</button>
@@ -189,7 +200,7 @@ export default function Onboarding(){
       <div className="tiers" role="radiogroup" aria-label="Model set" onKeyDown={radioKeys}>{TIERS.map(id=>{const t=catalog?.tiers.find(x=>x.id===id);return <button type="button" key={id} className="tier" role="radio" aria-checked={id===tier} tabIndex={id===tier?0:-1} onClick={()=>choose(id)}>
         <b>{id}{id===hw?.suggested&&<> <span className="chip ok">Suggested</span></>}</b><small>{t?(mac?t.suits_mac:t.suits_pc):''}</small><small className="mono">{t?`${file(t.speech)?.label} · ${file(t.notes)?.label}`:''}</small><small>{fileSize(tierBytes(id))}</small></button>;})}</div>
       <div className="dl">{rows.map(([name,f])=>{const done=f!.on_disk,pct=done?100:Math.min(99,Math.round((bytes[f!.id]??0)/f!.bytes*100));
-        const why=failure?.id===f!.id?failure.text:failed?.id===f!.id?s.dlFailed.replace('{reason}',failed.reason):paused&&firstOpen===f!.id?s.dlPaused:'';
+        const why=failure?.id===f!.id?failure.text:failed?.id===f!.id?failed.reason:paused&&firstOpen===f!.id?s.dlPaused:'';
         return <div className="dlrow" key={name}><span>{name} <span className="tip">{fileSize(f!.bytes)}</span></span><span className="mono">{done?'✓':starting&&firstOpen===f!.id?s.dlStarting:`${pct}%`}</span><div className="progress" role="progressbar" aria-label={name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{width:`${pct}%`}}/></div>{why&&<span className={`why ${why===s.dlPaused?'':'err'}`}>{why}</span>}</div>;})}</div>
       <div>{speedLine}{phase==='Done'&&allVerified&&<>{speedLine&&' '}<span className="chip ok">{s.modelsDone}</span></>}</div>
       {failed&&!rows.some(([,f])=>f!.id===failed.id)&&<div className="note warn" role="alert">{failed.reason}</div>}
@@ -197,13 +208,10 @@ export default function Onboarding(){
       <div className="foot"><button type="button" className="btn ghost" onClick={()=>go(1)}>Back</button><span className="controls">{button}<button type="button" className="btn primary" disabled={!pressed} onClick={()=>void proceed()}>Continue</button></span></div></>;
   }
   if(step===3){
-    const offer=setup?.phase.type==='AwaitingAnswer'?setup.phase.offer:null;
     pane=<>{stepLine}<h3>{s.tryTitle}</h3><p>{s.tryBody}</p>
       <div className="testbox">{heard?<><q>{heard}</q><span className="chip ok">{s.tryOk}</span></>:heard===''?<span className="chip amber">{s.tryNothing}</span>:<span className="tip">{speechReady?'Your sentence will appear here.':s.tryWait}</span>}
         <div className="field"><button type="button" className="btn" disabled={!speechReady||testing} aria-busy={testing} onClick={()=>void record()}>{heard!==null?s.tryAgain:`● ${s.tryButton}`}</button></div></div>
-      {offer&&setup&&<div className="note ask" role="alert"><span>{s.speedSlow.replace('{x}',times(setup.speed?.rtf??0))}</span><span className="controls">
-        <button type="button" className="btn primary sm" onClick={()=>void act(async()=>{await ipc.answerSlow(true);await readSetup();})}>{s.useTier.replace('{tier}',offer)}</button>
-        <button type="button" className="btn sm" onClick={()=>void act(async()=>{await ipc.answerSlow(false);await readSetup();})}>{s.keepTier.replace('{tier}',setup.tier)}</button></span></div>}
+      {slowAsk}
       {!offer&&speed&&!speed.keeps_up&&speed.tier==='Light'&&<p>{s.speedLightSlow}</p>}
       <p>{s.onbDoneBody}{notesReady?'':` ${s.notesModelPending}`}</p>{errorLine}
       <div className="foot"><button type="button" className="btn ghost" onClick={()=>go(2)}>Back</button><button type="button" className="btn primary" onClick={()=>void act(()=>ipc.finishOnboarding())}>Done</button></div></>;

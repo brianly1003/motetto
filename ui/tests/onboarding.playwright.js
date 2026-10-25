@@ -172,8 +172,21 @@ async (page)=>{
   await expect(p.getByText(/0.90×/).count().then(n=>n===0),'Another tier\'s speed test shown as the answer');
   await p.evaluate(()=>{fx.setup.speed={tier:'Best',rtf:0.09,keeps_up:true,measured_at:'1'};window.emit({type:'SpeedTest',...fx.setup.speed});});
   await p.getByText('Speed test: 0.09× real time · keeps up live',{exact:true}).waitFor();
+  // The slow-machine question is answered on Models too, not only on Try it.
+  await p.evaluate(()=>{fx.setup.speed={tier:'Best',rtf:0.8,keeps_up:false,measured_at:'2'};window.setup({phase:{type:'AwaitingAnswer',offer:'Balanced'}});});
+  await pane.getByRole('alert').getByText('This computer transcribed at 0.80× real time; live notes need 0.5× or faster.',{exact:true}).waitFor();
+  await p.getByRole('button',{name:'Use Balanced'}).waitFor();
+  await p.screenshot({path:`.playwright-out/onboarding-models-slow-${theme}.png`});
+  await p.getByRole('button',{name:'Keep Best'}).click();
+  await p.waitForFunction(()=>window.calls.some(x=>x.c==='answer_slow'&&x.a.useLower===false));
+  await p.evaluate(()=>{fx.setup.speed={tier:'Best',rtf:0.09,keeps_up:true,measured_at:'1'};window.setup({phase:{type:'SpeedTest'}});});
+  await p.getByText('Speed test: 0.09× real time · keeps up live',{exact:true}).waitFor();
   await p.evaluate(()=>{window.setup({phase:{type:'Downloading',id:'notes-qwen3-8b'}});window.emit({type:'DownloadProgress',id:'notes-qwen3-8b',bytes:2011113395,total:5027783488});});
   await dlrow('Notes model (in the background)').getByText('40%',{exact:true}).waitFor();
+  // A failed download's reason is already the full sentence: shown once, as is.
+  await p.evaluate(()=>window.emit({type:'DownloadFailed',id:'notes-qwen3-8b',reason:'Download stopped: no data for 30 seconds.',checksum:false}));
+  await dlrow('Notes model (in the background)').getByText('Download stopped: no data for 30 seconds.',{exact:true}).waitFor();
+  await expect(p.getByText(/Download stopped: Download stopped/).count().then(n=>n===0),'Download stopped shown twice');
   // A Settings download while paused leaves setup Idle: Resume still shows.
   await p.evaluate(()=>{fx.setup.files[2][1]=2011113395;window.setup({phase:{type:'Idle'}});});
   await p.getByRole('button',{name:'Resume download'}).click();
@@ -245,6 +258,15 @@ async (page)=>{
   await expect(checked('Balanced').then(v=>v==='true'),'Balanced lost after the runner reported');
   await p.getByRole('button',{name:'Pause'}).waitFor();
   await p.screenshot({path:`.playwright-out/onboarding-models-balanced-${theme}.png`});
+  // "Starting…" ends with any report for the picked tier, even an Idle one with no download.
+  await p.evaluate(()=>{fx.delayStart=false;fx.settings.tier=null;fx.setup={tier:'Best',phase:{type:'Idle'},files:[['speech-large-v3',0,1081140203],['vad-silero',0,885098],['notes-qwen3-8b',0,5027783488]],speed:null,keep_slow:false};window.saveFx();});
+  await p.reload();
+  await p.getByRole('heading',{name:'Models for this Mac'}).waitFor();
+  await p.getByRole('button',{name:'Download 6.1 GB'}).click();
+  await p.getByRole('button',{name:'Starting…'}).waitFor();
+  await p.evaluate(()=>window.setup({phase:{type:'Idle'}}));
+  await p.getByRole('button',{name:'Download 6.1 GB'}).waitFor();
+  await expect(p.getByText('Starting…').count().then(n=>n===0),'Starting… stuck after an Idle report');
   await p.evaluate(()=>sessionStorage.removeItem('fx'));
 
   if(errors.length)throw Error(errors.join('\n'));
