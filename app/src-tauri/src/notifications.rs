@@ -1,6 +1,6 @@
 //! Local OS notices with persistent in-app fallbacks and meeting-scoped actions.
 use crate::{controller::Action as SessionAction, desktop};
-use motetto_core::events::{AppState, Event, ModelKind, Problem, ProblemInfo, SessionState};
+use motetto_core::events::{AppState, Event, ModelKind, Problem, SessionState};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::{Action, ActionType, NotificationExt};
@@ -116,6 +116,7 @@ fn problem(app: &tauri::AppHandle, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use motetto_core::events::ProblemInfo;
 
     #[test]
     fn only_a_missing_speech_model_is_a_start_blocker() {
