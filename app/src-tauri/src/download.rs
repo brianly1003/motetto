@@ -103,8 +103,20 @@ pub fn fetch(
     stop: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Outcome, Failure> {
+    fetch_with(file, dir, base, base.is_none(), stop, progress)
+}
+
+/// `fetch`, with the redirect-hop check chosen apart from `base` so a test can keep it on.
+fn fetch_with(
+    file: &ModelFile,
+    dir: &Path,
+    base: Option<&str>,
+    checked: bool,
+    stop: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<Outcome, Failure> {
     let part = dir.join(format!("{}.part", file.file));
-    let result = run(file, dir, base, stop, progress);
+    let result = run(file, dir, base, checked, stop, progress);
     let on_disk = match &result {
         Ok(Outcome::Done(path)) => path,
         _ => &part,
@@ -117,6 +129,7 @@ fn run(
     file: &ModelFile,
     dir: &Path,
     base: Option<&str>,
+    checked: bool,
     stop: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Outcome, Failure> {
@@ -131,7 +144,7 @@ fn run(
         dir,
         part: dir.join(format!("{}.part", file.file)),
         url,
-        checked: base.is_none(),
+        checked,
         // Redirects are followed by hand so each hop is checked; no proxy from the environment.
         agent: ureq::Agent::config_builder()
             .proxy(None)
@@ -766,6 +779,29 @@ mod tests {
         let dir = folder("host");
         let result = fetch(&off, &dir, None, &AtomicBool::new(false), &mut |_, _| {});
         assert_eq!(result.err(), Some(Failure::Host("example.com".into())));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fetch_refuses_a_redirect_hop_to_another_host() {
+        let dir = folder("hop");
+        let moved = status("302 Found", "Location: http://evil.example/tiny.bin\r\n");
+        let (base, seen) = serve(vec![moved]);
+        let result = fetch_with(
+            &model(),
+            &dir,
+            Some(&base),
+            true,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        );
+        assert_eq!(result.err(), Some(Failure::Host("evil.example".into())));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "only the first hop was asked"
+        );
+        assert!(!dir.join("tiny.bin").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 
