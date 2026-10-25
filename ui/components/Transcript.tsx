@@ -6,6 +6,7 @@ import * as ipc from "@/lib/ipc";
 import { handBack } from "@/lib/focus";
 
 const esc = (text: string) => text.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+const READ_MS = 1500;
 const mac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
 // As in the mockup: the time plays from its line; the words are the line's text, edited in place
@@ -21,15 +22,41 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
   // Playback never pulls the view or the highlight onto the line being edited. Opening at a cited
   // time, or a playing line leaving the view, puts the line at the top so what plays next shows
   // below it (owner 2026-10-21); a line already in view stays put.
-  const opened = useRef(false);
+  // While the reader scrolls by hand the highlight keeps moving but the view is theirs; once the
+  // scrolling has stopped for READ_MS (momentum included) the view goes back to the playing line
+  // (owner 2026-10-25). A seek ends it at once. Wheel and touch are the hand; scroll events while
+  // a pointer is down are the scroll bar; scrollIntoView sends neither.
+  const opened = useRef(false), smooth = useRef(false), last = useRef(position);
+  const [reading, setReading] = useState(false);
+  useEffect(() => {
+    const body = box.current?.closest<HTMLElement>(".docbody");
+    if (!body) return;
+    let held = false, timer = 0;
+    const hand = () => { setReading(true); clearTimeout(timer); timer = window.setTimeout(() => { smooth.current = true; setReading(false); }, READ_MS); };
+    const down = () => { held = true; }, up = () => { held = false; };
+    const bar = () => { if (held) hand(); };
+    body.addEventListener("wheel", hand, {passive: true}); body.addEventListener("touchmove", hand, {passive: true});
+    body.addEventListener("pointerdown", down); addEventListener("pointerup", up); body.addEventListener("scroll", bar, {passive: true});
+    return () => {
+      clearTimeout(timer);
+      body.removeEventListener("wheel", hand); body.removeEventListener("touchmove", hand);
+      body.removeEventListener("pointerdown", down); removeEventListener("pointerup", up); body.removeEventListener("scroll", bar);
+    };
+  }, []);
+  // A seek (back, or ahead by more than a moment) means the reader wants that place now.
+  useEffect(() => {
+    if (position !== undefined && last.current !== undefined && (position < last.current || position - last.current > 2000)) setReading(false);
+    last.current = position;
+  }, [position]);
   useEffect(() => {
     const row = playing >= 0 && focused < 0 ? box.current?.children[playing] : undefined;
-    if (!row) return;
+    if (!row || reading && opened.current) return;
     const view = row.closest(".docbody")?.getBoundingClientRect(), r = row.getBoundingClientRect();
     const under = parseFloat(getComputedStyle(row).scrollMarginBottom) || 0;
-    if (!opened.current || !view || r.top < view.top || r.bottom > view.bottom - under) row.scrollIntoView({block: "start"});
-    opened.current = true;
-  }, [playing, focused]);
+    if (!opened.current || !view || r.top < view.top || r.bottom > view.bottom - under)
+      row.scrollIntoView({block: "start", behavior: smooth.current && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto"});
+    smooth.current = false; opened.current = true;
+  }, [playing, focused, reading]);
 
   async function save(index: number, value: string, undoable = true) {
     const before = lines[index]?.text ?? "";
