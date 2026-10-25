@@ -31,7 +31,8 @@ they will do it (\"I'll send it\", \"we'll check\") or agreed when asked; a prop
 Not tasks: ideas and proposals nobody took on, decisions made in the call (they go under their topic), advice, \
 explanations, how things work today, problems, and things done during the call. The owner does the work: \"Me: I'll send it\" \
 makes You the owner, \"Them: I'll check the account\" makes Them the owner (or that person's name, if a line \
-gives it), and a request is owned by whoever accepts it (\"Can you check it?\" then \"I'll check\"). Leave out \"<Owner>: \" when the \
+gives it), and a request is owned by whoever accepts it (\"Can you check it?\" then \"I'll check\"); a task handed to a named person or team (\"I'll ask Team X to do it\") is owned \
+by that person or team. Leave out \"<Owner>: \" when the \
 transcript doesn't show who. [mm:ss] is the source line's time exactly as written; omit it if no line \
 supports the task. News and facts are not tasks. Add a due date only if one was said. With no tasks at \
 all, write \"- None\".\n\
@@ -132,7 +133,10 @@ pub fn notes(
     let labeled = labeled(transcript);
     let who = if labeled { "" } else { UNLABELED };
     let prompt = |text: &str| format!("{PROMPT}{who}{language}{terms}{mine}\nTRANSCRIPT:\n{text}");
-    let parts = split_lines(transcript, max_chars);
+    let mut parts = split_lines(transcript, max_chars);
+    if let ([_], Some(at)) = (parts.as_slice(), recap_at(transcript)) {
+        parts = vec![&transcript[..at], transcript];
+    }
     let summary = if parts.len() <= 1 {
         println!("Summarizing with {llm}...");
         ask(&llm, &prompt(transcript))?
@@ -538,6 +542,29 @@ fn split_lines(text: &str, max: usize) -> Vec<&str> {
     parts
 }
 
+/// Where a spoken recap of the tasks starts ("Just to recap our action items"), if one does in the
+/// second half of the call. Given the recap, qwen3:8b copies it as the whole task list and drops
+/// the tasks taken on earlier (3 runs of 3, and prompt rules did not change that). So the part
+/// before the recap is summarized on its own as well as the whole call, and the two are merged
+/// like a long call's parts: on its own, the recap's short lines made one task per line. English
+/// and Vietnamese cues only; another language keeps one part.
+fn recap_at(text: &str) -> Option<usize> {
+    let (mut at, mut found) = (0, None);
+    for line in text.split_inclusive('\n') {
+        let said = line.to_lowercase();
+        if at >= text.len() / 2
+            && found.is_none()
+            && ["recap", "action item", "tóm lại", "tóm tắt"]
+                .iter()
+                .any(|cue| said.contains(cue))
+        {
+            found = Some(at);
+        }
+        at += line.len();
+    }
+    found
+}
+
 /// Whether `ollama list` output names `llm`; a name without a tag means `:latest`.
 fn installed(list: &str, llm: &str) -> bool {
     let want = if llm.contains(':') {
@@ -737,6 +764,19 @@ mod tests {
         let _ = fs::remove_file(format!("{base}.md"));
         assert!(md.contains(NO_SPEECH));
         assert!(md.contains("- [ ] You: call Linh"));
+    }
+
+    #[test]
+    fn a_recap_in_the_second_half_starts_its_own_part() {
+        let call = "[00:01] Me: hi\n[01:00] Them: I'll ask Team X to run the load test tomorrow\n\
+                    [02:00] Me: Just to recap our action items\n[02:05] Me: one, ship it\n";
+        assert_eq!(&call[recap_at(call).unwrap()..][..13], "[02:00] Me: J");
+        // Early on, "recap" is about something else; no cue at all keeps one part.
+        assert_eq!(
+            recap_at("[00:01] Me: recap of last week\n[01:00] Them: ok\n[02:00] Me: bye\n"),
+            None
+        );
+        assert_eq!(recap_at("[00:01] Me: hi\n[01:00] Them: bye\n"), None);
     }
 
     #[test]
