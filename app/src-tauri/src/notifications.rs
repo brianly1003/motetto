@@ -38,7 +38,8 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), String> {
                 let _ = handle
                     .state::<crate::settings::Store>()
                     .change(|s| s.onboarding_step = 2);
-                if let Err(error) = crate::setup::open_window(&handle) {
+                // Rebuilt, so a hidden window opens at step 2 instead of the page it had.
+                if let Err(error) = crate::setup::open_setup(handle.clone()) {
                     eprintln!("Motetto: couldn't open setup: {error}");
                 }
             } else if event.action_id() == "tap" {

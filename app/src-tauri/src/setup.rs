@@ -337,14 +337,42 @@ fn kick(app: &tauri::AppHandle) -> Result<(), String> {
         })
 }
 
-/// Next launch: an unfinished setup with a `.part` on disk continues in the background.
+/// In the models folder while the user has paused setup, so a relaunch doesn't undo the Pause.
+fn paused_marker(dir: &Path) -> PathBuf {
+    dir.join("setup-paused")
+}
+
+/// Pause writes the marker; Download, Resume, an answer or a Settings download removes it.
+fn mark_paused(dir: &Path, paused: bool) {
+    let marker = paused_marker(dir);
+    let _ = if paused {
+        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(marker, ""))
+    } else {
+        std::fs::remove_file(marker)
+    };
+}
+
+/// Whether a launch continues setup: first run unfinished, a tier chosen, its downloads or speed
+/// test still to do, and not paused by the user.
+fn resumes(s: &Settings, paused: bool, have: &dyn Fn(&str) -> bool) -> bool {
+    !s.onboarding_done
+        && !paused
+        && s.tier.is_some()
+        && matches!(
+            next(&restore(s, TierId::Balanced), have),
+            Phase::Downloading { .. } | Phase::SpeedTest
+        )
+}
+
+/// Next launch: an unfinished setup continues in the background, whether or not a file was
+/// half downloaded when the app quit.
 pub fn resume(app: &tauri::AppHandle) {
     let Ok(s) = app.state::<Store>().get() else {
         return;
     };
     let dir = model_store::dir(app);
-    let unfinished = catalog().files.iter().any(|f| part(&dir, f).exists());
-    if !s.onboarding_done && s.tier.is_some() && unfinished {
+    let have = |id: &str| installed(catalog(), &dir, &s.adopted, id);
+    if resumes(&s, paused_marker(&dir).exists(), &have) {
         if let Ok(mut inner) = app.state::<Setup>().inner.lock() {
             inner.tier_run = true;
         }
@@ -399,14 +427,24 @@ fn run(app: &tauri::AppHandle) {
                 match obtain(file, &dir, cache.as_deref(), &setup.stop, &mut progress) {
                     Ok(Got::Paused) => None,
                     Ok(got) => {
-                        let _ = store.change(|s| {
+                        // A tier run's file is the model in use at once, not at the next phase.
+                        let saved = store.change(|s| {
                             if let Got::Adopted(found) = got {
                                 s.adopted
                                     .insert(id.clone(), found.to_string_lossy().into_owned());
                             }
-                            refresh_paths(s, cat, &dir);
+                            persist(s, cat, &dir, tier_run);
                         });
                         emit(app, Event::DownloadDone { id: id.clone() });
+                        if file.kind == FileKind::Notes
+                            && saved.is_ok_and(|s| !s.notes_path.is_empty())
+                        {
+                            // A meeting that found no notes model can now have its notes written.
+                            crate::desktop::dispatch(
+                                app.clone(),
+                                crate::controller::Action::NotesModelReady,
+                            );
+                        }
                         None
                     }
                     Err(failure) => {
@@ -690,6 +728,7 @@ pub async fn start_setup(app: tauri::AppHandle, tier: TierId) -> Result<(), Stri
             }
             inner.paused = false;
             inner.tier_run = true;
+            mark_paused(&dir, false);
             // A download the new tier doesn't need stops; the runner moves on to the tier's.
             let wanted = cat.tier(tier);
             if let Phase::Downloading { id } = &inner.phase
@@ -704,13 +743,15 @@ pub async fn start_setup(app: tauri::AppHandle, tier: TierId) -> Result<(), Stri
     .await
 }
 
-/// Keeps the `.part`; Resume (or the next launch) continues it.
+/// Keeps the `.part`; Resume continues it, and setup stays paused across a relaunch.
 #[tauri::command]
-pub fn pause_download(setup: tauri::State<'_, Setup>) -> Result<(), String> {
+pub fn pause_download(app: tauri::AppHandle) -> Result<(), String> {
+    let setup = app.state::<Setup>();
     let mut inner = setup.inner.lock().map_err(|_| "Setup unavailable")?;
     if inner.running {
         inner.paused = true;
         setup.stop.store(true, Ordering::SeqCst);
+        mark_paused(&model_store::dir(&app), true);
     }
     Ok(())
 }
@@ -732,6 +773,7 @@ pub async fn answer_slow(app: tauri::AppHandle, use_lower: bool) -> Result<(), S
             inner.paused = false;
             inner.tier_run = true;
         }
+        mark_paused(&model_store::dir(&app), false);
         kick(&app)
     })
     .await
@@ -766,6 +808,9 @@ pub async fn download_model(app: tauri::AppHandle, id: String) -> Result<(), Str
         let setup = app.state::<Setup>();
         {
             let mut inner = setup.inner.lock().map_err(|_| "Setup unavailable")?;
+            if inner.paused {
+                mark_paused(&model_store::dir(&app), false);
+            }
             enqueue(&mut inner, id);
         }
         kick(&app)
@@ -989,6 +1034,43 @@ mod tests {
         assert_eq!(s.slow_question, None);
         record_speed(&mut s, speed_result(TierId::Light, 3.0));
         assert!(s.live_transcription);
+    }
+
+    #[test]
+    fn launch_resumes_an_unfinished_tier_unless_paused() {
+        let mut s = Settings {
+            tier: Some(TierId::Best),
+            ..Settings::default()
+        };
+        // Quit between files: nothing half downloaded, still resumed.
+        let speech_only = |id: &str| id == "speech-large-v3";
+        assert!(resumes(&s, false, &speech_only));
+        assert!(!resumes(&s, true, &speech_only), "paused by the user");
+        // The speed test is still to run.
+        let speech_and_vad = |id: &str| id == "speech-large-v3" || id == "vad-silero";
+        assert!(resumes(&s, false, &speech_and_vad));
+        // Done, or waiting for the slow answer: nothing runs by itself.
+        let mut done = s.clone();
+        record_speed(&mut done, speed_result(TierId::Best, 2.0));
+        assert!(!resumes(&done, false, &|_| true));
+        record_speed(&mut s, speed_result(TierId::Best, 8.0));
+        assert!(!resumes(&s, false, &speech_and_vad));
+        let unchosen = Settings::default();
+        assert!(!resumes(&unchosen, false, &|_| false));
+        s.onboarding_done = true;
+        s.slow_question = None;
+        assert!(!resumes(&s, false, &|_| false));
+    }
+
+    #[test]
+    fn pause_marker_comes_and_goes() {
+        let dir = std::env::temp_dir().join(format!("motetto-paused-{}", std::process::id()));
+        mark_paused(&dir, true);
+        assert!(paused_marker(&dir).exists());
+        mark_paused(&dir, false);
+        assert!(!paused_marker(&dir).exists());
+        mark_paused(&dir, false);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn inner() -> Inner {
