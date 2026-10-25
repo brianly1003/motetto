@@ -7,9 +7,10 @@ use std::{
     error::Error,
     hash::{BuildHasher, Hasher, RandomState},
     io::{self, BufRead},
+    path::{Path, PathBuf},
     process::{Child, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -41,6 +42,59 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 impl Drop for Server {
     fn drop(&mut self) {
         kill(&self.child);
+        forget_pid();
+    }
+}
+
+/// `llama-server.pid` in the app data folder: the running server, so a launch after a crash or
+/// Force Quit can stop the one left behind.
+static PID_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+/// At launch: remember where the pid file lives and stop a server an earlier run left running.
+pub fn configure(data_dir: &Path) {
+    let file = PID_FILE.get_or_init(|| data_dir.join("llama-server.pid"));
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let bundled = tools::bundled("llama-server");
+    if let Some(pid) = bundled.and_then(|b| left_behind(&text, &b, running_program)) {
+        eprintln!("Motetto: stopping notes engine {pid} left by an earlier run");
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+    let _ = std::fs::remove_file(file);
+}
+
+/// The pid in `text` when that process runs the bundled `llama-server`; never another program
+/// that has since been given the same pid.
+fn left_behind(text: &str, bundled: &Path, program: impl Fn(u32) -> Option<String>) -> Option<u32> {
+    let pid = text.trim().parse::<u32>().ok().filter(|&pid| pid > 1)?;
+    (Path::new(program(pid)?.trim()) == bundled).then_some(pid)
+}
+
+/// The executable `pid` runs, as `ps` names it (the full path it was started from on macOS).
+fn running_program(pid: u32) -> Option<String> {
+    // Windows: no `ps`; a server left there is not stopped yet (taskkill /FI would do it).
+    let output = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn remember_pid(pid: u32) {
+    if let Some(file) = PID_FILE.get() {
+        let _ = std::fs::write(file, pid.to_string());
+    }
+}
+
+fn forget_pid() {
+    if let Some(file) = PID_FILE.get() {
+        let _ = std::fs::remove_file(file);
     }
 }
 fn kill(child: &Mutex<Child>) {
@@ -63,6 +117,7 @@ fn stop_server(quitting: bool) {
         }
         if let Some(child) = active.take() {
             kill(&child);
+            forget_pid();
         }
     }
 }
@@ -134,9 +189,11 @@ fn start(model: &str) -> Result<Server, Failure> {
     let mut command = tools::command("llama-server");
     command
         .args(["-m", model, "--host", "127.0.0.1", "--port", "0"])
-        .args(["--api-key", &key, "-c", &CONTEXT_TOKENS.to_string()])
+        .args(["-c", &CONTEXT_TOKENS.to_string(), "--no-webui"])
         .args(["--parallel", "1", "-n", &MAX_ANSWER_TOKENS.to_string()])
         .args(["-ngl", "99", "--jinja"])
+        // From the environment, not the command line, where `ps` shows it to every user.
+        .env("LLAMA_API_KEY", &key)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -145,9 +202,9 @@ fn start(model: &str) -> Result<Server, Failure> {
     if SHUTTING_DOWN.load(Ordering::SeqCst) {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "Motetto is quitting").into());
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("The notes engine could not start: {e}"))?;
+    let mut child =
+        tools::spawn(&mut command).map_err(|e| format!("The notes engine could not start: {e}"))?;
+    remember_pid(child.id());
     let (sender, ports) = std::sync::mpsc::channel();
     for stream in [
         child
@@ -290,7 +347,9 @@ fn request(server: &Server, prompt: &str) -> Result<String, Failure> {
 fn request_body(prompt: &str) -> serde_json::Value {
     serde_json::json!({
         "messages": [{ "role": "user", "content": prompt }],
-        "temperature": 0,
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
         "chat_template_kwargs": { "enable_thinking": false },
     })
 }
@@ -319,7 +378,9 @@ mod tests {
     fn request_disables_thinking() {
         let body = request_body("Hi");
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
-        assert_eq!(body["temperature"], 0);
+        assert_eq!(body["temperature"], 0.7);
+        assert_eq!(body["top_p"], 0.8);
+        assert_eq!(body["top_k"], 20);
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "Hi");
     }
@@ -336,6 +397,23 @@ mod tests {
         assert!(error.contains("Invalid API Key"));
         assert!(answer("not json").is_err());
         assert!(answer(r#"{"choices":[]}"#).is_err());
+    }
+
+    #[test]
+    fn only_the_bundled_server_left_behind_is_stopped() {
+        let bundled = Path::new("/Applications/Motetto.app/Contents/MacOS/llama-server");
+        let ps = |name: &'static str| move |_| Some(format!("{name}\n"));
+        let server = ps("/Applications/Motetto.app/Contents/MacOS/llama-server");
+        assert_eq!(left_behind("4242\n", bundled, server), Some(4242));
+        // The pid now belongs to another program, or to no process at all.
+        assert_eq!(left_behind("4242", bundled, ps("/usr/bin/vim")), None);
+        assert_eq!(left_behind("4242", bundled, ps("llama-server")), None);
+        assert_eq!(left_behind("4242", bundled, |_| None), None);
+        // A damaged file, or a pid that would reach other processes.
+        assert_eq!(left_behind("", bundled, server), None);
+        assert_eq!(left_behind("-1", bundled, server), None);
+        assert_eq!(left_behind("1", bundled, server), None);
+        assert_eq!(left_behind("0", bundled, server), None);
     }
 
     #[test]

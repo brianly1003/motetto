@@ -132,6 +132,7 @@ pub fn run() {
             );
             settings.save(&config)?;
             motetto_core::config::configure_desktop(config.join("settings.json"));
+            crate::notes_engine::configure(&app.path().app_data_dir()?);
             motetto_core::summarize::configure_engine(motetto_core::summarize::Engine {
                 ask: crate::notes_engine::ask,
                 context_tokens: crate::notes_engine::CONTEXT_TOKENS,
