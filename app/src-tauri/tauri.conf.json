@@ -29,6 +29,13 @@
   },
   "bundle": {
     "active": false,
-    "icon": ["icons/icon.icns", "icons/icon.png"]
+    "icon": ["icons/icon.icns", "icons/icon.png"],
+    "externalBin": [
+      "binaries/whisper-server",
+      "binaries/whisper-cli",
+      "binaries/whisper-vad-speech-segments",
+      "binaries/llama-server"
+    ],
+    "resources": ["resources/speed-sample.wav", "resources/LICENSES.md"]
   }
 }

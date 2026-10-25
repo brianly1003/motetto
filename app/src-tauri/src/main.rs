@@ -25,6 +25,7 @@ mod settings_models;
 mod settings_storage;
 mod settings_system;
 mod shortcuts;
+mod sidecars;
 mod speech;
 mod transcript_edits;
 mod tray;
@@ -32,5 +33,12 @@ mod window_native;
 
 fn main() {
     motetto_core::tools::configure_desktop();
+    // The bundled programs sit next to the executable (Contents/MacOS on macOS).
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    {
+        motetto_core::tools::configure_bundled(dir);
+    }
     desktop::run();
 }
