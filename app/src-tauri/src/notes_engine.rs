@@ -6,8 +6,7 @@ use motetto_core::tools;
 use std::{
     error::Error,
     hash::{BuildHasher, Hasher, RandomState},
-    io,
-    net::TcpListener,
+    io::{self, BufRead},
     process::{Child, Stdio},
     sync::{
         Arc, Mutex,
@@ -21,7 +20,7 @@ pub const CONTEXT_TOKENS: u32 = 32_768;
 /// `-n`: the cap on one answer, which also bounds a model that loops.
 const MAX_ANSWER_TOKENS: u32 = 8_192;
 /// What callers see when no notes model has been resolved (settings `notes_path` is empty).
-pub const NOT_READY: &str = "notes model not ready";
+pub const NOT_READY: &str = motetto_core::summarize::NOTES_NOT_READY;
 const IDLE: Duration = Duration::from_secs(5 * 60);
 const LOAD_LIMIT: Duration = Duration::from_secs(60);
 type Failure = Box<dyn Error + Send + Sync>;
@@ -51,11 +50,20 @@ fn kill(child: &Mutex<Child>) {
     }
 }
 
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// For app exit: no server starts afterwards.
 pub fn shutdown() {
-    if let Ok(mut active) = ACTIVE.lock()
-        && let Some(child) = active.take()
-    {
-        kill(&child);
+    stop_server(true);
+}
+fn stop_server(quitting: bool) {
+    if let Ok(mut active) = ACTIVE.lock() {
+        if quitting {
+            SHUTTING_DOWN.store(true, Ordering::SeqCst);
+        }
+        if let Some(child) = active.take() {
+            kill(&child);
+        }
     }
 }
 
@@ -120,45 +128,86 @@ fn key() -> String {
 }
 
 fn start(model: &str) -> Result<Server, Failure> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    let port = listener.local_addr()?.port();
-    drop(listener);
     let key = key();
-    let child = tools::command("llama-server")
-        .args([
-            "-m",
-            model,
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-        ])
+    // Port 0 lets llama-server pick and keep its own port: no gap for another process to take it
+    // before the key and transcript are sent. The port is read from its log.
+    let mut command = tools::command("llama-server");
+    command
+        .args(["-m", model, "--host", "127.0.0.1", "--port", "0"])
         .args(["--api-key", &key, "-c", &CONTEXT_TOKENS.to_string()])
-        .args([
-            "-n",
-            &MAX_ANSWER_TOKENS.to_string(),
-            "-ngl",
-            "99",
-            "--jinja",
-        ])
+        .args(["--parallel", "1", "-n", &MAX_ANSWER_TOKENS.to_string()])
+        .args(["-ngl", "99", "--jinja"])
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Held across the check and the spawn so shutdown can't miss a child that is starting.
+    let mut active = ACTIVE.lock().map_err(|_| "notes engine lock failed")?;
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return Err(io::Error::new(io::ErrorKind::Interrupted, "Motetto is quitting").into());
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("The notes engine could not start: {e}"))?;
+    let (sender, ports) = std::sync::mpsc::channel();
+    for stream in [
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn io::Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn io::Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            // Keep draining so the server never blocks on a full pipe; the text is not kept.
+            for line in io::BufReader::new(stream).lines().map_while(Result::ok) {
+                if let Some(rest) = line.split("listening on http://127.0.0.1:").nth(1) {
+                    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                    if let Ok(port) = digits.parse::<u16>() {
+                        let _ = sender.send(port);
+                    }
+                }
+            }
+        });
+    }
     let child = Arc::new(Mutex::new(child));
-    *ACTIVE.lock().map_err(|_| "notes engine lock failed")? = Some(child.clone());
+    *active = Some(child.clone());
+    drop(active);
     // From here a failed wait drops the server, which kills the child.
-    let server = Server {
+    let mut server = Server {
         child,
         model: model.to_owned(),
-        port,
+        port: 0,
         key,
         last: Instant::now(),
         id: NEXT_ID.fetch_add(1, Ordering::SeqCst),
     };
-    let probe = agent(Duration::from_secs(2));
     let deadline = Instant::now() + LOAD_LIMIT;
+    while server.port == 0 {
+        tools::check()?;
+        if Instant::now() >= deadline {
+            return Err("The notes engine did not report its port".into());
+        }
+        if server
+            .child
+            .lock()
+            .map_err(|_| "notes engine lock failed")?
+            .try_wait()?
+            .is_some()
+        {
+            return Err("The notes engine stopped while starting".into());
+        }
+        if let Ok(port) = ports.recv_timeout(Duration::from_millis(100)) {
+            server.port = port;
+        }
+    }
+    let port = server.port;
+    let probe = agent(Duration::from_secs(2));
     while Instant::now() < deadline {
         tools::check()?;
         if server
@@ -298,6 +347,7 @@ mod tests {
 
     /// Needs the bundled llama-server and a GGUF: `MOTETTO_TEST_GGUF=<file>`. Run alone, since
     /// Stop is one global flag.
+    #[cfg(unix)]
     #[test]
     #[ignore = "needs the bundled llama-server and MOTETTO_TEST_GGUF"]
     fn server_killed_on_drop() {
@@ -326,7 +376,7 @@ mod tests {
             .lock()
             .unwrap()
             .id();
-        shutdown();
+        stop_server(false);
         std::thread::sleep(Duration::from_millis(300));
         let alive = std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])
@@ -348,6 +398,6 @@ mod tests {
         let kind = error.downcast_ref::<io::Error>().map(io::Error::kind);
         assert_eq!(kind, Some(io::ErrorKind::Interrupted));
         tools::reset();
-        shutdown();
+        stop_server(false);
     }
 }

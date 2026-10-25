@@ -113,6 +113,10 @@ pub struct Engine {
     pub context_tokens: u32,
 }
 
+/// The error text of an engine with no notes model; the session turns it into a missing-model
+/// problem instead of a failed meeting.
+pub const NOTES_NOT_READY: &str = "notes model not ready";
+
 static ENGINE: OnceLock<Engine> = OnceLock::new();
 
 /// Desktop only: route every prompt to `engine` instead of Ollama.

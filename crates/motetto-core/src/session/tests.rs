@@ -1008,6 +1008,40 @@ fn finish_failure_cancels_pending_quit_and_clears_slow_warning() {
 }
 
 #[test]
+fn missing_notes_model_is_a_model_problem_that_clears_when_notes_are_written() {
+    let s = step(start(fresh(), true), 1, Command::StopRecording).0;
+    let (s, _) = step(
+        s,
+        2,
+        Command::FinishFailed {
+            meeting_id: "m1".into(),
+            reason: crate::summarize::NOTES_NOT_READY.into(),
+        },
+    );
+    assert_eq!(s.app.state, SessionState::Idle);
+    assert_eq!(
+        s.app.problem.as_ref().unwrap().problem,
+        Problem::ModelMissing {
+            kind: ModelKind::Notes
+        }
+    );
+    // The speech model is untouched, so recording can still start.
+    assert!(s.readiness.speech_model);
+    let s = start(s, true);
+    let s = step(s, 3, Command::StopRecording).0;
+    let (s, _) = step(
+        s,
+        4,
+        Command::Finished {
+            meeting_id: "m1".into(),
+            title: "t".into(),
+            action_items: vec![],
+        },
+    );
+    assert!(s.app.problem.is_none());
+}
+
+#[test]
 fn expiry_that_exits_cannot_start_another_recording() {
     let s = step(start(fresh(), false), 1, Command::StopRecording).0;
     let s = step(s, 2, Command::RequestQuit).0;

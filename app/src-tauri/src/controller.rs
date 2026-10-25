@@ -629,6 +629,9 @@ fn cant_record(problem: &Problem) -> String {
             };
             format!("{permission} is off. Turn it on in {settings}.")
         }
+        Problem::ModelMissing {
+            kind: ModelKind::Notes,
+        } => "The notes model is missing.".into(),
         Problem::ModelMissing { .. } => "The speech model is missing.".into(),
         Problem::DiskFull | Problem::DiskLow { .. } => "The disk is full.".into(),
         _ => "Check the problem shown in Motetto.".into(),
