@@ -5,13 +5,13 @@ pub fn configure(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     let native = window.ns_window()? as *mut AnyObject;
     // SAFETY: setup calls this on AppKit's main thread; ns_window is the live NSWindow owned
     // by Tauri. Preserve its existing flags and add NSWindowCollectionBehaviorFullScreenAuxiliary.
-    // Tauri's always-on-top is the floating level (3); other meeting apps' prompts (Notion's) sit
-    // at the screen-saver level, so the Ask card and Pill use it too: NSScreenSaverWindowLevel
-    // (1000). At equal levels the window shown last is in front.
+    // Tauri's always-on-top is the floating level (3), under other apps' floating panels. Use
+    // NSMainMenuWindowLevel - 1 (23): above every app window, below the menu bar and the menus
+    // and popovers it opens (Sound, Control Center), which the screen-saver level (1000) covered.
     unsafe {
         let behavior: usize = msg_send![native, collectionBehavior];
         let _: () = msg_send![native, setCollectionBehavior: behavior | (1 << 8)];
-        let _: () = msg_send![native, setLevel: 1000isize];
+        let _: () = msg_send![native, setLevel: 23isize];
     }
     Ok(())
 }
