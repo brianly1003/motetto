@@ -342,7 +342,8 @@ fn paused_marker(dir: &Path) -> PathBuf {
     dir.join("setup-paused")
 }
 
-/// Pause writes the marker; Download, Resume, an answer or a Settings download removes it.
+/// Pause writes the marker; only a decision about the tier (Download, Resume, the slow answer)
+/// removes it, never a single Settings download.
 fn mark_paused(dir: &Path, paused: bool) {
     let marker = paused_marker(dir);
     let _ = if paused {
@@ -350,6 +351,19 @@ fn mark_paused(dir: &Path, paused: bool) {
     } else {
         std::fs::remove_file(marker)
     };
+}
+
+/// At launch: a Pause saved before the quit is the runner's state again.
+fn restore_pause(inner: &mut Inner, dir: &Path) -> bool {
+    inner.paused = paused_marker(dir).exists();
+    inner.paused
+}
+
+/// Download, Resume or the slow answer: the tier's run goes on and the saved Pause is gone.
+fn begin_tier(inner: &mut Inner, dir: &Path) {
+    inner.paused = false;
+    inner.tier_run = true;
+    mark_paused(dir, false);
 }
 
 /// Whether a launch continues setup: first run unfinished, a tier chosen, its downloads or speed
@@ -372,7 +386,11 @@ pub fn resume(app: &tauri::AppHandle) {
     };
     let dir = model_store::dir(app);
     let have = |id: &str| installed(catalog(), &dir, &s.adopted, id);
-    if resumes(&s, paused_marker(&dir).exists(), &have) {
+    let paused = match app.state::<Setup>().inner.lock() {
+        Ok(mut inner) => restore_pause(&mut inner, &dir),
+        Err(_) => return,
+    };
+    if resumes(&s, paused, &have) {
         if let Ok(mut inner) = app.state::<Setup>().inner.lock() {
             inner.tier_run = true;
         }
@@ -726,9 +744,7 @@ pub async fn start_setup(app: tauri::AppHandle, tier: TierId) -> Result<(), Stri
             if let Phase::Failed { .. } = inner.phase {
                 inner.phase = Phase::Idle;
             }
-            inner.paused = false;
-            inner.tier_run = true;
-            mark_paused(&dir, false);
+            begin_tier(&mut inner, &dir);
             // A download the new tier doesn't need stops; the runner moves on to the tier's.
             let wanted = cat.tier(tier);
             if let Phase::Downloading { id } = &inner.phase
@@ -770,10 +786,8 @@ pub async fn answer_slow(app: tauri::AppHandle, use_lower: bool) -> Result<(), S
             return Ok(());
         }
         if let Ok(mut inner) = app.state::<Setup>().inner.lock() {
-            inner.paused = false;
-            inner.tier_run = true;
+            begin_tier(&mut inner, &model_store::dir(&app));
         }
-        mark_paused(&model_store::dir(&app), false);
         kick(&app)
     })
     .await
@@ -808,9 +822,7 @@ pub async fn download_model(app: tauri::AppHandle, id: String) -> Result<(), Str
         let setup = app.state::<Setup>();
         {
             let mut inner = setup.inner.lock().map_err(|_| "Setup unavailable")?;
-            if inner.paused {
-                mark_paused(&model_store::dir(&app), false);
-            }
+            // The pause marker stays: one file is not a decision to resume the tier.
             enqueue(&mut inner, id);
         }
         kick(&app)
@@ -1060,6 +1072,38 @@ mod tests {
         s.onboarding_done = true;
         s.slow_question = None;
         assert!(!resumes(&s, false, &|_| false));
+    }
+
+    #[test]
+    fn a_queued_file_keeps_a_paused_tier_paused_across_a_relaunch() {
+        let dir = std::env::temp_dir().join(format!("motetto-relaunch-{}", std::process::id()));
+        let s = Settings {
+            tier: Some(TierId::Best),
+            ..Settings::default()
+        };
+        let have = |id: &str| id == "speech-large-v3";
+        // Paused mid tier run, then one file queued from Settings (download_model's path).
+        let mut before = inner();
+        before.tier_run = true;
+        before.paused = true;
+        mark_paused(&dir, true);
+        enqueue(&mut before, "speech-small".into());
+        assert!(
+            paused_marker(&dir).exists(),
+            "a queued file cleared the Pause"
+        );
+        // Relaunch: a fresh runner reads the marker and the tier run stays paused.
+        let mut after = inner();
+        assert!(restore_pause(&mut after, &dir));
+        assert!(!resumes(&s, after.paused, &have));
+        assert_eq!(plan(&after, &s, &have), Phase::Paused);
+        // Download or Resume clears it, and the tier runs again.
+        begin_tier(&mut after, &dir);
+        assert!(!paused_marker(&dir).exists() && !after.paused && after.tier_run);
+        let mut later = inner();
+        assert!(!restore_pause(&mut later, &dir));
+        assert!(resumes(&s, later.paused, &have));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
