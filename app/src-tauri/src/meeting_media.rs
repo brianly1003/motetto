@@ -41,7 +41,11 @@ fn files(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
                 let name = Path::new(&path)
                     .file_name()
                     .ok_or("Invalid audio filename")?;
-                files.push((dir.join(name), offset));
+                // Plays the mic without loudspeaker echo when transcribing made one, so the
+                // audio says what the transcript says; the recorded mic stays as it was.
+                let file = dir.join(name);
+                let cleaned = file.with_extension("aec.wav");
+                files.push((if cleaned.exists() { cleaned } else { file }, offset));
             }
         }
     } else if dir.join("source.16k.wav").exists() {
@@ -200,6 +204,12 @@ mod tests {
         assert_eq!(media.tracks[0].speaker, "You");
         assert_eq!(media.tracks[0].waveform.len(), 200);
         assert!(media.tracks[0].waveform.iter().all(|v| *v == 0.5));
+        // The echo-cancelled mic plays in its place, still as You.
+        fs::copy(&path, root.join("1/part-0000.mic.aec.wav")).unwrap();
+        let media = read(&root, "1").unwrap();
+        assert!(media.tracks[0].path.ends_with("part-0000.mic.aec.wav"));
+        assert_eq!(media.tracks[0].speaker, "You");
+        fs::remove_file(root.join("1/part-0000.mic.aec.wav")).unwrap();
         #[cfg(unix)]
         {
             fs::remove_file(&path).unwrap();

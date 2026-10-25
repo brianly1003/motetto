@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{config, decode, diarize, slice};
+use crate::{aec, config, decode, diarize, slice};
 
 /// Who a track belongs to, from its file name.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,14 +96,41 @@ pub fn transcript_parts(
     let mut segments = vec![];
     let mut heard: Vec<(String, usize)> = vec![];
     for (sources, offset_ms) in parts {
+        // The mic needs the system track decoded for echo cancellation; each track is decoded once.
+        let mut decoded: Vec<String> = Vec::new();
+        let mut decode16 = |src: &String| -> Result<String, Box<dyn Error>> {
+            let stem = Path::new(src).with_extension("");
+            let wav16 = format!("{}.16k.wav", stem.to_string_lossy());
+            if !decoded.contains(src) {
+                decode::to_wav(Path::new(src), Path::new(&wav16))?;
+                decoded.push(src.clone());
+            }
+            Ok(wav16)
+        };
         for src in sources {
             let speaker = Speaker::from_path(src);
             let stem = Path::new(src)
                 .with_extension("")
                 .to_string_lossy()
                 .into_owned();
-            let wav16 = format!("{stem}.16k.wav");
-            decode::to_wav(Path::new(src), Path::new(&wav16))?;
+            let mut wav16 = decode16(src)?;
+            // Through loudspeakers the mic records the other side again: cancel that echo
+            // against the system track and transcribe (and play) the cleaned mic instead.
+            let system = sources.iter().find(|s| s.ends_with(".system.wav"));
+            if let (Speaker::Me, Some(system)) = (speaker, system) {
+                let system16 = decode16(system)?;
+                let cleaned = format!("{stem}.aec.wav");
+                let _ = fs::remove_file(&cleaned);
+                if let Some(echo) =
+                    aec::cancel(Path::new(&wav16), Path::new(&system16), Path::new(&cleaned))?
+                {
+                    println!(
+                        "Removed loudspeaker echo from {src} ({} ms behind, match {:.2})",
+                        echo.lag_ms, echo.matched
+                    );
+                    wav16 = cleaned;
+                }
+            }
             println!("Transcribing {src} with {model}...");
             let rows = whisper(&model, &wav16, &stem, quiet)?;
             let track_language = fs::read_to_string(format!("{stem}.json"))

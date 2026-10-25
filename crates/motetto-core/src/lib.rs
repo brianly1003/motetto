@@ -5,6 +5,7 @@ pub mod capture;
 mod platform;
 #[cfg(target_os = "windows")]
 pub use platform::windows as capture;
+pub mod aec;
 pub mod config;
 pub mod correct;
 mod decode;
