@@ -164,9 +164,17 @@ fn start(model: &str) -> Result<Server, Failure> {
     {
         let sender = sender.clone();
         std::thread::spawn(move || {
-            // Keep draining so the server never blocks on a full pipe; the text is not kept.
-            for line in io::BufReader::new(stream).lines().map_while(Result::ok) {
-                if let Some(rest) = line.split("listening on http://127.0.0.1:").nth(1) {
+            // Keep draining bytes to the end, even past a line that isn't UTF-8, so the server
+            // never blocks on a full pipe; the text is not kept.
+            let mut reader = io::BufReader::new(stream);
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                if !matches!(reader.read_until(b'\n', &mut line), Ok(1..)) {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&line);
+                if let Some(rest) = text.split("listening on http://127.0.0.1:").nth(1) {
                     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
                     if let Ok(port) = digits.parse::<u16>() {
                         let _ = sender.send(port);
