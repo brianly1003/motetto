@@ -17,10 +17,19 @@ mkdir -p "$cache" "$out"
 exe=
 case $triple in *windows*) exe=.exe ;; esac
 
-fetch() { # name url tag
+# fetch <name> <url> <tag> <commit>: a tag can be moved, so the checkout must be the pinned commit,
+# fresh or cached. A wrong cached checkout is an error, not silently replaced: look at it, then
+# delete it to clone again.
+fetch() {
   local dir=$cache/$1-$3
   if [ ! -d "$dir/.git" ]; then
-    git clone --quiet --depth 1 --branch "$3" "$2" "$dir"
+    git clone --quiet --depth 1 --branch "$3" "$2" "$dir" >&2
+  fi
+  local head
+  head=$(git -C "$dir" rev-parse HEAD)
+  if [ "$head" != "$4" ]; then
+    echo "$dir is at $head, expected $4 ($3); check sidecars.env, or delete the folder to clone again" >&2
+    exit 1
   fi
   echo "$dir"
 }
@@ -45,8 +54,8 @@ install_program() {
   cp "$file" "$out/$2$3-$triple$exe"
 }
 
-whisper=$(fetch whisper.cpp https://github.com/ggml-org/whisper.cpp "$WHISPER_CPP_TAG")
-llama=$(fetch llama.cpp https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_TAG")
+whisper=$(fetch whisper.cpp https://github.com/ggml-org/whisper.cpp "$WHISPER_CPP_TAG" "$WHISPER_CPP_COMMIT")
+llama=$(fetch llama.cpp https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_TAG" "$LLAMA_CPP_COMMIT")
 whisper_programs=(whisper-server whisper-cli whisper-vad-speech-segments)
 # llama-server only serves plain HTTP on localhost and the app downloads models itself: no TLS.
 
