@@ -6,6 +6,7 @@ import type {Settings} from '@/lib/bindings/Settings';
 import {fileSize} from '@/lib/document';
 import {strings as str} from '@/lib/strings';
 import type {Catalog} from '@/lib/bindings/Catalog';
+import type {SetupState} from '@/lib/bindings/SetupState';
 import type {Hardware} from '@/lib/bindings/Hardware';
 import type {SpeedResult} from '@/lib/bindings/SpeedResult';
 import type {TierId} from '@/lib/bindings/TierId';
@@ -26,6 +27,7 @@ export default function SettingsPage(){
   const [catalog,setCatalog]=useState<Catalog|null>(null);
   const [hw,setHw]=useState<Hardware|null>(null);
   // A catalog file picked in Settings that is not on disk yet: nothing is saved until it is verified (SPEC 8.4).
+  const [setup,setSetup]=useState<SetupState|null>(null);
   const [pick,setPick]=useState<{speech?:string;notes?:string}>({});
   const [bytes,setBytes]=useState<Record<string,[number,number]>>({});
   const [failure,setFailure]=useState<Record<string,string>>({});
@@ -63,21 +65,29 @@ export default function SettingsPage(){
   useEffect(()=>{
     if(!ipc.desktopAvailable())return;
     setWipe(false);setError('');
-    if(tab==='Models')void Promise.all([ipc.modelCatalog(),ipc.hardwareInfo()]).then(([c,h])=>{setCatalog(c);setHw(h);}).catch(e=>setError(String(e)));
+    if(tab==='Models')void Promise.all([ipc.modelCatalog(),ipc.hardwareInfo(),ipc.setupState()]).then(([c,h,st])=>{setCatalog(c);setHw(h);setSetup(st);}).catch(e=>setError(String(e)));
     if(tab==='Privacy')void ipc.storageSummary().then(setStorage).catch(e=>setError(String(e)));
     if(tab==='About')void ipc.about().then(setInfo).catch(e=>setError(String(e)));
   },[tab]);
+  // Whichever tab is open: setup finishing a download or moving on changes settings and the catalog (SPEC 8.4).
+  async function reload(){
+    if(!saving.current)await refresh();
+    const [c,st]=await Promise.all([ipc.modelCatalog(),ipc.setupState()]);
+    setCatalog(c);setSetup(st);return c;
+  }
   useEffect(()=>{
-    if(tab!=='Models'||!ipc.desktopAvailable())return;
+    if(!ipc.desktopAvailable())return;
     let active=true;const off:Array<()=>void>=[];
+    const again=()=>void reload().catch(e=>setError(String(e)));
+    window.addEventListener('focus',again);
     void ipc.onSessionEvent(event=>{
       if(!active)return;
       if(event.type==='DownloadProgress')setBytes(old=>({...old,[event.id]:[event.bytes,event.total]}));
-      else if(event.type==='DownloadFailed'){setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});setFailure(old=>({...old,[event.id]:event.checksum?str.dlChecksum:str.dlFailed.replace('{reason}',event.reason)}));}
+      else if(event.type==='DownloadFailed'){setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});setFailure(old=>({...old,[event.id]:event.checksum?str.dlChecksum:str.dlFailed.replace('{reason}',event.reason)}));again();}
+      else if(event.type==='SetupChanged')again();
       else if(event.type==='DownloadDone'){
         setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});
-        void ipc.modelCatalog().then(c=>{
-          if(!active)return;setCatalog(c);
+        void reload().then(()=>{
           // The file is verified: now the choice that waited for it is saved.
           const {settings:current,pick:waiting}=live.current;
           for(const key of ['speech','notes'] as const){
@@ -86,8 +96,8 @@ export default function SettingsPage(){
         }).catch(e=>setError(String(e)));
       }
     }).then(fn=>{if(active)off.push(fn);else fn();}).catch(e=>setError(String(e)));
-    return()=>{active=false;off.forEach(fn=>fn());};
-  },[tab]);
+    return()=>{active=false;window.removeEventListener('focus',again);off.forEach(fn=>fn());};
+  },[]);
   async function action(run:()=>Promise<unknown>,message='Saved',workingMessage='Saving…'){
     if(saving.current)return;
     saving.current=true;setPending(true);setWorking(workingMessage);setError('');setSaved('');clearTimeout(timer.current);
@@ -155,10 +165,17 @@ export default function SettingsPage(){
           if(file.on_disk){setPick(old=>({...old,[kind]:undefined}));void save({[`${kind}_model`]:id});}else setPick(old=>({...old,[kind]:id}));
         };
         const model=(kind:'speech'|'notes',label:string,className:string,extra?:ReactNode)=>{
-          const current=settings[`${kind}_model`],shown=pick[kind]??current,waiting=pick[kind]?catalog?.files.find(f=>f.id===pick[kind]):undefined;
+          const current=settings[`${kind}_model`];
+          // Setup's own download: the tier's file is shown as the choice, with its status, until it is verified and saved.
+          const tierFile=!current&&!pick[kind]&&settings.tier&&catalog?catalog.tiers.find(t=>t.id===(setup?.tier??settings.tier))?.[kind]:undefined;
+          const tierWait=tierFile&&!catalog?.files.find(f=>f.id===tierFile)?.on_disk?tierFile:undefined;
+          const tierProgress=tierWait&&(bytes[tierWait]??setup?.files.find(f=>f[0]===tierWait)?.slice(1));
+          const tierLine=!tierWait?'':setup?.phase.type==='Downloading'&&setup.phase.id===tierWait?`Downloading… ${Math.floor((tierProgress?tierProgress[0]/Math.max(1,tierProgress[1]):0)*100)}%`:setup?.phase.type==='Paused'?'Download paused':'Waiting to download';
+          const shown=pick[kind]??(current||tierWait||''),waiting=pick[kind]?catalog?.files.find(f=>f.id===pick[kind]):undefined;
           const progress=waiting&&bytes[waiting.id];
           return <Row label={kind==='speech'?'Speech':'Notes'} help={waiting?'The current model stays in use until the new one is downloaded and checked.':undefined}>
             <div className="field"><select className={className} aria-label={label} value={shown} onChange={e=>choose(kind,e.target.value)}>{!shown&&<option value="">Choose a model</option>}{files(kind==='speech'?'Speech':'Notes').map(f=>{const tier=tierOf(f.id);return <option key={f.id} value={f.id}>{f.label} · {fileSize(f.bytes)}{tier&&` · ${tier}`}</option>;})}</select>{extra}</div>
+            {tierWait&&<div className="field model-wait"><span role="status">{tierLine}</span></div>}
             {waiting&&<div className="field model-wait"><span>{str.modelNeedsDownload}</span>{progress?<span className="mono" role="status">{Math.floor(progress[0]/Math.max(1,progress[1])*100)}%</span>:<button className="btn sm" onClick={()=>{setFailure(old=>({...old,[waiting.id]:''}));void ipc.downloadModel(waiting.id).catch(e=>setError(String(e)));}}>{str.dlButton.replace('{size}',fileSize(waiting.bytes))}</button>}</div>}
             {waiting&&failure[waiting.id]&&<div className="help" role="status">{failure[waiting.id]}</div>}
           </Row>;
@@ -173,7 +190,7 @@ export default function SettingsPage(){
         {model('notes','Notes model','notes-model')}
         <Row label="Call language" help="Detect handles mixed-language calls; pick one if detection guesses wrong."><div className="field"><select className="call-language" aria-label="Call language" value={settings.call_language} onChange={e=>void save({call_language:e.target.value})}><option value="detect">Detect</option>{LANGUAGES.map(([id,label])=><option key={id} value={id}>{{en:'English',vi:'Vietnamese',zh:'Chinese',ja:'Japanese'}[id]??label}</option>)}</select></div></Row>
         <Row label="Long calls"><div className="field"><span>Summarize in parts of</span>{number('Part size in characters','part_chars',8000,48000)}<span>characters</span></div></Row>
-        <div className="note">{hw?`This ${mac?'Mac':'PC'}: ${hw.label}. `:''}{result?`Last speed test: ${result.rtf.toFixed(2)}× real time${result.tier!==tierOf(settings.speech_model)?` (${result.tier})`:''}. ${result.keeps_up?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`:'No speed test has run yet.'} <button className="btn sm" disabled={!testTier} onClick={()=>testTier&&void action(async()=>setSpeed(await ipc.runSpeedTest(testTier)),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a generated local English sample, without recording.</div></div>
+        <div className="note">{hw?`This ${mac?'Mac':'PC'}: ${hw.label}. `:''}{result?`Last speed test: ${result.rtf.toFixed(2)}× real time${result.tier!==tierOf(settings.speech_model)?` (${result.tier})`:''}. ${result.keeps_up?'This speech model keeps up live.':'This speech model may fall behind with two tracks.'}`:'No speed test has run yet.'} <button className="btn sm" disabled={!testTier} onClick={()=>testTier&&void action(async()=>setSpeed(await ipc.runSpeedTest(testTier)),'Speed test complete','Running the speed test…')}>Run the speed test again</button><div className="help">Uses a short English recording that ships with Motetto; nothing is recorded.</div></div>
         {unused>0&&<Row label="Unused models" help="Downloaded files the chosen models don't use. They can be downloaded again."><button className="btn sm" onClick={()=>void action(async()=>{await ipc.deleteUnusedModels();setCatalog(await ipc.modelCatalog());},'Unused models deleted')}>{str.unusedModels.replace('{size}',fileSize(unused))}</button></Row>}
         </>;
       })()}

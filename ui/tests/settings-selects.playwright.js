@@ -24,6 +24,7 @@ async(page)=>{
     if(command==='recent_mic_apps')return ['com.example.Discord'];
     if(command==='add_app'){apps.push({app_id:args.appId,name:args.appId,mode:'ask',single_signal:false,mac_ids:[args.appId],win_ids:[],title_patterns:[]});return structuredClone(settings);}
     if(command==='model_catalog')return {vad:'vad-silero',tiers:[{id:'Best',speech:'speech-large-v3',notes:'notes-qwen3-8b'},{id:'Balanced',speech:'speech-large-v3-turbo',notes:'notes-qwen3.5-4b'},{id:'Light',speech:'speech-small',notes:'notes-qwen3.5-2b'}],files:[['speech-large-v3','Speech','large-v3',1081140203],['speech-large-v3-turbo','Speech','large-v3-turbo',574041195],['speech-small','Speech','small',487601967],['vad-silero','Vad','Voice detection',885098],['notes-qwen3-8b','Notes','Qwen3 8B',5027783488],['notes-qwen3.5-4b','Notes','Qwen3.5 4B',2740937888],['notes-qwen3.5-2b','Notes','Qwen3.5 2B',1280835840]].map(([id,kind,label,bytes])=>({id,kind,label,bytes,file:id,url:'',sha256:'',on_disk:window.onDisk.includes(id)}))};
+    if(command==='setup_state')return structuredClone(window.setupState||{tier:'Best',phase:{type:'Idle'},files:[],speed:null,keep_slow:false});
     if(command==='hardware_info')return {chip:'M1 Max',memory_gb:32,suggested:'Best',label:'M1 Max, 32 GB'};
     if(command==='run_speed_test')return {tier:args.tier,rtf:.25,keeps_up:true,measured_at:'1'};
     if(command==='download_model'){window.downloads=[...(window.downloads||[]),args.id];return;}
