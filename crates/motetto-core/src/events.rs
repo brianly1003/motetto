@@ -210,7 +210,58 @@ pub struct ActionItem {
     pub source_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+/// The desktop's model tiers (SPEC 5.1); the files behind each live in the app's catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum TierId {
+    Best,
+    Balanced,
+    Light,
+}
+impl TierId {
+    /// The tier a too-slow speed test offers next; Light is the floor.
+    pub fn down(self) -> Self {
+        match self {
+            Self::Best => Self::Balanced,
+            Self::Balanced | Self::Light => Self::Light,
+        }
+    }
+}
+
+/// One speed test: `rtf` is processing time over audio time, so below 1.0 keeps up with a call.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct SpeedResult {
+    pub tier: TierId,
+    pub rtf: f32,
+    pub keeps_up: bool,
+    pub measured_at: String,
+}
+
+/// Where first-run setup is (SPEC 5.2): speech, voice detection, speed test, then notes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type")]
+pub enum Phase {
+    Idle,
+    Downloading { id: String },
+    SpeedTest,
+    AwaitingAnswer { offer: TierId },
+    Paused,
+    Failed { id: String, reason: String },
+    Done,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct SetupState {
+    pub tier: TierId,
+    pub phase: Phase,
+    /// (catalog id, bytes on disk, total) for the tier's files, read from disk.
+    #[ts(type = "[string, number, number][]")]
+    pub files: Vec<(String, u64, u64)>,
+    pub speed: Option<SpeedResult>,
+    /// The user answered "Keep {tier}" to a slow result, so it isn't asked again.
+    pub keep_slow: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum Event {
     StateChanged(Box<AppState>),
@@ -231,6 +282,23 @@ pub enum Event {
         title: String,
         action_items: Vec<ActionItem>,
     },
+    DownloadProgress {
+        id: String,
+        #[ts(type = "number")]
+        bytes: u64,
+        #[ts(type = "number")]
+        total: u64,
+    },
+    DownloadDone {
+        id: String,
+    },
+    DownloadFailed {
+        id: String,
+        reason: String,
+        checksum: bool,
+    },
+    SpeedTest(SpeedResult),
+    SetupChanged(SetupState),
 }
 
 /// A detector-confirmed call; unknown apps are filtered by the detector before this boundary.
