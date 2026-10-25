@@ -100,6 +100,14 @@ fn menu(
         .enabled(false)
         .build(app)?;
     let mut builder = MenuBuilder::new(app).item(&header);
+    let settings = app
+        .state::<crate::settings::Store>()
+        .get()
+        .unwrap_or_default();
+    if !settings.onboarding_done {
+        builder = builder
+            .item(&MenuItemBuilder::with_id("setup", "Finish setting up Motetto").build(app)?);
+    }
     for (id, label, shortcut) in match action {
         Action::Record => vec![("record", "Record now", "Ctrl+Alt+S")],
         Action::Asking => vec![
@@ -121,10 +129,6 @@ fn menu(
         Action::Resume => vec![("resume", "Resume recording", "Ctrl+Alt+S")],
         Action::None => vec![],
     } {
-        let settings = app
-            .state::<crate::settings::Store>()
-            .get()
-            .unwrap_or_default();
         let key = match id {
             "record" | "stop" => Some("S"),
             "resume" if !shortcut.is_empty() => Some("S"),

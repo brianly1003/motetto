@@ -2,6 +2,8 @@
 import type { ActionItem } from "./ActionItem";
 import type { AppState } from "./AppState";
 import type { Mode } from "./Mode";
+import type { SetupState } from "./SetupState";
+import type { SpeedResult } from "./SpeedResult";
 import type { Stage } from "./Stage";
 
-export type Event = { "type": "StateChanged" } & AppState | { "type": "CallDetected", call_id: string, app: string, app_id: string, mode: Mode, } | { "type": "Stage", meeting_id: string, stage: Stage, percent: number, eta_s: number | null, } | { "type": "NotesReady", meeting_id: string, title: string, action_items: Array<ActionItem>, };
+export type Event = { "type": "StateChanged" } & AppState | { "type": "CallDetected", call_id: string, app: string, app_id: string, mode: Mode, } | { "type": "Stage", meeting_id: string, stage: Stage, percent: number, eta_s: number | null, } | { "type": "NotesReady", meeting_id: string, title: string, action_items: Array<ActionItem>, } | { "type": "DownloadProgress", id: string, bytes: number, total: number, } | { "type": "DownloadDone", id: string, } | { "type": "DownloadFailed", id: string, reason: string, checksum: boolean, } | { "type": "SpeedTest" } & SpeedResult | { "type": "SetupChanged" } & SetupState;

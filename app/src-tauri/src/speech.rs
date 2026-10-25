@@ -17,6 +17,8 @@ pub struct Server {
     pub client: whisper::Client,
     empty_vad: Arc<AtomicBool>,
     diagnostics: Option<JoinHandle<()>>,
+    model: String,
+    vad: Option<String>,
 }
 static ACTIVE: Mutex<Option<Arc<Mutex<Child>>>> = Mutex::new(None);
 pub fn shutdown() {
@@ -31,6 +33,15 @@ pub fn shutdown() {
 impl Server {
     pub fn start(stop: &motetto_core::events::Stop) -> Result<Self, Box<dyn std::error::Error>> {
         let model = config::var("WHISPER_MODEL").ok_or("The speech model is not configured")?;
+        let vad = config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty());
+        Self::start_with(stop, model, vad)
+    }
+    /// A given model rather than the configured one (the speed test of a tier not chosen yet).
+    pub fn start_with(
+        stop: &motetto_core::events::Stop,
+        model: String,
+        vad: Option<String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
         drop(listener);
@@ -48,8 +59,8 @@ impl Server {
             // pass (language_probabilities), which Motetto never reads: ~4.8 s -> ~3.0 s per slice.
             "-nlp",
         ]);
-        if let Some(vad) = config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty()) {
-            command.args(["--vad", "--vad-model", &vad]);
+        if let Some(vad) = &vad {
+            command.args(["--vad", "--vad-model", vad]);
         }
         let mut child = command
             .stdin(Stdio::null())
@@ -79,6 +90,8 @@ impl Server {
             client: whisper::Client::new(port)?,
             empty_vad,
             diagnostics: Some(diagnostics),
+            model,
+            vad,
         };
         let deadline = Instant::now() + Duration::from_secs(90);
         while Instant::now() < deadline && !stop.load(std::sync::atomic::Ordering::SeqCst) {
@@ -138,7 +151,7 @@ impl Server {
             // Some whisper-server versions exit when auto language detection follows empty VAD.
             // Only a confirmed empty VAD result is silence; every other failure stays an error.
             if self.empty_vad.load(Ordering::SeqCst) && !stop.load(Ordering::SeqCst) {
-                *self = Self::start(stop)?;
+                *self = Self::start_with(stop, self.model.clone(), self.vad.clone())?;
                 return Ok(Vec::new());
             }
         }

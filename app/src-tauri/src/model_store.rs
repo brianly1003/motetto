@@ -68,6 +68,7 @@ mod tests {
             url: "https://huggingface.co/motet/test/resolve/abc/tiny.bin".into(),
             bytes: bytes.len() as u64,
             sha256: format!("{:x}", Sha256::digest(bytes)),
+            on_disk: false,
         }
     }
 

@@ -303,6 +303,23 @@ impl Settings {
     }
 }
 
+/// Setup and the verified model paths are written by Rust only (first run, the runner); a
+/// settings window's save never changes them.
+fn keep_setup(s: &mut Settings, saved: Settings) {
+    s.onboarding_done = saved.onboarding_done;
+    s.onboarding_step = saved.onboarding_step;
+    s.consent_confirmed_at = saved.consent_confirmed_at;
+    s.tier = saved.tier;
+    s.speed_test = saved.speed_test;
+    s.live_transcription = saved.live_transcription;
+    s.slow_question = saved.slow_question;
+    s.screen_requested = saved.screen_requested;
+    s.adopted = saved.adopted;
+    s.speech_path = saved.speech_path;
+    s.vad_path = saved.vad_path;
+    s.notes_path = saved.notes_path;
+}
+
 pub struct Store {
     pub dir: PathBuf,
     pub value: Mutex<Settings>,
@@ -384,18 +401,23 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
                 "Wait until the recording or import finishes before changing settings.".into(),
             );
         }
+        let models = crate::model_store::dir(&app);
         let mut result = (|| {
-            if settings.speech_model != old.speech_model
-                && !Path::new(&settings.speech_path).is_file()
-            {
+            let on_disk = |id: &str| {
+                catalog()
+                    .file(id)
+                    .and_then(|f| crate::model_store::path(&models, &old.adopted, f))
+                    .is_some()
+            };
+            if settings.speech_model != old.speech_model && !on_disk(&settings.speech_model) {
                 return Err(
                     "Download the speech model first. The current model is still in use.".into(),
                 );
             }
-            if settings.notes_model != old.notes_model
-                && catalog().file(&settings.notes_model).is_none()
-            {
-                return Err("Choose a notes model from the list.".into());
+            if settings.notes_model != old.notes_model && !on_disk(&settings.notes_model) {
+                return Err(
+                    "Download the notes model first. The current model is still in use.".into(),
+                );
             }
             if settings.open_at_login != old.open_at_login {
                 crate::settings_system::login(&app, settings.open_at_login)?;
@@ -409,10 +431,13 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
                 let ask = s.ask_on_call;
                 let modes = s.app_modes.clone();
                 let mic = s.mic_device.clone();
+                let rust_owned = s.clone();
                 *s = settings.clone();
                 s.ask_on_call = ask;
                 s.app_modes = modes;
                 s.mic_device = mic;
+                keep_setup(s, rust_owned);
+                crate::setup::refresh_paths(s, catalog(), &models);
             })
         })();
         if let Err(reason) = &mut result {
@@ -610,6 +635,7 @@ mod tests {
             url: String::new(),
             bytes: data.len() as u64,
             sha256: format!("{:x}", Sha256::digest(data)),
+            on_disk: false,
         };
         let cat = Catalog {
             files: vec![

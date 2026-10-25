@@ -75,7 +75,7 @@ pub fn ask(prompt: &str) -> Result<String, Failure> {
 fn ask_with(model: &str, prompt: &str) -> Result<String, Failure> {
     tools::check()?;
     // Under 16 GB the model and a transcription slice don't fit together: let the slice finish.
-    if crate::settings_models::memory_gb().is_some_and(|gb| gb < 16) {
+    if crate::hardware::memory_gb().is_some_and(|gb| gb < 16) {
         wait_while(crate::live::slicing, tools::cancelled)?;
     }
     let mut guard = SERVER.lock().map_err(|_| "notes engine lock failed")?;

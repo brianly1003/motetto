@@ -28,6 +28,19 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), String> {
                 {
                     desktop::dispatch(handle.clone(), SessionAction::StopMeeting(id.into()));
                 }
+            } else if event.action_id() == "tap"
+                && event
+                    .notification()
+                    .and_then(|n| n.extra().get("open"))
+                    .is_some_and(|v| v.as_str() == Some("setup"))
+            {
+                // `setup_slow`: first run at the Models step, where the question is.
+                let _ = handle
+                    .state::<crate::settings::Store>()
+                    .change(|s| s.onboarding_step = 2);
+                if let Err(error) = crate::setup::open_window(&handle) {
+                    eprintln!("Motetto: couldn't open setup: {error}");
+                }
             } else if event.action_id() == "tap" {
                 // The library remains a fallback when the platform cannot deliver action buttons.
                 desktop::show(&handle);
@@ -56,6 +69,20 @@ pub fn quiet(app: &tauri::AppHandle, title: &str, body: &str) -> bool {
         eprintln!("Motetto notification: {error}");
     }
     result.is_ok()
+}
+
+/// SPEC 7.5 `setup_slow`: a slow speed test while the first-run window is closed.
+pub fn setup_slow(app: &tauri::AppHandle, title: &str) {
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body("Choose a lighter model set so notes keep up during calls.")
+        .extra("open", "setup")
+        .show()
+    {
+        eprintln!("Motetto notification: {error}");
+    }
 }
 
 pub fn event(app: &tauri::AppHandle, event: &Event) {

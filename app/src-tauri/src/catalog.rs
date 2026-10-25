@@ -3,12 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use ts_rs::TS;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub enum TierId {
-    Best,
-    Balanced,
-    Light,
-}
+pub use motetto_core::events::{SpeedResult, TierId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub enum FileKind {
@@ -27,15 +22,9 @@ pub struct ModelFile {
     #[ts(type = "number")]
     pub bytes: u64,
     pub sha256: String,
-}
-
-/// One speed test: `rtf` is processing time over audio time, so below 1.0 keeps up with a call.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
-pub struct SpeedResult {
-    pub tier: TierId,
-    pub rtf: f32,
-    pub keeps_up: bool,
-    pub measured_at: String,
+    /// Filled in for `model_catalog` only: the file is installed (exact size on disk).
+    #[serde(default)]
+    pub on_disk: bool,
 }
 
 /// `speech` and `notes` are `ModelFile` ids; the suits strings are shown as-is.

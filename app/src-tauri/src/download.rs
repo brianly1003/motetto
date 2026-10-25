@@ -364,7 +364,7 @@ fn allowed(url: &str) -> bool {
 }
 
 /// Free space must cover the bytes still to fetch plus 1 GB, checked before each request.
-fn space_ok(remaining: u64, free: u64) -> Result<(), Failure> {
+pub fn space_ok(remaining: u64, free: u64) -> Result<(), Failure> {
     let need = remaining.saturating_add(GB);
     if free >= need {
         Ok(())
@@ -455,6 +455,7 @@ mod tests {
             url: "https://huggingface.co/motet/test/resolve/abc/tiny.bin".into(),
             bytes: SIZE as u64,
             sha256: format!("{:x}", Sha256::digest(data())),
+            on_disk: false,
         }
     }
 

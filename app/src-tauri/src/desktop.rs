@@ -83,9 +83,22 @@ pub fn run() {
             crate::settings::call_apps,
             crate::settings::recent_mic_apps,
             crate::settings::add_app,
-            crate::settings_models::installed_models,
-            crate::settings_models::pick_speech_model,
-            crate::settings_models::run_speed_test,
+            crate::permissions::permissions,
+            crate::permissions::request_permission,
+            crate::hardware::hardware_info,
+            crate::setup::model_catalog,
+            crate::setup::setup_state,
+            crate::setup::start_setup,
+            crate::setup::pause_download,
+            crate::setup::answer_slow,
+            crate::setup::run_speed_test,
+            crate::setup::download_model,
+            crate::setup::delete_model,
+            crate::setup::delete_unused_models,
+            crate::setup::test_recording,
+            crate::setup::set_onboarding_step,
+            crate::setup::finish_onboarding,
+            crate::setup::relaunch,
             crate::settings_storage::storage_summary,
             crate::settings_storage::delete_all_meetings,
             crate::settings_storage::move_notes_folder,
@@ -110,6 +123,12 @@ pub fn run() {
             {
                 settings.keep_audio = "forever".into();
             }
+            // Never trust saved model paths: re-read each from disk at the catalog's exact size.
+            crate::setup::refresh_paths(
+                &mut settings,
+                crate::catalog::catalog(),
+                &crate::model_store::dir(app.handle()),
+            );
             settings.save(&config)?;
             motetto_core::config::configure_desktop(config.join("settings.json"));
             motetto_core::summarize::configure_engine(motetto_core::summarize::Engine {
@@ -177,6 +196,7 @@ pub fn run() {
             crate::shortcuts::install(app.handle())?;
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
+            app.manage(crate::setup::Setup::default());
             app.manage(crate::tray::State::default());
             let menu = crate::tray::initial(app.handle())?;
             tauri::tray::TrayIconBuilder::with_id("motetto")
@@ -186,6 +206,11 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show(app),
+                    "setup" => {
+                        if let Err(error) = crate::setup::open_window(app) {
+                            let _ = app.emit("motetto://notice", error);
+                        }
+                    }
                     "record" => dispatch(app.clone(), Action::Start),
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
@@ -238,6 +263,11 @@ pub fn run() {
             {
                 window.hide()?;
             }
+            // SPEC 5.2: setup reopens at its step and its downloads continue in the background.
+            if !app.state::<crate::settings::Store>().get()?.onboarding_done {
+                crate::setup::open_window(app.handle())?;
+                crate::setup::resume(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -273,7 +303,7 @@ pub fn run() {
                             SessionState::Recording | SessionState::Stopped { .. }
                         )
                     });
-                if window.label() == "settings"
+                if ["settings", "onboarding"].contains(&window.label())
                     || !active
                     || (window.label() == "main"
                         && crate::companion::available(window.app_handle()))
