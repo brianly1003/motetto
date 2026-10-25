@@ -83,7 +83,7 @@ export default function SettingsPage(){
     void ipc.onSessionEvent(event=>{
       if(!active)return;
       if(event.type==='DownloadProgress')setBytes(old=>({...old,[event.id]:[event.bytes,event.total]}));
-      else if(event.type==='DownloadFailed'){setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});setFailure(old=>({...old,[event.id]:event.checksum?str.dlChecksum:str.dlFailed.replace('{reason}',event.reason)}));again();}
+      else if(event.type==='DownloadFailed'){setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});setFailure(old=>({...old,[event.id]:event.checksum?str.dlChecksum:event.reason}));again();}
       else if(event.type==='SetupChanged')again();
       else if(event.type==='DownloadDone'){
         setBytes(old=>{const {[event.id]:_,...rest}=old;return rest;});
@@ -170,12 +170,17 @@ export default function SettingsPage(){
           const tierFile=!current&&!pick[kind]&&settings.tier&&catalog?catalog.tiers.find(t=>t.id===(setup?.tier??settings.tier))?.[kind]:undefined;
           const tierWait=tierFile&&!catalog?.files.find(f=>f.id===tierFile)?.on_disk?tierFile:undefined;
           const tierProgress=tierWait&&(bytes[tierWait]??setup?.files.find(f=>f[0]===tierWait)?.slice(1));
-          const tierLine=!tierWait?'':setup?.phase.type==='Downloading'&&setup.phase.id===tierWait?`Downloading… ${Math.floor((tierProgress?tierProgress[0]/Math.max(1,tierProgress[1]):0)*100)}%`:setup?.phase.type==='Paused'?'Download paused':'Waiting to download';
-          const shown=pick[kind]??(current||tierWait||''),waiting=pick[kind]?catalog?.files.find(f=>f.id===pick[kind]):undefined;
+          // Only what setup is doing: an idle, finished or failed runner isn't "waiting" for this file.
+          const phase=setup?.phase;
+          const tierLine=!tierWait||!phase?'':phase.type==='Downloading'&&phase.id===tierWait?`Downloading… ${Math.floor((tierProgress?tierProgress[0]/Math.max(1,tierProgress[1]):0)*100)}%`
+            :phase.type==='Paused'?'Download paused':phase.type==='Failed'&&phase.id===tierWait?phase.reason
+            :phase.type==='Downloading'||phase.type==='SpeedTest'||phase.type==='AwaitingAnswer'?'Waiting to download':'';
+          // A tier file already on disk is shown too, between its DownloadDone and the saved choice.
+          const shown=pick[kind]??(current||tierFile||''),waiting=pick[kind]?catalog?.files.find(f=>f.id===pick[kind]):undefined;
           const progress=waiting&&bytes[waiting.id];
           return <Row label={kind==='speech'?'Speech':'Notes'} help={waiting?'The current model stays in use until the new one is downloaded and checked.':undefined}>
             <div className="field"><select className={className} aria-label={label} value={shown} onChange={e=>choose(kind,e.target.value)}>{!shown&&<option value="">Choose a model</option>}{files(kind==='speech'?'Speech':'Notes').map(f=>{const tier=tierOf(f.id);return <option key={f.id} value={f.id}>{f.label} · {fileSize(f.bytes)}{tier&&` · ${tier}`}</option>;})}</select>{extra}</div>
-            {tierWait&&<div className="field model-wait"><span role="status">{tierLine}</span></div>}
+            {tierLine&&<div className="field model-wait"><span role="status">{tierLine}</span></div>}
             {waiting&&<div className="field model-wait"><span>{str.modelNeedsDownload}</span>{progress?<span className="mono" role="status">{Math.floor(progress[0]/Math.max(1,progress[1])*100)}%</span>:<button className="btn sm" onClick={()=>{setFailure(old=>({...old,[waiting.id]:''}));void ipc.downloadModel(waiting.id).catch(e=>setError(String(e)));}}>{str.dlButton.replace('{size}',fileSize(waiting.bytes))}</button>}</div>}
             {waiting&&failure[waiting.id]&&<div className="help" role="status">{failure[waiting.id]}</div>}
           </Row>;
@@ -185,7 +190,13 @@ export default function SettingsPage(){
         const mac=info?.platform!=='windows';
         const result=speed??settings.speed_test;
         const testTier:TierId|undefined=tierOf(settings.speech_model)??hw?.suggested;
+        // `speed_slow` from setup's speed test waits for an answer before the notes model downloads.
+        const offer=settings.slow_question;
+        const slowRtf=settings.speed_test?.rtf??0;
         return <>
+        {offer&&<div className="note ask" role="alert"><span>{str.speedSlow.replace('{x}',slowRtf.toFixed(2))}</span><span className="controls">
+          <button className="btn primary sm" onClick={()=>void action(()=>ipc.answerSlow(true))}>{str.useTier.replace('{tier}',offer)}</button>
+          <button className="btn sm" onClick={()=>void action(()=>ipc.answerSlow(false))}>{str.keepTier.replace('{tier}',settings.tier??'')}</button></span></div>}
         {model('speech','Speech model','speech-model',<span className="chip plain">Local</span>)}
         {model('notes','Notes model','notes-model')}
         <Row label="Call language" help="Detect handles mixed-language calls; pick one if detection guesses wrong."><div className="field"><select className="call-language" aria-label="Call language" value={settings.call_language} onChange={e=>void save({call_language:e.target.value})}><option value="detect">Detect</option>{LANGUAGES.map(([id,label])=><option key={id} value={id}>{{en:'English',vi:'Vietnamese',zh:'Chinese',ja:'Japanese'}[id]??label}</option>)}</select></div></Row>

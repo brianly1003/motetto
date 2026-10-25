@@ -28,6 +28,7 @@ async(page)=>{
     if(command==='setup_state')return structuredClone(window.setupState||{tier:'Best',phase:{type:'Idle'},files:[],speed:null,keep_slow:false});
     if(command==='hardware_info')return {chip:'M1 Max',memory_gb:32,suggested:'Best',label:'M1 Max, 32 GB'};
     if(command==='run_speed_test')return {tier:args.tier,rtf:.25,keeps_up:true,measured_at:'1'};
+    if(command==='answer_slow'){window.answered=args.useLower;settings.slow_question=null;if(window.settingsOverride)delete window.settingsOverride.slow_question;return;}
     if(command==='download_model'){window.downloads=[...(window.downloads||[]),args.id];return;}
     if(command==='delete_unused_models')return 574041195;
     if(command==='set_onboarding_step')return;
@@ -44,6 +45,18 @@ async(page)=>{
   await p.goto('http://127.0.0.1:3004/settings/?tab=models');
   await p.getByRole('combobox',{name:'Notes model',exact:true}).waitFor();
   const notes=p.getByRole('combobox',{name:'Notes model',exact:true});
+  // Setup idle with the tier's file not on disk: no made-up "Waiting to download".
+  await p.waitForTimeout(100);
+  if(await p.getByText('Waiting to download').count())throw Error(theme+': an idle setup reads as waiting to download');
+  // The speed question waits in Settings too; Keep answers it.
+  await p.evaluate(()=>{window.settingsOverride={slow_question:'Light',speed_test:{tier:'Balanced',rtf:.8,keeps_up:false,measured_at:'1'}};window.dispatchEvent(new Event('focus'));});
+  await p.getByRole('alert').getByText('This computer transcribed at 0.80× real time; live notes need 0.5× or faster.',{exact:true}).waitFor();
+  await p.getByRole('button',{name:'Use Light'}).waitFor();
+  await p.screenshot({path:`.playwright-out/settings-models-slow-${theme}.png`});
+  await p.getByRole('button',{name:'Keep Balanced'}).click();
+  await p.waitForFunction(()=>window.answered===false);
+  await p.getByRole('button',{name:'Keep Balanced'}).waitFor({state:'detached'});
+  await p.evaluate(()=>{window.settingsOverride={speed_test:null};});
   // Setup is downloading the tier's notes model; the setting is still empty.
   await p.evaluate(()=>{window.setupState={tier:'Balanced',phase:{type:'Downloading',id:'notes-qwen3.5-4b'},files:[['speech-large-v3-turbo',574041195,574041195],['vad-silero',885098,885098],['notes-qwen3.5-4b',1151193913,2740937888]],speed:null,keep_slow:false};window.emit({type:'SetupChanged',...window.setupState});});
   await p.getByText('Downloading… 42%',{exact:true}).waitFor();
@@ -53,13 +66,27 @@ async(page)=>{
   await p.getByText('Downloading… 50%',{exact:true}).waitFor();
   if(await p.evaluate(()=>window.savedSettings!==undefined))throw Error(theme+': a model was saved before it was verified');
   await p.screenshot({path:`.playwright-out/settings-models-setup-${theme}.png`});
-  // A queued file shows its status too; Settings is on another tab when it finishes.
+  // DownloadDone comes before the SetupChanged that saves the choice: the file on disk stays shown.
+  await p.evaluate(()=>{window.onDisk.push('notes-qwen3.5-4b');window.emit({type:'DownloadDone',id:'notes-qwen3.5-4b'});});
+  await p.waitForFunction(()=>window.testCalls.filter(c=>c.command==='model_catalog').length>=3);
+  await p.waitForTimeout(150);
+  if(await notes.inputValue()!=='notes-qwen3.5-4b')throw Error(theme+': the downloaded tier file is not shown before the choice is saved');
+  if((await notes.locator('option').allTextContents()).includes('Choose a model'))throw Error(theme+': Choose a model flashed after DownloadDone');
+  // Settings is on another tab when setup saves the choice.
   await p.getByRole('tab',{name:'Privacy',exact:true}).click();
-  await p.evaluate(()=>{window.onDisk.push('notes-qwen3.5-4b');window.settingsOverride={notes_model:'notes-qwen3.5-4b'};window.emit({type:'DownloadDone',id:'notes-qwen3.5-4b'});});
+  await p.evaluate(()=>{window.settingsOverride={notes_model:'notes-qwen3.5-4b'};window.setupState={...window.setupState,phase:{type:'Done'}};window.emit({type:'SetupChanged',...window.setupState});});
   await p.getByRole('tab',{name:'Models',exact:true}).click();
   await p.waitForFunction(()=>document.querySelector('select[aria-label="Notes model"]')?.value==='notes-qwen3.5-4b');
   if(await p.getByText(/Downloading|Waiting to download|Not downloaded/).count())throw Error(theme+': a status line remains after the download finished');
   await p.screenshot({path:`.playwright-out/settings-models-setup-done-${theme}.png`});
+  // A failed download's reason is shown once, as is.
+  const speech=p.getByRole('combobox',{name:'Speech model',exact:true});
+  await speech.selectOption('speech-small');
+  await p.getByRole('button',{name:'Download 487.6 MB'}).click();
+  await p.waitForFunction(()=>(window.downloads||[]).includes('speech-small'));
+  await p.evaluate(()=>window.emit({type:'DownloadFailed',id:'speech-small',reason:'Download stopped: no data for 30 seconds.',checksum:false}));
+  await p.getByText('Download stopped: no data for 30 seconds.',{exact:true}).waitFor();
+  if(await p.getByText(/Download stopped: Download stopped/).count())throw Error(theme+': Download stopped shown twice');
   if(errors.length)throw Error(errors.join('\n'));
   results.push({theme,setup:'passed'});await p.close();
  }return results;
