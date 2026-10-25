@@ -56,13 +56,18 @@ pub fn spawn(
                             if offset_ms == 0 {
                                 let _ = app.emit("motetto://open-meeting", id.clone());
                             }
-                            crate::live::start(
-                                app.clone(),
-                                id.clone(),
-                                base.into(),
-                                offset_ms,
-                                stop.clone(),
-                            )?;
+                            // Live captions off (set by the speed test on a slow Mac): the call
+                            // is transcribed after Stop only.
+                            let settings = app.state::<crate::settings::Store>().get();
+                            if live_captions(settings.as_ref().ok()) {
+                                crate::live::start(
+                                    app.clone(),
+                                    id.clone(),
+                                    base.into(),
+                                    offset_ms,
+                                    stop.clone(),
+                                )?;
+                            }
                             #[cfg(target_os = "macos")]
                             // Windows records the default mic; its picker needs WASAPI ids.
                             #[cfg(target_os = "macos")]
@@ -350,10 +355,24 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage)) -> Result<Stri
     Ok(status(root, &record.id, "Ready")?.title)
 }
 
+/// Live captions run unless the settings turn them off; unreadable settings keep them on.
+fn live_captions(settings: Option<&crate::settings::Settings>) -> bool {
+    settings.is_none_or(|s| s.live_transcription)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use motetto_core::events::Stop;
+
+    #[test]
+    fn live_captions_follow_the_setting() {
+        let mut settings = crate::settings::Settings::default();
+        assert!(live_captions(Some(&settings)));
+        settings.live_transcription = false;
+        assert!(!live_captions(Some(&settings)));
+        assert!(live_captions(None));
+    }
     fn root() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
