@@ -12,7 +12,7 @@ const mac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platf
 // As in the mockup: the time plays from its line; the words are the line's text, edited in place
 // (SPEC 7.11). The speaker and time never change; an emptied line is removed but keeps its place,
 // and what was heard stays one click away (Revert).
-export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position}: {id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number}) {
+export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position, running = false}: {id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number; running?: boolean}) {
   const lines = transcriptLines(text, marks);
   const heardLines = heard ? transcriptLines(heard, []) : null;
   const [focused, setFocused] = useState(-1);
@@ -25,7 +25,8 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
   // While the reader scrolls by hand the highlight keeps moving but the view is theirs; once the
   // scrolling has stopped for READ_MS (momentum included) the view goes back to the playing line
   // (owner 2026-10-25). A seek ends it at once. Wheel and touch are the hand; scroll events while
-  // a pointer is down are the scroll bar; scrollIntoView sends neither.
+  // a pointer is down are the scroll bar; scrollIntoView sends neither. With the audio stopped the
+  // view never follows (owner 2026-10-25); pressing Play brings the playing line back into view.
   const opened = useRef(false), smooth = useRef(false), last = useRef(position);
   const [reading, setReading] = useState(false);
   useEffect(() => {
@@ -50,13 +51,13 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
   }, [position]);
   useEffect(() => {
     const row = playing >= 0 && focused < 0 ? box.current?.children[playing] : undefined;
-    if (!row || reading && opened.current) return;
+    if (!row || (reading || !running) && opened.current) return;
     const view = row.closest(".docbody")?.getBoundingClientRect(), r = row.getBoundingClientRect();
     const under = parseFloat(getComputedStyle(row).scrollMarginBottom) || 0;
     if (!opened.current || !view || r.top < view.top || r.bottom > view.bottom - under)
       row.scrollIntoView({block: "start", behavior: smooth.current && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto"});
     smooth.current = false; opened.current = true;
-  }, [playing, focused, reading]);
+  }, [playing, focused, reading, running]);
 
   async function save(index: number, value: string, undoable = true) {
     const before = lines[index]?.text ?? "";

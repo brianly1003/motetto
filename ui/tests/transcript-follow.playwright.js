@@ -53,6 +53,23 @@ async (page) => {
     const line = await body.evaluate(el => { const v = el.getBoundingClientRect(); return [...el.querySelectorAll('.tline')].find(r => r.getBoundingClientRect().top > v.top + 60)?.dataset.line; });
     await p.locator(`.tline[data-line="${line}"] button.ts`).click(); await p.waitForTimeout(2000);
     if (await playing() < +line || !await inView()) fails.push(`${theme}: a seek while reading lost the playing line (${line} -> ${await playing()})`);
+    // Stopped audio: scrolling away stays where the reader put it (owner 2026-10-25); Play brings the line back.
+    await p.locator('.player .doc-action').click(); await p.waitForTimeout(300);
+    if (!/Play/.test(await p.locator('.player .doc-action').innerText())) fails.push(`${theme}: did not pause`);
+    await body.evaluate(el => { el.scrollTop = 0; }); // jump far away from the playing line
+    await p.mouse.wheel(0, 120); await p.waitForTimeout(150);
+    const away = await top();
+    if (await inView()) fails.push(`${theme}: the playing line is still in view, the check proves nothing`);
+    await p.waitForTimeout(2500);
+    if (Math.abs(await top() - away) > 1 || await inView()) fails.push(`${theme}: the view followed while the audio was stopped`);
+    await p.locator('.player .doc-action').click(); await p.waitForTimeout(800);
+    if (!await inView()) fails.push(`${theme}: Play did not bring the playing line back`);
+    // Space on the Notes tab plays and pauses when nothing has focus.
+    await p.getByRole('tab', { name: 'Notes' }).click(); await p.evaluate(() => document.activeElement?.blur());
+    const label = () => p.locator('.player .doc-action').innerText();
+    const before = await label(); await p.keyboard.press(' '); await p.waitForTimeout(200);
+    const after = await label();
+    if (/Pause/.test(before) === /Pause/.test(after)) fails.push(`${theme}: Space on Notes did not toggle (${before} -> ${after})`);
     await p.close();
   }
   return fails.length ? fails : 'PASS';
