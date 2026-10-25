@@ -1,5 +1,5 @@
 //! Saved desktop preferences, separate from the CLI environment configuration.
-use crate::catalog::{FileKind, SpeedResult, TierId, catalog};
+use crate::catalog::{Catalog, FileKind, ModelFile, SpeedResult, TierId, catalog};
 use motetto_core::{
     events::Mode,
     watch::{self, AppRule},
@@ -128,10 +128,30 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    /// Reads and, once, migrates an M4 file: the result is saved at once so the SHA-256 of a
+    /// multi-GB file is computed at most one time.
     pub fn read(dir: &Path) -> Result<Self, String> {
-        Self::read_with(dir, std::env::home_dir())
+        Self::read_with(
+            dir,
+            catalog(),
+            std::env::home_dir(),
+            motetto_core::config::var("WHISPER_VAD_MODEL"),
+        )
     }
-    fn read_with(dir: &Path, home: Option<PathBuf>) -> Result<Self, String> {
+    fn read_with(
+        dir: &Path,
+        cat: &Catalog,
+        home: Option<PathBuf>,
+        vad_env: Option<String>,
+    ) -> Result<Self, String> {
+        let mut settings = Self::parse(dir)?;
+        if settings.migrate(cat, home, vad_env) {
+            // A failed save only means the next read tries again.
+            let _ = settings.save(dir);
+        }
+        Ok(settings)
+    }
+    fn parse(dir: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(dir.join("settings.json")) {
             Ok(text) => {
                 let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
@@ -143,7 +163,6 @@ impl Settings {
                 if value.get("keep_audio").is_none() {
                     settings.keep_audio = "forever".into();
                 }
-                settings.migrate(home);
                 settings.validate()?;
                 Ok(settings)
             }
@@ -152,33 +171,51 @@ impl Settings {
         }
     }
     /// M4 stored a speech model path and an Ollama name; both are catalog ids now. A path to a
-    /// verified catalog file is adopted (so it isn't downloaded again); anything else is cleared.
-    fn migrate(&mut self, home: Option<PathBuf>) {
-        let cat = catalog();
-        if cat.file(&self.speech_model).is_none() {
+    /// verified catalog file is adopted (so it isn't downloaded again), as is the old voice
+    /// detection file; anything else is cleared. True when something changed and must be saved.
+    fn migrate(&mut self, cat: &Catalog, home: Option<PathBuf>, vad_env: Option<String>) -> bool {
+        let speech_old = cat.file(&self.speech_model).is_none() && !self.speech_model.is_empty();
+        let notes_old = cat.file(&self.notes_model).is_none() && !self.notes_model.is_empty();
+        if !speech_old && !notes_old {
+            return false;
+        }
+        let cache = home.map(|h| h.join(".cache/whisper"));
+        let adopt = |file: &ModelFile, first: Option<PathBuf>| {
+            let candidates: Vec<PathBuf> = first
+                .into_iter()
+                .chain(cache.as_ref().map(|c| c.join(&file.file)))
+                .collect();
+            crate::model_store::adopt(file, &candidates)
+                .map(|found| (file.id.clone(), found.to_string_lossy().into_owned()))
+        };
+        if speech_old {
             let old = std::mem::take(&mut self.speech_model);
             let name = Path::new(&old).file_name().and_then(|n| n.to_str());
             if let Some(file) = cat
                 .files
                 .iter()
                 .find(|f| f.kind == FileKind::Speech && Some(f.file.as_str()) == name)
+                && let Some((id, path)) = adopt(file, Some(PathBuf::from(&old)))
             {
-                let mut candidates = vec![PathBuf::from(&old)];
-                candidates.extend(home.map(|h| h.join(".cache/whisper").join(&file.file)));
-                if let Some(found) = crate::model_store::adopt(file, &candidates) {
-                    self.adopted
-                        .insert(file.id.clone(), found.to_string_lossy().into_owned());
-                    self.speech_model = file.id.clone();
-                }
+                self.adopted.insert(id.clone(), path);
+                self.speech_model = id;
             }
         }
-        if cat.file(&self.notes_model).is_none() {
+        if notes_old {
             self.notes_model.clear();
         }
+        if let Some(file) = cat.file(&cat.vad)
+            && !self.adopted.contains_key(&file.id)
+            && let Some((id, path)) =
+                adopt(file, vad_env.filter(|v| !v.is_empty()).map(PathBuf::from))
+        {
+            self.adopted.insert(id, path);
+        }
+        true
     }
-    // Read-only callers can fall back; writes always use the validated Store.
+    // Read-only callers (the tray) fall back to defaults and never migrate, so they never hash.
     pub fn load(dir: &Path) -> Self {
-        Self::read(dir).unwrap_or_default()
+        Self::parse(dir).unwrap_or_default()
     }
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -550,12 +587,58 @@ mod tests {
             r#"{"speech_model":"/Users/x/.cache/whisper/ggml-large-v3-q5_0.bin","notes_model":"qwen3:8b","ask_on_call":false}"#,
         )
         .unwrap();
-        let settings = Settings::read_with(&root, None).unwrap();
+        let settings = Settings::read_with(&root, catalog(), None, None).unwrap();
         assert_eq!(settings.speech_model, "");
         assert_eq!(settings.notes_model, "");
         assert!(!settings.onboarding_done);
         assert!(settings.live_transcription && settings.adopted.is_empty());
         assert!(!settings.ask_on_call);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn migration_adopts_once_and_persists() {
+        use sha2::{Digest, Sha256};
+        let root =
+            std::env::temp_dir().join(format!("motet-settings-adopt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let file = |id: &str, kind, name: &str, data: &[u8]| ModelFile {
+            id: id.into(),
+            kind,
+            file: name.into(),
+            label: id.into(),
+            url: String::new(),
+            bytes: data.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(data)),
+        };
+        let cat = Catalog {
+            files: vec![
+                file("s", FileKind::Speech, "s.bin", b"speech"),
+                file("v", FileKind::Vad, "v.bin", b"vad"),
+            ],
+            tiers: vec![],
+            vad: "v".into(),
+        };
+        let speech = root.join("s.bin");
+        let vad = root.join("v.bin");
+        std::fs::write(&speech, b"speech").unwrap();
+        std::fs::write(&vad, b"vad").unwrap();
+        let old = serde_json::json!({"speech_model": speech, "notes_model": "qwen3:8b"});
+        std::fs::write(root.join("settings.json"), old.to_string()).unwrap();
+        let vad_env = Some(vad.to_string_lossy().into_owned());
+        let first = Settings::read_with(&root, &cat, None, vad_env).unwrap();
+        assert_eq!(first.speech_model, "s");
+        assert_eq!(first.notes_model, "");
+        assert_eq!(first.adopted["s"], speech.to_string_lossy());
+        assert_eq!(first.adopted["v"], vad.to_string_lossy());
+        // Saved: the next read has catalog ids and must not hash again, even with the files gone.
+        std::fs::remove_file(&speech).unwrap();
+        let again = Settings::read_with(&root, &cat, None, None).unwrap();
+        assert_eq!(again.speech_model, "s");
+        assert_eq!(again.adopted, first.adopted);
+        // The tray's load never migrates.
+        std::fs::write(root.join("settings.json"), old.to_string()).unwrap();
+        assert_ne!(Settings::load(&root).speech_model, "s");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
