@@ -768,6 +768,11 @@ pub(crate) fn ask(llm: &str, prompt: &str) -> Result<String, Box<dyn Error>> {
 fn ask_with(engine: Option<&Engine>, llm: &str, prompt: &str) -> Result<String, Box<dyn Error>> {
     if let Some(engine) = engine {
         let raw = (engine.ask)(prompt).map_err(|e| e.to_string())?;
+        // The engine answers in one piece: cut a loop afterwards, where Ollama's stream stops.
+        if let Some(whole) = loop_cut(&raw) {
+            eprintln!("warning: the notes model started repeating itself; its answer was cut");
+            return Ok(clean_summary(whole).to_string());
+        }
         return Ok(clean_summary(&raw).to_string());
     }
     // `ollama run` downloads a model it doesn't have, and the name can come from a ./.env in a
@@ -800,6 +805,23 @@ fn ask_with(engine: Option<&Engine>, llm: &str, prompt: &str) -> Result<String, 
         return Ok(clean_summary(whole).to_string());
     }
     Ok(clean_summary(&answer.text).to_string())
+}
+
+/// A whole answer that loops, cut where the Ollama stream would have stopped: the last whole
+/// line once `runaway` holds; `None` when it never loops.
+fn loop_cut(answer: &str) -> Option<&str> {
+    let ends = answer.match_indices('\n').map(|(at, _)| at + 1);
+    let end = ends
+        .chain([answer.len()])
+        .find(|&end| runaway(&answer.as_bytes()[..end]))?;
+    let seen = &answer.as_bytes()[..end.min(MAX_ANSWER_BYTES)];
+    let seen = seen.strip_suffix(b"\n").unwrap_or(seen);
+    let at = if end <= MAX_ANSWER_BYTES && answer.as_bytes()[end - 1] == b'\n' {
+        seen.len()
+    } else {
+        seen.iter().rposition(|&b| b == b'\n').unwrap_or(0)
+    };
+    Some(&answer[..at])
 }
 
 // Notes for a 35-minute call came to 14 KB; one part of it once ran to 13,357 tokens (16 minutes)
@@ -1065,6 +1087,31 @@ mod tests {
             ),
             "- The **dashboard** is done. [02:05]\n- [ ] You: Ship [01:20]\n[00:10]"
         );
+    }
+
+    #[test]
+    fn a_looping_engine_answer_is_cut() {
+        let engine = Engine {
+            ask: |_| {
+                let line = "- [ ] You: Send the deck to Team X [03:30]\n";
+                Ok(format!("## Action items\n{}- tail", line.repeat(5)))
+            },
+            context_tokens: 16384,
+        };
+        let line = "- [ ] You: Send the deck to Team X [03:30]";
+        assert_eq!(
+            ask_with(Some(&engine), "ignored", "p").unwrap(),
+            format!("## Action items\n{line}\n{line}\n{line}")
+        );
+        assert_eq!(loop_cut("# Notes\n- one\n- two\n"), None);
+        let looping = "a line of notes\n".repeat(9);
+        assert_eq!(
+            loop_cut(&looping).unwrap(),
+            "a line of notes\na line of notes\na line of notes"
+        );
+        let unique: String = (0..5000).map(|i| format!("note {i:06}\n")).collect();
+        let cut = loop_cut(&unique).unwrap();
+        assert!(cut.len() <= MAX_ANSWER_BYTES && cut.ends_with(char::is_numeric));
     }
 
     #[test]
