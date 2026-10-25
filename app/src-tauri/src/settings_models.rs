@@ -40,15 +40,6 @@ pub fn memory_gb() -> Option<u64> {
     None
 }
 
-/// The suggested notes model when Ollama already has it: a first run starts with it (no download).
-pub fn installed_suggestion() -> Option<String> {
-    let suggested = suggested_notes_model(memory_gb()?);
-    notes_models()
-        .ok()?
-        .iter()
-        .any(|name| name == suggested)
-        .then(|| suggested.to_string())
-}
 pub fn notes_models() -> Result<Vec<String>, String> {
     let output = motetto_core::tools::command("ollama")
         .env("OLLAMA_HOST", motetto_core::ollama::host())
@@ -74,12 +65,6 @@ fn parse_models(text: &str) -> Vec<String> {
             .then(|| name.to_owned())
         })
         .collect()
-}
-pub fn check_notes_model(model: &str) -> Result<(), String> {
-    if !notes_models()?.iter().any(|name| name == model) {
-        return Err("Choose an installed local Ollama model. No model was downloaded.".into());
-    }
-    Ok(())
 }
 #[tauri::command]
 pub async fn installed_models(app: tauri::AppHandle) -> Result<Models, String> {

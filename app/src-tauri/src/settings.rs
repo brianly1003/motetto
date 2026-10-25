@@ -85,12 +85,8 @@ impl Default for Settings {
             apps: Vec::new(),
             idle_stop_s: 30,
             discard_short_s: 20,
-            speech_model: motetto_core::config::var("WHISPER_MODEL").unwrap_or_default(),
-            // A first run with no model set starts with the one suggested for this memory, if installed.
-            notes_model: motetto_core::config::var("OLLAMA_MODEL")
-                .filter(|m| !m.is_empty())
-                .or_else(crate::settings_models::installed_suggestion)
-                .unwrap_or_default(),
+            speech_model: String::new(),
+            notes_model: String::new(),
             onboarding_done: false,
             onboarding_step: 0,
             consent_confirmed_at: None,
