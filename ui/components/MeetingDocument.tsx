@@ -61,10 +61,10 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   useEffect(()=>{if(renameRequest)startRename();},[renameRequest]);
   const [media,setMedia]=useState<MeetingMedia|null>(null);
   const [playing,setPlaying]=useState(false);
-  // Space plays or pauses on the Notes tab too (owner 2026-10-25) when nothing has focus; the
-  // Transcript tab has its own handler, and a focused note block keeps Space for typing.
+  // Space plays or pauses on the Notes and Audio tabs too (owner 2026-10-25) when nothing has
+  // focus; the Transcript tab has its own handler, and a focused note block keeps Space for typing.
   useEffect(()=>{
-    if(tab!=='Notes')return;
+    if(tab==='Transcript')return;
     const key=(e:KeyboardEvent)=>{if(e.key!==' '||e.target!==document.body||e.metaKey||e.ctrlKey||e.altKey||!duration)return;e.preventDefault();togglePlay();};
     document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key);
   });
@@ -194,7 +194,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     </header>
     {live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage id={meeting.summary.id} stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage id={meeting.summary.id} stage={rewriting.stage}/>:rewriting?<RewritingPage id={meeting.summary.id} stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
     <div className="doctools"><div className="tabs" role="tablist" aria-label={s.meetingViews}>{['Notes','Transcript','Audio'].map((name,index)=><button key={name} id={`tab-${name}`} type="button" role="tab" aria-selected={tab===name} aria-controls="meeting-panel" tabIndex={tab===name?0:-1} onClick={()=>setTab(name)} onKeyDown={event=>{
-      if(event.key===' ' && tab!=='Audio' && name===tab && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();event.stopPropagation();togglePlay();return;}
+      if(event.key===' ' && name===tab && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();event.stopPropagation();togglePlay();return;}
       const names=['Notes','Transcript','Audio'];let next=index;
       if(event.key==='ArrowRight')next=(index+1)%3;else if(event.key==='ArrowLeft')next=(index+2)%3;else if(event.key==='Home')next=0;else if(event.key==='End')next=2;else return;
       event.preventDefault();setTab(names[next]);document.getElementById(`tab-${names[next]}`)?.focus();

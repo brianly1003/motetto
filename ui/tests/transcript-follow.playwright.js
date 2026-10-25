@@ -70,6 +70,9 @@ async (page) => {
     const before = await label(); await p.keyboard.press(' '); await p.waitForTimeout(200);
     const after = await label();
     if (/Pause/.test(before) === /Pause/.test(after)) fails.push(`${theme}: Space on Notes did not toggle (${before} -> ${after})`);
+    await p.getByRole('tab', { name: 'Audio' }).click(); await p.evaluate(() => document.activeElement?.blur());
+    const was = await label(); await p.keyboard.press(' '); await p.waitForTimeout(200);
+    if (/Pause/.test(was) === /Pause/.test(await label())) fails.push(`${theme}: Space on Audio did not toggle`);
     await p.close();
   }
   return fails.length ? fails : 'PASS';
