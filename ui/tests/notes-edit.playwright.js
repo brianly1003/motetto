@@ -75,12 +75,21 @@ async (page) => {
     if(!/^- \[ \] Kevin: Check whether the 2021 Firebase project is still active( \[00:56\])? and \[00:16\] \*\*soon\*\*( \[00:56\])?$/.test(taskLine))failures.push(`task line: ${taskLine}`);
     if(await p.locator(task+' .src',{hasText:'00:16'}).count()!==1)failures.push('typed time is not a chip after saving');
 
-    // 4. Enter splits a task into a new unticked task; ⌘Z (no caret) undoes it.
+    // 4. Enter saves and leaves the block; ⇧Enter stays in it; ⌘Enter splits a task into a new
+    // unticked task; ⌘Z (no caret) undoes it.
+    const blocksBefore=await p.locator('.notes [data-lines]').count();
     at=await endOf('.todo li:has-text("device table") .task-text'); await p.mouse.click(at.x,at.y);
+    await p.keyboard.type(' now'); await p.keyboard.press('Shift+Enter'); await p.keyboard.type('please');
+    if(!await p.locator('.notes .editing').count())failures.push('Shift+Enter left the block');
     await p.keyboard.press('Enter'); await p.waitForTimeout(250);
+    if(await p.locator('.notes .editing').count())failures.push('Enter did not leave the block');
+    if(await p.locator('.notes [data-lines]').count()!==blocksBefore)failures.push('Enter added a block');
+    if(!/- \[ \] You: Share the device table design( \[01:20\])? now please( \[01:20\])?\n/.test(await saved()))failures.push(`Enter did not save one line: ${(await saved()).split('\n')[2]}`);
+    at=await endOf('.todo li:has-text("device table") .task-text'); await p.mouse.click(at.x,at.y);
+    await p.keyboard.press('Meta+Enter'); await p.waitForTimeout(250);
     await p.keyboard.type('Book the review');
     await p.keyboard.press('Escape'); await p.waitForTimeout(250);
-    if(!(await saved()).includes('\n- [ ] Book the review\n'))failures.push('Enter did not make a new task');
+    if(!(await saved()).includes('\n- [ ] Book the review\n'))failures.push('Cmd+Enter did not make a new task');
     await p.keyboard.press('Meta+z'); await p.waitForTimeout(250);
     if((await saved()).includes('Book the review'))failures.push('undo did not remove the new task');
 
@@ -121,7 +130,7 @@ async (page) => {
     const pickNames=await p.locator('.mention [role=option]').allInnerTexts();
     if(pickNames.length!==1||pickNames[0]?.trim()!=='Kevin')failures.push(`picker options (new only when nothing matches): ${JSON.stringify(pickNames)}`);
     await p.keyboard.press('Enter'); await p.waitForTimeout(250);
-    if(!(await saved()).includes('\n- [ ] Kevin: Share the device table design [01:20]\n'))failures.push(`assign by picker: ${(await saved()).split('\n')[2]}`);
+    if(!(await saved()).includes('\n- [ ] Kevin: Share the device table design now please [01:20]\n'))failures.push(`assign by picker: ${(await saved()).split('\n')[2]}`);
     if(await p.locator('.todo li:has-text("device table") .owner').innerText()!=='Kevin')failures.push('owner pill not updated');
     // A name nobody has yet; picking on a bullet makes it a task.
     at=await endOf(overview); await p.mouse.click(at.x,at.y);

@@ -13,8 +13,9 @@ const LABELS = /^(action items|overview|open questions|my notes|your jots)$/i;
 const MY_NOTES = /^my notes$/i;
 // Atoms keep their look and their own controls while a block is edited (SPEC 7.11).
 const ATOMS = 'input, button, .owner, .jotmark, .tip';
-// blocks with links, HTML or code stay read-only until the serializer round-trips them.
-const UNSAFE = /\]\(|<|`/;
+// Blocks with links (an autolink is "<scheme:...>" or "<a@b>") or code stay read-only until the
+// serializer round-trips them. Other "<" is text (no HTML in notes), so "<You>" stays editable.
+const UNSAFE = /\]\(|<[^<>\s]*[:@][^<>\s]*>|`/;
 
 // Typed text of an edited element, written back as note syntax; atoms add nothing except a time chip.
 function rawOf(node: Node): string {
@@ -164,7 +165,9 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
       }
       const el = editableOf(block), all = blocks(), index = all.indexOf(block), empty = !rawOf(el).replace(/​/g, '').trim();
       if ((e.metaKey || e.ctrlKey) && /^[iu]$/i.test(e.key)) { e.preventDefault(); return; } // notes keep bold only
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); const back = handBack(root); void commit(block).then(back); }
+      // Enter saves and leaves the block, as Esc does; ⌘Enter / Ctrl+Enter adds a block after it;
+      // ⇧Enter is a line break inside it (owner 2026-10-26).
+      if (e.key === 'Escape' || e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); e.stopPropagation(); const back = handBack(root); void commit(block).then(back); }
       else if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const sel = getSelection(); if (!sel?.rangeCount || empty) { const back = handBack(root); void commit(block).then(back); return; }

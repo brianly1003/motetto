@@ -505,6 +505,19 @@ fn tidy_tasks(notes: &str) -> String {
             continue;
         };
         let item = item.strip_prefix("[ ] ").unwrap_or(item).trim();
+        // "<You> Ask Linh" (the prompt's brackets, no colon) reads as "<You>: Ask Linh"; a lone
+        // "<You>" is no task.
+        let owned;
+        let item = match item.strip_prefix('<').and_then(|rest| rest.split_once('>')) {
+            Some((owner, task)) if !owner.is_empty() && !owner.contains(['<', ':']) => {
+                if task.trim().is_empty() {
+                    continue;
+                }
+                owned = format!("<{owner}>: {}", task.trim_start_matches(':').trim());
+                owned.as_str()
+            }
+            _ => item,
+        };
         if item.trim_end_matches('.').eq_ignore_ascii_case("none") {
             nones.push(lines.len());
             lines.push("- None".into());
@@ -1049,6 +1062,13 @@ mod tests {
                 "### Action items\n- [ ] <Team X>: Add Spanish [27:16]\n- [ ] <<Lan>>: Test\n- [ ] <Ann: Go"
             ),
             "### Action items\n- [ ] Team X: Add Spanish [27:16]\n- [ ] <Lan>: Test\n- [ ] <Ann: Go"
+        );
+        // Brackets without the colon still name the owner; a bracketed owner alone is dropped.
+        assert_eq!(
+            tidy_tasks(
+                "### Action items\n- [ ] <You>\n- [ ] <You> Ask Team X [02:39]\n- [ ] <Me>Test"
+            ),
+            "### Action items\n- [ ] You: Ask Team X [02:39]\n- [ ] You: Test"
         );
         // A looping model repeats a task, sometimes at a new time; tasks only alike stay.
         assert_eq!(
