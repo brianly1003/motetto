@@ -13,6 +13,9 @@ import { MenuIcon } from "./MenuIcon";
 const PREFERRED = "motetto.readIn", RECENT = "motetto.readIn.recent";
 function stored(key: string) { try { return localStorage.getItem(key); } catch { return null; } }
 function store(key: string, value: string | null) { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* private window: not remembered */ } }
+// Not now hides the offer on every meeting until Motetto quits (owner 2026-10-26); closing the
+// window only hides it, so this lives as long as the app does, and an update restarts it.
+let notNow = false;
 const recent = (): string[] => { try { return JSON.parse(stored(RECENT) ?? "[]").filter((code: string) => (NOTE_LANGUAGES as readonly string[]).includes(code)); } catch { return []; } };
 
 export function TranslateIcon() {
@@ -34,7 +37,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
   const [running, setRunning] = useState<ipc.TranslateProgress | null>(null);
   const [failed, setFailed] = useState<{ code: string; message: string } | null>(null);
   const [preferred, setPreferred] = useState<string | null>(() => stored(PREFERRED));
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(notNow);
   // The language this page asked for: it opens when it lands (as does the remembered one).
   const wanted = useRef<string | null>(null);
   const live = useRef({ id, preferred }); live.current = { id, preferred };
@@ -44,7 +47,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
   useEffect(() => {
     if (!desktop) return;
     let active = true;
-    setView(null); setShown(null); setFailed(null); setDismissed(false); wanted.current = null;
+    setView(null); setShown(null); setFailed(null); setDismissed(notNow); wanted.current = null;
     void list().then(found => { if (!active) return; setSaved(found); const p = stored(PREFERRED); if (p && p !== written && found.some(t => t.code === p)) setView(p); });
     void ipc.translating().then(now => { if (active) setRunning(now || null); }).catch(() => {});
     return () => { active = false; };
@@ -101,7 +104,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
     markdown: translation ? (translation.stale ? translation.markdown : withTicks(translation.markdown, meeting.notes_md)) : null,
     stale: !!translation?.stale,
     toggle: translation && !translation.stale ? toggle : undefined,
-    choose, translate, show: setView, dismiss: () => setDismissed(true), clearFailed: () => setFailed(null),
+    choose, translate, show: setView, dismiss: () => { notNow = true; setDismissed(true); }, clearFailed: () => setFailed(null),
     stop: () => void ipc.stopTranslation(id).catch(error => onError(String(error))),
   };
 }
@@ -145,7 +148,7 @@ export function ReadInPicker({ readIn, meeting }: { readIn: ReadIn; meeting: Mee
   const rows = useMemo(() => {
     const seen = new Set<string>(), out: Row[] = [];
     const add = (group: string, codes: readonly string[]) => {
-      const fresh = codes.filter(code => !seen.has(code) && matches(code, query));
+      const fresh = [...new Set(codes)].filter(code => !seen.has(code) && matches(code, query));
       fresh.forEach((code, i) => { seen.add(code); out.push({ code, group: i === 0 ? group : undefined }); });
     };
     if (readIn.written) seen.add(readIn.written);
