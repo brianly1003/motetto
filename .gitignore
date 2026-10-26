@@ -12,3 +12,6 @@ app/src-tauri/gen/
 
 # Local only.
 /docs/
+
+# Built by scripts/build-sidecars.sh.
+/app/src-tauri/binaries/

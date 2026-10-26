@@ -134,9 +134,6 @@ export const setAppMode=(appId:string,mode:'ask'|'off')=>invoke<void>('set_app_m
 export const callApps=()=>invoke<CallApp[]>('call_apps');
 export const recentMicApps=()=>invoke<string[]>('recent_mic_apps');
 export const addApp=(appId:string)=>invoke<Settings>('add_app',{appId});
-export const installedModels=()=>invoke<{speech:string[];notes:string[];warning:string|null;suggested:string|null;memory_gb:number|null}>('installed_models');
-export const pickSpeechModel=()=>invoke<string|null>('pick_speech_model');
-export const runSpeedTest=()=>invoke<number>('run_speed_test');
 import type {StorageSummary} from "./bindings/StorageSummary";
 export type {StorageSummary};
 export const storageSummary=()=>invoke<StorageSummary>('storage_summary');
@@ -160,3 +157,29 @@ export async function onTranslate(callback: (progress: TranslateProgress) => voi
   const { listen } = await import('@tauri-apps/api/event');
   return listen<TranslateProgress>('motetto://translate', event => callback(event.payload));
 }
+// First run (SPEC 5.2, DESIGN 4.11): Rust owns the setup pipeline; this window only shows it.
+import type {Catalog} from "./bindings/Catalog";
+import type {Grant} from "./bindings/Grant";
+import type {Hardware} from "./bindings/Hardware";
+import type {Heard} from "./bindings/Heard";
+import type {Permissions} from "./bindings/Permissions";
+import type {SpeedResult} from "./bindings/SpeedResult";
+import type {SetupState} from "./bindings/SetupState";
+import type {TierId} from "./bindings/TierId";
+export const permissions=()=>invoke<Permissions>('permissions');
+export const requestPermission=(kind:PermissionKind)=>invoke<Grant>('request_permission',{kind});
+export const relaunch=()=>invoke<void>('relaunch');
+export const hardwareInfo=()=>invoke<Hardware>('hardware_info');
+export const modelCatalog=()=>invoke<Catalog>('model_catalog');
+export const startSetup=(tier:TierId)=>invoke<void>('start_setup',{tier});
+export const pauseDownload=()=>invoke<void>('pause_download');
+export const answerSlow=(useLower:boolean)=>invoke<void>('answer_slow',{useLower});
+export const setupState=()=>invoke<SetupState>('setup_state');
+export const testRecording=()=>invoke<Heard>('test_recording');
+export const runSpeedTest=(tier:TierId)=>invoke<SpeedResult>('run_speed_test',{tier});
+export const downloadModel=(id:string)=>invoke<void>('download_model',{id});
+export const deleteModel=(id:string)=>invoke<void>('delete_model',{id});
+export const deleteUnusedModels=()=>invoke<number>('delete_unused_models');
+export const openSetup=()=>invoke<void>('open_setup');
+export const setOnboardingStep=(step:number,consent?:boolean)=>invoke<void>('set_onboarding_step',{step,consent:consent??null});
+export const finishOnboarding=()=>invoke<void>('finish_onboarding');

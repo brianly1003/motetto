@@ -208,7 +208,7 @@ export function ReadInBar({ readIn, onWriteIn }: { readIn: ReadIn; onWriteIn?: (
       <i className="readin-progress" style={run.of ? { ["--done" as string]: `${(run.part - 1) / run.of * 100}%`, ["--next" as string]: `${run.part / run.of * 100}%` } : undefined} aria-hidden="true"/>
     </div>;
   }
-  if (readIn.failed) return <Alert variant="danger" role="alert" title={s.translateFailed} actions={<><button className="doc-action" onClick={() => readIn.translate(readIn.failed!.code)}>{s.tryAgain}</button><button className="doc-action ghost" onClick={readIn.clearFailed}>{s.cancel}</button></>}>{readIn.failed.message}</Alert>;
+  if (readIn.failed) return <Alert variant="danger" role="alert" title={s.translateFailed} actions={<><button className="doc-action" onClick={() => readIn.translate(readIn.failed!.code)}>{s.translateRetry}</button><button className="doc-action ghost" onClick={readIn.clearFailed}>{s.cancel}</button></>}>{readIn.failed.message}</Alert>;
   if (readIn.view && readIn.markdown !== null) {
     const name = nativeName(readIn.view);
     if (readIn.stale) return <Alert variant="warning" title={s.staleTitle} actions={<><button className="doc-action" onClick={() => readIn.translate(readIn.view!)}>{s.updateTranslation}</button><button className="doc-action ghost" onClick={() => readIn.show(null)}>{s.showOriginal}</button></>}>{s.staleBody}</Alert>;

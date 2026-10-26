@@ -19,7 +19,7 @@ pub struct Input {
     pub command: Command,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Emit(Event),
     NotifyRecording {
@@ -135,6 +135,11 @@ impl Session {
 
     fn audio(&self) -> bool {
         self.app.started_by != Some(StartReason::NotesOnly)
+    }
+
+    /// Every open problem, the shown one first or not; the desktop resolves some by cause.
+    pub fn problems(&self) -> &[ProblemInfo] {
+        &self.problems
     }
 
     fn idle(&mut self) {
@@ -723,6 +728,10 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 Problem::ModelMissing {
                     kind: ModelKind::Speech,
                 } => session.readiness.speech_model = false,
+                // No readiness flag yet: it clears when notes are written again.
+                Problem::ModelMissing {
+                    kind: ModelKind::Notes,
+                } => {}
                 Problem::PermissionMissing { kind, .. } => match kind {
                     PermissionKind::Microphone => session.readiness.microphone = false,
                     PermissionKind::SystemAudio => session.readiness.system_audio = false,
@@ -763,7 +772,13 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 meeting_id: meeting_id.clone(),
             }) =>
         {
-            session.problems.retain(|p| !matches!(p.problem, Problem::Slow) && !matches!(&p.problem, Problem::NotesFailed { meeting_id: id, .. } if id == &meeting_id));
+            session.problems.retain(|p| !matches!(
+                    p.problem,
+                    Problem::Slow
+                        | Problem::ModelMissing {
+                            kind: ModelKind::Notes
+                        }
+                ) && !matches!(&p.problem, Problem::NotesFailed { meeting_id: id, .. } if id == &meeting_id));
             effects.push(Effect::Emit(Event::NotesReady {
                 meeting_id,
                 title,
@@ -782,7 +797,15 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                     meeting_id: meeting_id.clone(),
                 }) =>
         {
-            session.problem(Problem::NotesFailed { meeting_id, reason }, &input.since);
+            // No notes model: the transcript is kept and the notes can be written later.
+            let problem = if reason == crate::summarize::NOTES_NOT_READY {
+                Problem::ModelMissing {
+                    kind: ModelKind::Notes,
+                }
+            } else {
+                Problem::NotesFailed { meeting_id, reason }
+            };
+            session.problem(problem, &input.since);
             session.idle();
             session
                 .problems

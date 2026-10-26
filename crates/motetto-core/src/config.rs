@@ -14,6 +14,12 @@ fn desktop_value(key: &str) -> Option<serde_json::Value> {
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
     value.get(key).cloned()
 }
+/// The notes model file the desktop resolved and verified; None until one is ready.
+pub fn notes_path() -> Option<String> {
+    desktop_value("notes_path")
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|p| !p.is_empty())
+}
 pub fn call_language() -> Option<String> {
     desktop_value("call_language").and_then(|v| {
         v.as_str()
@@ -36,8 +42,14 @@ fn desktop_var_with(
     value: impl Fn(&str) -> Option<serde_json::Value>,
 ) -> Option<String> {
     match key {
-        "WHISPER_MODEL" => value("speech_model").and_then(|v| v.as_str().map(str::to_owned)),
-        "OLLAMA_MODEL" => value("notes_model").and_then(|v| v.as_str().map(str::to_owned)),
+        // The *_path keys are resolved by the app after a model is verified; empty means not ready.
+        "WHISPER_MODEL" => value("speech_path").and_then(|v| v.as_str().map(str::to_owned)),
+        "WHISPER_VAD_MODEL" => value("vad_path").and_then(|v| v.as_str().map(str::to_owned)),
+        // The bundled engine ignores the name; any non-empty value only says "ready".
+        "OLLAMA_MODEL" => value("notes_path").and_then(|v| {
+            v.as_str()
+                .map(|p| if p.is_empty() { "" } else { "bundled" }.to_owned())
+        }),
         "SUMMARY_CHUNK_CHARS" => {
             value("part_chars").and_then(|v| v.as_u64().map(|n| n.to_string()))
         }
@@ -158,12 +170,12 @@ mod tests {
 
     #[test]
     fn desktop_overrides_are_local_only_and_empty_spellings_turn_off_terms() {
-        let value = serde_json::json!({"speech_model":"", "notes_model":"qwen3:8b", "part_chars":16000,"spellings":[],"PATH":"evil","OLLAMA_HOST":"remote"});
+        let value = serde_json::json!({"speech_path":"", "vad_path":"", "notes_path":"/m/notes.gguf", "part_chars":16000,"spellings":[],"PATH":"evil","OLLAMA_HOST":"remote"});
         let get = |key: &str| value.get(key).cloned();
         assert_eq!(desktop_var_with("WHISPER_MODEL", get), Some(String::new()));
         assert_eq!(
             desktop_var_with("OLLAMA_MODEL", get),
-            Some("qwen3:8b".into())
+            Some("bundled".into())
         );
         assert_eq!(
             desktop_var_with("SUMMARY_CHUNK_CHARS", get),
@@ -178,6 +190,27 @@ mod tests {
             desktop_var_with("TERMS", |key| (key == "spellings").then(|| rows.clone())).unwrap();
         let cleaned = clean_terms(&raw).unwrap();
         assert!(!cleaned.contains(['[', ']', ':', '\n', '<', '>']));
+    }
+    #[test]
+    fn desktop_vars_use_resolved_paths() {
+        let value = serde_json::json!({"speech_model":"large", "speech_path":"/m/ggml.bin", "vad_path":"", "notes_path":""});
+        let get = |key: &str| value.get(key).cloned();
+        assert_eq!(
+            desktop_var_with("WHISPER_MODEL", get),
+            Some("/m/ggml.bin".into())
+        );
+        // An explicit empty value is "off" and must not fall back to .env or the shell.
+        assert_eq!(
+            desktop_var_with("WHISPER_VAD_MODEL", get),
+            Some(String::new())
+        );
+        assert_eq!(desktop_var_with("OLLAMA_MODEL", get), Some(String::new()));
+        let ready = serde_json::json!({"notes_path":"/m/notes.gguf"});
+        assert_eq!(
+            desktop_var_with("OLLAMA_MODEL", |k| ready.get(k).cloned()),
+            Some("bundled".into())
+        );
+        assert_eq!(desktop_var_with("WHISPER_VAD_MODEL", |_| None), None);
     }
     #[test]
     fn screenshots_require_explicit_opt_in() {

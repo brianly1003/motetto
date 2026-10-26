@@ -17,6 +17,8 @@ hound = "3.5"
 ts-rs = "12"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

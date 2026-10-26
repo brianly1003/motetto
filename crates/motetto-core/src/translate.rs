@@ -6,7 +6,6 @@
 
 use std::error::Error;
 
-use crate::config;
 use crate::summarize;
 
 // Lines per question: small models keep every number in a list this long; longer ones drop some.
@@ -23,7 +22,7 @@ pub fn notes(
     progress: &dyn Fn(u32, u32),
 ) -> Result<String, Box<dyn Error>> {
     let name = summarize::language_name(code).ok_or("Choose a supported language")?;
-    let llm = config::var("OLLAMA_MODEL").ok_or("set OLLAMA_MODEL (see `ollama list`)")?;
+    let llm = summarize::notes_llm()?;
     translate_with(markdown, name, progress, |prompt| {
         summarize::ask_until(&llm, prompt, stop)
     })

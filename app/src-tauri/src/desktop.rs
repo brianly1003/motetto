@@ -82,15 +82,29 @@ pub fn run() {
             hold_ask,
             set_ask_on_call,
             crate::settings::open_settings,
+            crate::setup::open_setup,
             crate::settings::get_settings,
             crate::settings::save_settings,
             crate::settings::set_app_mode,
             crate::settings::call_apps,
             crate::settings::recent_mic_apps,
             crate::settings::add_app,
-            crate::settings_models::installed_models,
-            crate::settings_models::pick_speech_model,
-            crate::settings_models::run_speed_test,
+            crate::permissions::permissions,
+            crate::permissions::request_permission,
+            crate::hardware::hardware_info,
+            crate::setup::model_catalog,
+            crate::setup::setup_state,
+            crate::setup::start_setup,
+            crate::setup::pause_download,
+            crate::setup::answer_slow,
+            crate::setup::run_speed_test,
+            crate::setup::download_model,
+            crate::setup::delete_model,
+            crate::setup::delete_unused_models,
+            crate::setup::test_recording,
+            crate::setup::set_onboarding_step,
+            crate::setup::finish_onboarding,
+            crate::setup::relaunch,
             crate::settings_storage::storage_summary,
             crate::settings_storage::delete_all_meetings,
             crate::settings_storage::move_notes_folder,
@@ -115,8 +129,19 @@ pub fn run() {
             {
                 settings.keep_audio = "forever".into();
             }
+            // Never trust saved model paths: re-read each from disk at the catalog's exact size.
+            crate::setup::refresh_paths(
+                &mut settings,
+                crate::catalog::catalog(),
+                &crate::model_store::dir(app.handle()),
+            );
             settings.save(&config)?;
             motetto_core::config::configure_desktop(config.join("settings.json"));
+            crate::notes_engine::configure(&app.path().app_data_dir()?);
+            motetto_core::summarize::configure_engine(motetto_core::summarize::Engine {
+                ask: crate::notes_engine::ask,
+                context_tokens: crate::notes_engine::CONTEXT_TOKENS,
+            });
             app.manage(crate::settings::Store {
                 dir: config.clone(),
                 value: std::sync::Mutex::new(settings),
@@ -179,6 +204,7 @@ pub fn run() {
             crate::shortcuts::install(app.handle())?;
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
+            app.manage(crate::setup::Setup::default());
             app.manage(crate::tray::State::default());
             let menu = crate::tray::initial(app.handle())?;
             tauri::tray::TrayIconBuilder::with_id("motetto")
@@ -188,6 +214,11 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show(app),
+                    "setup" => {
+                        if let Err(error) = crate::setup::open_window(app) {
+                            let _ = app.emit("motetto://notice", error);
+                        }
+                    }
                     "record" => dispatch(app.clone(), Action::Start),
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
@@ -240,6 +271,14 @@ pub fn run() {
             {
                 window.hide()?;
             }
+            // SPEC 5.2: setup reopens at its step and its downloads continue in the background.
+            if !app.state::<crate::settings::Store>().get()?.onboarding_done {
+                // A window that can't open mustn't stop the app; the tray still offers setup.
+                if let Err(error) = crate::setup::open_window(app.handle()) {
+                    eprintln!("Motetto: couldn't open setup: {error}");
+                }
+                crate::setup::resume(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -275,7 +314,7 @@ pub fn run() {
                             SessionState::Recording | SessionState::Stopped { .. }
                         )
                     });
-                if window.label() == "settings"
+                if ["settings", "onboarding"].contains(&window.label())
                     || !active
                     || (window.label() == "main"
                         && crate::companion::available(window.app_handle()))
@@ -305,6 +344,7 @@ pub fn run() {
                     }
                 } else {
                     crate::speech::shutdown();
+                    crate::notes_engine::shutdown();
                 }
             }
         });
@@ -323,8 +363,13 @@ async fn act(app: tauri::AppHandle, action: Action) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-fn get_state(controller: tauri::State<'_, Controller>) -> Result<AppState, String> {
-    controller.state()
+fn get_state(
+    controller: tauri::State<'_, Controller>,
+    settings: tauri::State<'_, crate::settings::Store>,
+) -> Result<AppState, String> {
+    let mut state = controller.state()?;
+    state.onboarding_done = settings.get()?.onboarding_done;
+    Ok(state)
 }
 #[tauri::command]
 async fn start_recording(app: tauri::AppHandle, notes_only: Option<bool>) -> Result<(), String> {
@@ -440,6 +485,13 @@ impl Host for Desktop {
     }
     fn readiness(&self, request: bool) -> Result<Readiness, String> {
         let (microphone, system_audio) = permissions::audio(request)?;
+        if request && !system_audio {
+            // That start showed the Screen & System Audio prompt: from now on it reads Denied.
+            let _ = self
+                .app
+                .state::<crate::settings::Store>()
+                .change(|s| s.screen_requested = true);
+        }
         let disk = std::process::Command::new("df")
             .arg("-Pk")
             .arg(&self.root)

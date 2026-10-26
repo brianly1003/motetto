@@ -1,0 +1,91 @@
+{
+  "files": [
+    {
+      "id": "speech-large-v3",
+      "kind": "Speech",
+      "label": "large-v3",
+      "file": "ggml-large-v3-q5_0.bin",
+      "bytes": 1081140203,
+      "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-q5_0.bin"
+    },
+    {
+      "id": "speech-large-v3-turbo",
+      "kind": "Speech",
+      "label": "large-v3-turbo",
+      "file": "ggml-large-v3-turbo-q5_0.bin",
+      "bytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin"
+    },
+    {
+      "id": "speech-small",
+      "kind": "Speech",
+      "label": "small",
+      "file": "ggml-small.bin",
+      "bytes": 487601967,
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin"
+    },
+    {
+      "id": "vad-silero",
+      "kind": "Vad",
+      "label": "Voice detection",
+      "file": "ggml-silero-v5.1.2.bin",
+      "bytes": 885098,
+      "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+      "url": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
+    },
+    {
+      "id": "notes-qwen3-8b",
+      "kind": "Notes",
+      "label": "Qwen3 8B",
+      "file": "Qwen3-8B-Q4_K_M.gguf",
+      "bytes": 5027783488,
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
+    },
+    {
+      "id": "notes-qwen3.5-4b",
+      "kind": "Notes",
+      "label": "Qwen3.5 4B",
+      "file": "Qwen3.5-4B-Q4_K_M.gguf",
+      "bytes": 2740937888,
+      "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+      "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf"
+    },
+    {
+      "id": "notes-qwen3.5-2b",
+      "kind": "Notes",
+      "label": "Qwen3.5 2B",
+      "file": "Qwen3.5-2B-Q4_K_M.gguf",
+      "bytes": 1280835840,
+      "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+      "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf"
+    }
+  ],
+  "tiers": [
+    {
+      "id": "Best",
+      "speech": "speech-large-v3",
+      "notes": "notes-qwen3-8b",
+      "suits_mac": "16 GB memory or more",
+      "suits_pc": "GPU with 8 GB+ VRAM"
+    },
+    {
+      "id": "Balanced",
+      "speech": "speech-large-v3-turbo",
+      "notes": "notes-qwen3.5-4b",
+      "suits_mac": "8 GB memory",
+      "suits_pc": "GPU with 4-8 GB VRAM, or no GPU and 16 GB+ RAM"
+    },
+    {
+      "id": "Light",
+      "speech": "speech-small",
+      "notes": "notes-qwen3.5-2b",
+      "suits_mac": "Only if the speed test fails",
+      "suits_pc": "No usable GPU and under 16 GB RAM"
+    }
+  ],
+  "vad": "vad-silero"
+}

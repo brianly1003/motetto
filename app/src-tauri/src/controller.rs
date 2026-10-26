@@ -28,6 +28,8 @@ pub enum Action {
     RequestQuit,
     Quit(bool),
     Dismiss(u64),
+    /// Setup verified the notes model: a pending "notes model missing" problem is resolved.
+    NotesModelReady,
     AnswerAsk {
         call_id: String,
         record: bool,
@@ -371,6 +373,24 @@ impl<H: Host> Engine<H> {
             }
             Action::Quit(stop_and_save) => Command::Quit { stop_and_save },
             Action::Dismiss(id) => Command::DismissProblem { id },
+            Action::NotesModelReady => {
+                let missing: Vec<u64> = self
+                    .session
+                    .problems()
+                    .iter()
+                    .filter(|p| {
+                        p.problem
+                            == Problem::ModelMissing {
+                                kind: ModelKind::Notes,
+                            }
+                    })
+                    .map(|p| p.id)
+                    .collect();
+                for id in missing {
+                    self.apply(Command::ProblemResolved { id }, now);
+                }
+                return Ok(());
+            }
         };
         let manual_stop = matches!(command, Command::StopRecordingInMain)
             && matches!(
@@ -552,7 +572,9 @@ impl<H: Host> Engine<H> {
                     self.host.exit();
                     Ok(())
                 }
-                Effect::PauseDownload => Ok(()), // No downloader runs in this M4 shell.
+                // Nothing to pause here: setup's download keeps its `.part` on quit and the next
+                // launch resumes it (setup::resume).
+                Effect::PauseDownload => Ok(()),
                 // A settings write that fails must not stop a recording; say so and go on.
                 Effect::SetAppMode { app_id, mode } => {
                     if let Err(e) = self.host.set_app_mode(&app_id, mode) {
@@ -629,6 +651,9 @@ fn cant_record(problem: &Problem) -> String {
             };
             format!("{permission} is off. Turn it on in {settings}.")
         }
+        Problem::ModelMissing {
+            kind: ModelKind::Notes,
+        } => "The notes model is missing.".into(),
         Problem::ModelMissing { .. } => "The speech model is missing.".into(),
         Problem::DiskFull | Problem::DiskLow { .. } => "The disk is full.".into(),
         _ => "Check the problem shown in Motetto.".into(),

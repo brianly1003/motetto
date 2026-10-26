@@ -174,6 +174,24 @@ pub fn start(
 }
 type Row = (u64, u64, &'static str, String);
 
+static SLICING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// True while a live slice is being transcribed; the notes engine waits on it under 16 GB.
+pub fn slicing() -> bool {
+    SLICING.load(std::sync::atomic::Ordering::SeqCst)
+}
+struct Slicing;
+impl Slicing {
+    fn begin() -> Self {
+        SLICING.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for Slicing {
+    fn drop(&mut self) {
+        SLICING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Transcribes `cursor..end` of both tracks, skipping a track that is digital silence.
 fn transcribe_slice(
     server: &mut crate::speech::Server,
@@ -196,6 +214,7 @@ fn transcribe_slice(
         // skipping by RMS level saved no request on a real call. Needs a VAD to do better.
         if samples.iter().any(|sample| sample.abs() > 0.005) {
             let prompt = motetto_core::config::terms();
+            let _slicing = Slicing::begin();
             for segment in server.transcribe(&samples, offset + cursor, prompt.as_deref(), stop)? {
                 segments.push((segment.start_ms, segment.end_ms, side, segment.text));
             }

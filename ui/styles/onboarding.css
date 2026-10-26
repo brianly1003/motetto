@@ -1,0 +1,52 @@
+/* First run (mockup .onb, .onbnav, .onbpane, .perm, .tiers, .tier, .dl, .dlrow, .consent, .promise, .testbox).
+   The window's own title bar replaces the mockup's; the values below are the mockup's with the app's tokens. */
+.onb { height: 100dvh; display: flex; flex-direction: column; background: var(--surface-1); }
+.onbin { display: grid; grid-template-columns: 200px 1fr; min-height: 0; flex: 1; }
+.onbnav { background: var(--surface-2); border-right: 1px solid var(--line); padding: 20px 12px; display: grid; align-content: start; gap: 4px; }
+.onbnav button { text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; color: var(--ink-2); font-size: 13px; }
+.onbnav button[aria-current="step"] { background: var(--surface-1); color: var(--ink-1); box-shadow: 0 0 0 1px var(--line); }
+.onbnav button[disabled] { opacity: .5; cursor: default; }
+.onbnav .n { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-2); display: grid; place-items: center; font: 11px var(--font-data); font-feature-settings: "tnum"; }
+.onbnav .done .n { background: var(--ok); border-color: var(--ok); color: #fff; }
+.onbpane { padding: 24px 32px; display: flex; flex-direction: column; gap: 13px; min-width: 0; overflow: auto; }
+.onbpane h3 { margin: 0; font: 400 30px/1.1 var(--font-doc); text-wrap: balance; }
+.onbpane p { margin: 0; color: var(--ink-2); max-width: 56ch; }
+.onbpane .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 6px; }
+.onb .eyebrow { font: 600 12px/1 var(--font-ui); color: var(--ink-3); }
+.onb .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.onb .btn { white-space: nowrap; }
+/* The mockup's .btn.primary outranks .btn:hover; app.css's bare .primary does not. */
+.onb .btn.primary:hover { background: var(--ink-1); }
+.onb .btn svg { width: 14px; height: 14px; }
+.onb .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 99px; font: 500 11px/1.6 var(--font-data); white-space: nowrap; font-feature-settings: "tnum"; }
+.onb .chip.ok { background: var(--ok-soft); color: var(--ok); }
+.onb .chip.amber { background: var(--accent-soft); color: var(--accent-ink); }
+.perm { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.perm.denied { border-color: var(--accent); }
+.perm .pi { width: 34px; height: 34px; border-radius: 9px; background: var(--surface-3); display: grid; place-items: center; }
+.perm .pi svg { width: 17px; height: 17px; stroke-width: 1.4; }
+.perm b { font-weight: 600; font-size: 13.5px; }
+.perm small { display: block; color: var(--ink-2); font-size: 12.5px; }
+.tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tier { border: 1px solid var(--line); border-radius: 10px; padding: 11px; display: grid; gap: 4px; text-align: left; background: var(--surface-1); }
+.tier[aria-checked="true"] { border-color: var(--ink-1); box-shadow: 0 0 0 1px var(--ink-1) inset; }
+.tier b { font-weight: 600; }
+.tier small { color: var(--ink-2); font-size: 12px; }
+.dl { display: grid; gap: 9px; }
+.dlrow { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 12.5px; }
+.dlrow .progress { grid-column: 1 / -1; width: auto; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.dlrow .progress:after { content: none; }
+.dlrow .progress i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+.dlrow .why { grid-column: 1 / -1; color: var(--ink-3); font-size: 12px; }
+.dlrow .why.err { color: var(--accent-ink); }
+@media (prefers-reduced-motion: reduce) { .dlrow .progress i { transition: none; } }
+.consent { display: flex; gap: 10px; align-items: start; padding: 12px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); font-size: 13px; }
+.consent input { margin-top: 3px; accent-color: var(--accent); }
+.promise { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.promise div { border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 12.5px; color: var(--ink-2); }
+.promise b { display: block; color: var(--ink-1); font-size: 13.5px; margin-bottom: 2px; }
+.testbox { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; }
+.testbox q { font: 400 20px/1.3 var(--font-doc); color: var(--ink-1); quotes: "“" "”"; }
+/* The speed question (SPEC 5.2 speed_slow) and errors: the mockup's .note with its own controls. */
+.onb .note:is(.ask, .warn) { display: grid; gap: 8px; }
+.onb .note.warn { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
