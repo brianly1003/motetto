@@ -35,7 +35,7 @@ async (page) => {
 
    for(const tab of ['Notes','Transcript']){
     await p.getByRole('tab',{name:tab,exact:true}).click();
-    const scope=tab==='Notes'?'.docbody > .notes':'.tlist';
+    const scope=tab==='Notes'?'.docbody .notes':'.tlist';
     const content=()=>p.locator(scope).evaluate(e=>{const copy=e.cloneNode(true);copy.querySelectorAll('[style=""]').forEach(e=>e.removeAttribute('style'));return copy.innerHTML;});
     const before=await content();
     const topBefore=await p.locator('.docbody').evaluate(e=>e.getBoundingClientRect().top);

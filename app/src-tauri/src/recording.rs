@@ -277,6 +277,7 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 locked: false,
                 title_source: Default::default(),
                 language: None,
+                notes_language: None,
             },
         )?;
     }
@@ -328,11 +329,13 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage)) -> Result<Stri
             &text,
             &mine,
             heard.language.as_deref(),
+            None,
             &stage,
         )?;
         let mut metadata = library::summary(root, &record.id)?;
         metadata.titled(title);
         metadata.language = heard.language;
+        metadata.notes_language = config::notes_language();
         metadata.notes_ms = Some(started.elapsed().as_millis() as u64);
         metadata.spellings = spellings;
         library::save(root, &metadata)?;

@@ -50,6 +50,21 @@ export const strings = {
   recoverBodyMany: "{n} recordings were interrupted. Their saved audio is still on this computer.",
   recover: "Recover", discard: "Discard", recovered: "Recovered. The recording is being transcribed.",
   recoveryDiscarded: "Discarded the unfinished recording. It's in Recently deleted.",
+  // Read in (Notes tab, owner 2026-10-26): the notes translated on this computer.
+  readIn: "Read in", readInOriginal: "Original", readInAsWritten: "As written", readInCall: "Call in {langs}", readInSearch: "Search languages", readInSaved: "Translated", readInSuggested: "Suggested", readInAll: "All languages", readInNone: "No language matches", readInFresh: "Saved", readInStale: "Out of date", readInRunning: "Translating…",
+  readInFoot: "Translated on this computer by your notes model. Times, tasks and names stay as they are.",
+  translatingTo: "Translating into {lang}", translatingPart: "part {n} of {m}", translatingStart: "starting", translatingKeep: "Keep reading. It opens when it's ready.", stopTranslating: "Stop",
+  translatedFrom: "Translated on this computer.", showOriginal: "Show original", showLanguage: "Show {lang}", translateAgain: "Translate again", showingOriginal: "Showing the original notes.",
+  staleTitle: "The notes changed after this translation", staleBody: "Some lines may not match the notes any more. Ticking tasks here waits until it's updated.", updateTranslation: "Update translation",
+  translateFailed: "Couldn't translate the notes", tryAgain: "Try again", stoppedTranslation: "Stopped. The notes are unchanged.",
+  suggestTitle: "Read these notes in {lang}?", suggestBody: "Your notes model translates them on this computer, usually in under a minute.", translate: "Translate", notNow: "Not now",
+  translatedHint: "Translation, read-only. Tick tasks here; edit the words in the original.", translatedStaleHint: "Out-of-date translation, read-only.", notesTranslatedLabel: "Meeting notes, translated.",
+  // Write the notes again in a language (owner 2026-10-26): made from the transcript, so it reads
+  // better than a translation of the notes.
+  writeIn: "Write in", writeInCall: "Same as the call", writeInCallLangs: "Same as the call ({langs})", writeInGo: "Write in {lang}",
+  writeInHelp: "Written from the transcript, not translated.",
+  writeInOffer: "Write in {lang}", writeInOfferTip: "Write the notes again in {lang} from the transcript. It reads better than a translation.",
+  writtenIn: "Written in {lang}",
   sourceNote: "Generated notes can miss details. Check important decisions against the transcript.",
   noNotes: "This meeting has no notes yet. The source recording and any completed transcript remain on this computer.",
 };

@@ -30,6 +30,11 @@ pub fn run() {
             crate::note_items::set_action_item_done,
             crate::note_items::save_notes,
             crate::transcript_edits::save_transcript_line,
+            crate::translations::notes_translations,
+            crate::translations::get_translation,
+            crate::translations::translate_notes,
+            crate::translations::translating,
+            crate::translations::stop_translation,
             crate::meeting_actions::meeting_action,
             crate::meeting_actions::deleted_meetings,
             crate::meeting_actions::rename_meeting,
@@ -135,6 +140,7 @@ pub fn run() {
             }
             app.manage(crate::my_notes::Store::new(root.clone()));
             app.manage(crate::live::State::default());
+            app.manage(crate::translations::Running::default());
             app.manage(crate::microphone::Clipping::default());
             let busy = Arc::new(AtomicBool::new(false));
             let allow_exit = Arc::new(AtomicBool::new(false));
@@ -362,8 +368,9 @@ async fn undo_discard(app: tauri::AppHandle, id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     }
     let result = async {
-        crate::meeting_actions::meeting_action(app.clone(), id.clone(), "restore".into()).await?;
-        crate::meeting_actions::meeting_action(app.clone(), id, "regenerate".into()).await
+        crate::meeting_actions::meeting_action(app.clone(), id.clone(), "restore".into(), None)
+            .await?;
+        crate::meeting_actions::meeting_action(app.clone(), id, "regenerate".into(), None).await
     }
     .await;
     // The Pill has gone by now, so the library says what went wrong.

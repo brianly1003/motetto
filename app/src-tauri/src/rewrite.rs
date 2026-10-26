@@ -103,8 +103,14 @@ pub(crate) fn retranscribe(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Resu
     library::save(root, &summary)
 }
 
-/// `stage` reports the step being done, for the meeting's Writing the notes again page.
-pub(crate) fn regenerate(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result<(), String> {
+/// `write_in` is the language picked in its question (a code or "same_as_call"); None follows
+/// Settings. `stage` reports the step being done, for the meeting's Writing the notes again page.
+pub(crate) fn regenerate(
+    root: &Path,
+    id: &str,
+    write_in: Option<&str>,
+    stage: &dyn Fn(Stage),
+) -> Result<(), String> {
     let folder = library::folder(root, id)?;
     if crate::bookmarks::locked(root, id)? {
         return Err(crate::bookmarks::LOCKED.into());
@@ -150,6 +156,7 @@ pub(crate) fn regenerate(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result
             &transcript,
             &notes,
             language.as_deref(),
+            write_in,
             stage,
         )
         .map_err(|e| e.to_string())?;
@@ -176,6 +183,15 @@ pub(crate) fn regenerate(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result
         summary.spellings = spellings;
         summary.titled(title);
         summary.language = language;
+        summary.notes_language = match write_in {
+            Some("same_as_call") => None,
+            Some(code) => Some(code.to_string()),
+            None => motetto_core::config::notes_language(),
+        };
+        // A translation into the language the notes are now written in would repeat them.
+        if let Some(code) = &summary.notes_language {
+            let _ = fs::remove_file(folder.join(format!("notes.{code}.md")));
+        }
         // Notes written: a recording that needed them (Discard, then Undo) is ready now.
         summary.status = "Ready".into();
         library::save(root, &summary)
@@ -199,7 +215,7 @@ mod tests {
         .unwrap();
         fs::write(root.join("123/notes.md"), "Keep edited notes").unwrap();
         assert!(
-            regenerate(&root, "123", &|_| {})
+            regenerate(&root, "123", None, &|_| {})
                 .unwrap_err()
                 .contains("no transcript")
         );

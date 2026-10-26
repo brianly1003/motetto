@@ -37,6 +37,10 @@ pub struct MeetingSummary {
     /// ISO code of the language whisper heard (SPEC 6.4); None before it was recorded.
     #[serde(default)]
     pub language: Option<String>,
+    /// ISO code the notes were written in when one was chosen (Settings or Write the notes
+    /// again); None for the call's own language or meetings saved before it was kept.
+    #[serde(default)]
+    pub notes_language: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -293,6 +297,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         locked: false,
         title_source: Default::default(),
         language: None,
+        notes_language: None,
     }
 }
 
@@ -413,6 +418,7 @@ pub fn import(
         locked: false,
         title_source: Default::default(),
         language: None,
+        notes_language: None,
     };
     let dir = root.join(&summary.id);
     fs::create_dir(&dir).map_err(|e| e.to_string())?;
@@ -447,9 +453,11 @@ pub fn import(
             &notes_input,
             "",
             summary.language.as_deref(),
+            None,
             &|_| {},
         )?;
         summary.titled(title);
+        summary.notes_language = motetto_core::config::notes_language();
         summary.notes_ms = Some(started.elapsed().as_millis() as u64);
         summary.spellings = spellings;
         Ok(())
@@ -632,6 +640,7 @@ mod tests {
                     locked: false,
                     title_source: Default::default(),
                     language: None,
+                    notes_language: None,
                 },
             )
             .unwrap();
@@ -676,6 +685,7 @@ mod tests {
                 locked: false,
                 title_source: Default::default(),
                 language: None,
+                notes_language: None,
             };
             save(&root, &summary).unwrap();
         }

@@ -14,4 +14,9 @@ title_source: TitleSource,
 /**
  * ISO code of the language whisper heard (SPEC 6.4); None before it was recorded.
  */
-language: string | null, };
+language: string | null, 
+/**
+ * ISO code the notes were written in when one was chosen (Settings or Write the notes
+ * again); None for the call's own language or meetings saved before it was kept.
+ */
+notes_language: string | null, };

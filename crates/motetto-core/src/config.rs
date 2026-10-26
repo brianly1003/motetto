@@ -24,7 +24,7 @@ pub fn call_language() -> Option<String> {
 pub fn notes_language() -> Option<String> {
     desktop_value("notes_language").and_then(|v| {
         v.as_str()
-            .filter(|s| ["en", "vi", "zh", "ja"].contains(s))
+            .filter(|s| crate::summarize::language_name(s).is_some())
             .map(str::to_owned)
     })
 }

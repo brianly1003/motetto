@@ -100,5 +100,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // The title is printed ("Title: ..."); the CLI's notes file keeps its layout.
-    summarize::notes(&base, &transcript, "", heard.language.as_deref(), &|_| {}).map(drop)
+    summarize::notes(
+        &base,
+        &transcript,
+        "",
+        heard.language.as_deref(),
+        None,
+        &|_| {},
+    )
+    .map(drop)
 }

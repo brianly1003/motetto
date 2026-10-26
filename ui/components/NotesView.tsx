@@ -52,7 +52,11 @@ function atEdge(el: HTMLElement, last: boolean) {
 const editableOf = (block: HTMLElement) => block.querySelector<HTMLElement>(':scope .task-text, :scope .jot-text') ?? block;
 const kindOf = (block: HTMLElement): Kind => (block.dataset.kind as Kind) ?? (block.tagName === 'LI' ? 'li' : 'p');
 
-export default function NotesView({id, markdown, locked=false, onChange, onError, durationMs, onSeek}: {id:string; markdown:string; locked?:boolean; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void}) {
+/** `translated`: a Read in translation, read-only. Its lines are the notes' lines, so a heading
+ *  keeps its original's look (`labelOf`) and a tick goes to notes.md (`onToggle`, none when stale). */
+export type Translated = {hint:string; labelOf:(line:number)=>string|undefined; onToggle?:(line:number, done:boolean)=>Promise<void>};
+
+export default function NotesView({id, markdown, locked=false, translated, onChange, onError, durationMs, onSeek}: {id:string; markdown:string; locked?:boolean; translated?:Translated; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void}) {
   const [saving, setSaving] = useState(false);
   // The @ picker (SPEC 7.11): the one way to assign. `at` is the "@" being typed: its text node,
   // offset and the query after it; the menu lists You, then owners already in these notes.
@@ -229,12 +233,13 @@ export default function NotesView({id, markdown, locked=false, onChange, onError
 
   async function toggle(line:number, done:boolean) {
     setSaving(true);
+    if (translated) { try { await translated.onToggle?.(line, done); } finally { setSaving(false); } return; }
     try { const next = await ipc.setActionItemDone(id,line,done,latest.current); latest.current = base.current = next; onChange(next); }
     catch(error) { onError(String(error)); }
     finally { setSaving(false); }
   }
   const all = markdown.split('\n');
-  const editable = (a:number, b:number) => locked || all.slice(a, b).some(line => UNSAFE.test(line)) ? '0' : '1';
+  const editable = (a:number, b:number) => locked || translated || all.slice(a, b).some(line => UNSAFE.test(line)) ? '0' : '1';
   // A section's non-task text, rendered with its real line numbers so each block knows its range.
   const body = (lines:{text:string; line:number}[], skip:(text:string)=>boolean) => {
     if (!lines.length) return '';
@@ -254,22 +259,23 @@ export default function NotesView({id, markdown, locked=false, onChange, onError
   const inline = (text:string) => renderNotes(text, onSeek ? durationMs : 0);
   // "Show all" sits once, on the first section with tasks (Action items), as in the mockup.
   const sections = noteSections(markdown), firstTasks = sections.findIndex(section => section.lines.some(line => taskLine(line.text)));
-  return <div ref={box} className="notes" tabIndex={0} role="document" aria-label={locked ? s.notesLockedLabel : s.notesLabel} onClick={event=>{const chip=(event.target as HTMLElement).closest<HTMLButtonElement>('button.src');if(chip){event.preventDefault();onSeek?.(Number(chip.dataset.ms));}}}>{sections.map((section,index)=>{
+  return <div ref={box} className="notes" tabIndex={0} role="document" aria-label={translated ? s.notesTranslatedLabel : locked ? s.notesLockedLabel : s.notesLabel} onClick={event=>{const chip=(event.target as HTMLElement).closest<HTMLButtonElement>('button.src');if(chip){event.preventDefault();onSeek?.(Number(chip.dataset.ms));}}}>{sections.map((section,index)=>{
     const tasks = section.lines.filter(line=>{const t=taskLine(line.text);return t&&(!ownerFilter||(t.owner==='Me'?'You':t.owner)===ownerFilter);});
-    const Heading = LABELS.test(section.title) ? 'h3' : 'h4';
+    const kind = translated?.labelOf(section.line) ?? section.title;
+    const Heading = LABELS.test(kind) ? 'h3' : 'h4';
     const filtered = ownerFilter && index === firstTasks;
     const head = section.title && (filtered ? <Heading>{section.title} <button type="button" className="doc-action ghost show-all" onClick={()=>setOwnerFilter(null)}>{s.showAll}</button></Heading> : Heading === 'h4' && section.line >= 0
       ? <h4 data-lines={`${section.line},${section.line+1}`} data-kind="heading" data-editable={editable(section.line, section.line+1)} dangerouslySetInnerHTML={{__html:renderInline(section.title)}}/>
       : <Heading>{section.title}</Heading>);
     // The user's own lines, as the mockup's jots: ✎, the line, then its time.
-    if (MY_NOTES.test(section.title)) return <section key={index}>{head}<ul>{section.lines.filter(line=>line.text.trim()).map(line=>{
+    if (MY_NOTES.test(kind)) return <section key={index}>{head}<ul>{section.lines.filter(line=>line.text.trim()).map(line=>{
       const [, time, text] = /^\s*(?:\[(\d+:\d{2})\]\s*)?(.*)$/.exec(line.text)!;
       return <li key={line.line} data-lines={`${line.line},${line.line+1}`} data-kind="jot" data-editable={editable(line.line, line.line+1)}><span className="jotmark" aria-label="Your note">✎</span><span className="jot-text" dangerouslySetInnerHTML={{__html:renderInline(text, onSeek ? durationMs : 0)}}/>{time&&<> <span className="tip">{time}</span></>}</li>;
     })}</ul></section>;
     return <section key={index}>{head}
       {tasks.length ? <><ul className="todo">{tasks.map(line=>{
         const task = taskLine(line.text)!;
-        return <li key={line.line} className={task.done?'done':''} data-lines={`${line.line},${line.line+1}`} data-kind="task" data-editable={editable(line.line, line.line+1)}><input id={`task-${line.line}`} type="checkbox" checked={task.done} disabled={saving} aria-labelledby={`task-label-${line.line}`} onChange={event=>void toggle(line.line,event.target.checked)}/><span className="tt" id={`task-label-${line.line}`}>{task.owner&&(renaming?.line===line.line
+        return <li key={line.line} className={task.done?'done':''} data-lines={`${line.line},${line.line+1}`} data-kind="task" data-editable={editable(line.line, line.line+1)}><input id={`task-${line.line}`} type="checkbox" checked={task.done} disabled={saving || (!!translated && !translated.onToggle)} aria-labelledby={`task-label-${line.line}`} onChange={event=>void toggle(line.line,event.target.checked)}/><span className="tt" id={`task-label-${line.line}`}>{task.owner&&(renaming?.line===line.line
           ? <input className={`owner ownerin ${task.owner==='You'||task.owner==='Me'?'me':''}`} aria-label={s.ownerName} defaultValue={renaming.name} size={Math.max(3, renaming.name.length)} maxLength={40} autoFocus onFocus={event=>event.currentTarget.select()}
               onInput={event=>{event.currentTarget.size=Math.max(3,event.currentTarget.value.length);}}
               onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void fixName(renaming.name,line.line,event.currentTarget.value);}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setRenaming(null);}}}
@@ -277,10 +283,10 @@ export default function NotesView({id, markdown, locked=false, onChange, onError
           : <button type="button" className={`owner ${task.owner==='You'||task.owner==='Me'?'me':''}`} aria-haspopup="menu" aria-pressed={ownerFilter===(task.owner==='Me'?'You':task.owner)} onClick={event=>{const r=event.currentTarget.getBoundingClientRect();const name=task.owner==='Me'?'You':task.owner;setOwnerMenu(ownerMenu?.line===line.line?null:{name,line:line.line,x:r.left,y:r.bottom+4});}}>{task.owner==='Me'?'You':task.owner}</button>)}<span className="task-text" dangerouslySetInnerHTML={{__html:inline(task.text)}}/></span></li>;
       })}</ul><div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!taskLine(text))}}/></> : <div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!ownerFilter&&!!taskLine(text))}}/>}
     </section>;
-  })}<p className="tip notes-hint">{locked ? s.lockedHint : s.editHint}</p>
+  })}<p className="tip notes-hint">{translated ? translated.hint : locked ? s.lockedHint : s.editHint}</p>
     {mention && <PeoplePicker options={people(mention.query)} known={known()} index={mention.index} x={mention.x} y={mention.y} onPick={pick}/>}
     {ownerMenu && <div className="mention gmenu" role="menu" aria-label={ownerMenu.name} style={{left: ownerMenu.x, top: ownerMenu.y}}>
       <button type="button" role="menuitem" onClick={() => { setOwnerFilter(ownerFilter === ownerMenu.name ? null : ownerMenu.name); setOwnerMenu(null); }}>{ownerFilter === ownerMenu.name ? s.showEveryone : s.showOnly.replace('{name}', ownerMenu.name)}</button>
-      {!locked && ownerMenu.name !== 'You' && <button type="button" role="menuitem" onClick={() => { setRenaming({name: ownerMenu.name, line: ownerMenu.line}); setOwnerMenu(null); }}>{s.fixName}</button>}
+      {!locked && !translated && ownerMenu.name !== 'You' && <button type="button" role="menuitem" onClick={() => { setRenaming({name: ownerMenu.name, line: ownerMenu.line}); setOwnerMenu(null); }}>{s.fixName}</button>}
     </div>}</div>;
 }

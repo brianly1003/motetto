@@ -108,7 +108,8 @@ export const sharingMode = (active: boolean) => invoke<void>("sharing_mode", { a
 export const openActionItems = () => invoke<[MeetingSummary, string][]>("open_action_items");
 export const searchMeetings = (query: string) => invoke<SearchHit[]>("search_meetings", { query });
 
-export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "delete" | "restore" | "purge") => invoke<void>("meeting_action", { id, action });
+/** `language`: Write the notes again in this code (or "same_as_call") instead of the Settings one. */
+export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "delete" | "restore" | "purge", language?: string) => invoke<void>("meeting_action", { id, action, language: language ?? null });
 export const deletedMeetings = () => invoke<MeetingSummary[]>("deleted_meetings");
 export const renameMeeting = (id: string, title: string) => invoke<MeetingSummary>("rename_meeting", { id, title });
 export const setLocked = (id: string, locked: boolean) => invoke<MeetingSummary>("set_locked", { id, locked });
@@ -145,4 +146,17 @@ export const about=()=>invoke<{version:string;licences:string;platform:string}>(
 export const openLogsFolder=()=>invoke<void>('open_logs_folder');
 export async function onSettingsTab(callback:(tab:string)=>void){
   const {listen}=await import('@tauri-apps/api/event');return listen<string>('motetto://settings-tab',event=>callback(event.payload));
+}
+
+// Read in (Notes tab): the notes translated on this computer, one saved file per language.
+export type Translation = { code: string; markdown: string; stale: boolean };
+export type TranslateProgress = { id: string; code: string; part: number; of: number; done: boolean; error: string | null };
+export const notesTranslations = (id: string) => invoke<Translation[]>('notes_translations', { id });
+export const getTranslation = (id: string, code: string) => invoke<Translation | null>('get_translation', { id, code });
+export const translateNotes = (id: string, code: string) => invoke<Translation>('translate_notes', { id, code });
+export const translating = () => invoke<TranslateProgress | null>('translating');
+export const stopTranslation = (id: string) => invoke<void>('stop_translation', { id });
+export async function onTranslate(callback: (progress: TranslateProgress) => void) {
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen<TranslateProgress>('motetto://translate', event => callback(event.payload));
 }

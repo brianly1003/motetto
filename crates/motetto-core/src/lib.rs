@@ -18,6 +18,7 @@ pub mod session;
 pub mod slice;
 pub mod summarize;
 pub mod transcribe;
+pub mod translate;
 pub mod whisper;
 
 pub mod tools;

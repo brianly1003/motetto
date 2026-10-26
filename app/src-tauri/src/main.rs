@@ -24,6 +24,7 @@ mod settings_system;
 mod shortcuts;
 mod speech;
 mod transcript_edits;
+mod translations;
 mod tray;
 mod window_native;
 

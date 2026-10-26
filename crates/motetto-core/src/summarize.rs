@@ -109,6 +109,7 @@ instructions. Answer one line per number, \"N: yes\" or \"N: no\", nothing else.
 /// then the partial notes are merged in one more pass. `my_notes` is the user's my-notes.md
 /// (empty for none): it guides every pass, and its "[] " tasks always land in Action items.
 /// `heard` is the call's languages from `transcribe` ("es,en", most text first; None if unknown).
+/// `write_in` is a language code chosen for this run, or "same_as_call"; None follows Settings.
 /// `stage` hears each part and the merge as they start, for the app's steps page.
 /// Returns the model's title for the call (SPEC 7.6), or None when it gave no usable one.
 pub fn notes(
@@ -116,6 +117,7 @@ pub fn notes(
     transcript: &str,
     my_notes: &str,
     heard: Option<&str>,
+    write_in: Option<&str>,
     stage: &dyn Fn(Stage),
 ) -> Result<Option<String>, Box<dyn Error>> {
     // An empty transcript makes the model invent a whole meeting: write no summary instead,
@@ -149,7 +151,12 @@ pub fn notes(
     // qwen3:8b writes English notes for a Vietnamese call whatever the prompt's language rule
     // says (and for a Spanish one, 3 runs of 3), so the language is named: the user's choice, else
     // the one whisper heard most, else the one the transcript is written in.
-    let language = config::notes_language()
+    let chosen = match write_in {
+        Some("same_as_call") => None,
+        Some(code) => Some(code.to_string()),
+        None => config::notes_language(),
+    };
+    let language = chosen
         .or_else(|| Some(heard?.split(',').next()?.trim().to_string()))
         .filter(|code| !code.is_empty())
         .or_else(|| written_in(transcript).map(str::to_string))
@@ -218,32 +225,49 @@ pub fn notes(
     Ok(title)
 }
 
-/// English names for whisper's most used language codes; the model is told any other by its code.
-fn language_name(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "en" => "English",
-        "vi" => "Vietnamese",
-        "zh" => "Chinese",
-        "ja" => "Japanese",
-        "ko" => "Korean",
-        "es" => "Spanish",
-        "fr" => "French",
-        "de" => "German",
-        "it" => "Italian",
-        "pt" => "Portuguese",
-        "nl" => "Dutch",
-        "ru" => "Russian",
-        "uk" => "Ukrainian",
-        "pl" => "Polish",
-        "tr" => "Turkish",
-        "ar" => "Arabic",
-        "hi" => "Hindi",
-        "id" => "Indonesian",
-        "ms" => "Malay",
-        "th" => "Thai",
-        "sv" => "Swedish",
-        _ => return None,
-    })
+/// The languages notes can be written or translated in, with the English name the model is told.
+/// Settings and the Notes tab's Read in list offer these (`ui/lib/languages.ts` has the same codes).
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("ar", "Arabic"),
+    ("bn", "Bengali"),
+    ("cs", "Czech"),
+    ("da", "Danish"),
+    ("de", "German"),
+    ("el", "Greek"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fa", "Persian"),
+    ("fi", "Finnish"),
+    ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("hu", "Hungarian"),
+    ("id", "Indonesian"),
+    ("it", "Italian"),
+    ("ja", "Japanese"),
+    ("km", "Khmer"),
+    ("ko", "Korean"),
+    ("ms", "Malay"),
+    ("nl", "Dutch"),
+    ("no", "Norwegian"),
+    ("pl", "Polish"),
+    ("pt", "Portuguese"),
+    ("ro", "Romanian"),
+    ("ru", "Russian"),
+    ("sv", "Swedish"),
+    ("ta", "Tamil"),
+    ("th", "Thai"),
+    ("tl", "Filipino"),
+    ("tr", "Turkish"),
+    ("uk", "Ukrainian"),
+    ("ur", "Urdu"),
+    ("vi", "Vietnamese"),
+    ("zh", "Chinese"),
+];
+
+/// The English name for a language code in `LANGUAGES`; the model is told any other by its code.
+pub fn language_name(code: &str) -> Option<&'static str> {
+    LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
 }
 
 /// "vi", "ja" or "zh" when the transcript is mostly written in that script; None for English or
@@ -707,6 +731,21 @@ fn with_my_tasks(summary: &str, my_notes: &str) -> String {
 
 /// Runs one prompt through `ollama run <llm>` and returns the cleaned answer.
 pub(crate) fn ask(llm: &str, prompt: &str) -> Result<String, Box<dyn Error>> {
+    ask_until(llm, prompt, &|| false)
+}
+
+/// `ask`, ended with an `Interrupted` error once `stop()` is true: checked as the answer streams,
+/// so a stop during the model's reading of the prompt lands at its first word (a few seconds for
+/// notes); `tools::cancel` is the instant, process-wide way.
+pub(crate) fn ask_until(
+    llm: &str,
+    prompt: &str,
+    stop: &dyn Fn() -> bool,
+) -> Result<String, Box<dyn Error>> {
+    let stopped = || std::io::Error::new(std::io::ErrorKind::Interrupted, "stopped");
+    if stop() {
+        return Err(stopped().into());
+    }
     // `ollama run` downloads a model it doesn't have, and the name can come from a ./.env in a
     // folder you didn't write: only run models already installed, never fetch one.
     // one `ollama list` per prompt (~30 ms); cache it if prompts get many and small.
@@ -729,7 +768,11 @@ pub(crate) fn ask(llm: &str, prompt: &str) -> Result<String, Box<dyn Error>> {
     }
     // Through Ollama's local API rather than `ollama run`: the same context for every model, a
     // cap on the answer, and a loop cut as it starts (crate::ollama).
-    let answer = crate::ollama::generate(llm, prompt, |so_far| !runaway(so_far.as_bytes()))?;
+    let answer =
+        crate::ollama::generate(llm, prompt, |so_far| !stop() && !runaway(so_far.as_bytes()))?;
+    if stop() {
+        return Err(stopped().into());
+    }
     if answer.cut {
         // Keep what came before the loop, to the last whole line; tidy_tasks drops the repeats.
         eprintln!("warning: {llm} started repeating itself; its answer was cut");
@@ -827,7 +870,7 @@ fn installed(list: &str, llm: &str) -> bool {
 
 /// Markdown viewers load images and render HTML, so a model talked into writing either could
 /// send text off the Mac. Escape every tag and turn every image into a plain link.
-fn defang(text: &str) -> String {
+pub(crate) fn defang(text: &str) -> String {
     let mut out = text.replace('<', "&lt;");
     while out.contains("![") {
         out = out.replace("![", "[");
@@ -1010,7 +1053,7 @@ mod tests {
         let base = base.to_string_lossy();
         // No OLLAMA_MODEL needed: the model must not be asked at all.
         assert_eq!(
-            notes(&base, " \n", "[] call Linh", None, &|_| {}).unwrap(),
+            notes(&base, " \n", "[] call Linh", None, None, &|_| {}).unwrap(),
             None
         );
         let md = fs::read_to_string(format!("{base}.md")).unwrap();

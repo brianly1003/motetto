@@ -163,7 +163,8 @@ impl Settings {
             return Err("That microphone id isn't valid.".into());
         }
         if !["detect", "en", "vi", "zh", "ja"].contains(&self.call_language.as_str())
-            || !["same_as_call", "en", "vi", "zh", "ja"].contains(&self.notes_language.as_str())
+            || (self.notes_language != "same_as_call"
+                && motetto_core::summarize::language_name(&self.notes_language).is_none())
             || !["30_days", "forever", "after_notes"].contains(&self.keep_audio.as_str())
             || !["pill", "dot"].contains(&self.companion.default_size.as_str())
         {

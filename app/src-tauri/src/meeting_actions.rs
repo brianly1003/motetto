@@ -121,7 +121,7 @@ fn run(root: &Path, id: &str, action: &str) -> Result<(), String> {
                 Err("Could not open the meeting folder".into())
             }
         }
-        "regenerate" => crate::rewrite::regenerate(root, id, &|_| {}),
+        "regenerate" => crate::rewrite::regenerate(root, id, None, &|_| {}),
         "retranscribe" => crate::rewrite::retranscribe(root, id, &|_| {}),
         _ => Err("Unknown meeting action".into()),
     }
@@ -143,7 +143,15 @@ pub async fn meeting_action(
     app: tauri::AppHandle,
     id: String,
     action: String,
+    language: Option<String>,
 ) -> Result<(), String> {
+    // Write the notes again in a language picked for this meeting (SPEC 7.12).
+    if let Some(code) = &language
+        && (action != "regenerate"
+            || (code != "same_as_call" && motetto_core::summarize::language_name(code).is_none()))
+    {
+        return Err("Unknown notes language".into());
+    }
     let state = app.state::<Library>();
     let root = state.root.clone();
     // Delete, restore, purge and reveal touch one folder, so other meetings stay manageable while a
@@ -174,12 +182,7 @@ pub async fn meeting_action(
     let _ = app.emit("motetto://library-changed", ());
     let worker = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let job = if action == "retranscribe" {
-            crate::rewrite::retranscribe
-        } else {
-            crate::rewrite::regenerate
-        };
-        job(&root, &id, &|stage| {
+        let stage = |stage| {
             let _ = worker.emit(
                 "motetto://event",
                 Event::Stage {
@@ -189,7 +192,12 @@ pub async fn meeting_action(
                     eta_s: None,
                 },
             );
-        })
+        };
+        if action == "retranscribe" {
+            crate::rewrite::retranscribe(&root, &id, &stage)
+        } else {
+            crate::rewrite::regenerate(&root, &id, language.as_deref(), &stage)
+        }
     })
     .await
     .map_err(|e| e.to_string())
