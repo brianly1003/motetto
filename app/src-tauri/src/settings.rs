@@ -38,6 +38,7 @@ pub struct Settings {
     pub version: u32,
     pub notes_folder: String,
     pub open_at_login: bool,
+    pub appearance: String,
     pub notes_language: String,
     pub ask_on_call: bool,
     pub app_modes: BTreeMap<String, Mode>,
@@ -85,6 +86,7 @@ impl Default for Settings {
             version: 1,
             notes_folder: String::new(),
             open_at_login: false,
+            appearance: "system".into(),
             notes_language: "same_as_call".into(),
             ask_on_call: true,
             app_modes: BTreeMap::new(),
@@ -251,6 +253,9 @@ impl Settings {
         rules
     }
     fn validate(&self) -> Result<(), String> {
+        if !["system", "light", "dark"].contains(&self.appearance.as_str()) {
+            return Err("Choose System, Light or Dark for appearance.".into());
+        }
         if self.version != 1
             || !(10..=300).contains(&self.idle_stop_s)
             || self.discard_short_s > 120
@@ -476,6 +481,7 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
                 .store(false, std::sync::atomic::Ordering::SeqCst);
         }
         if result.is_ok() {
+            apply_appearance(&app, &settings.appearance);
             crate::desktop::dispatch(
                 app.clone(),
                 crate::controller::Action::ShareVideoAsk(settings.screen_on_own_share == "ask"),
@@ -589,6 +595,14 @@ pub fn open(app: &tauri::AppHandle, tab: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+pub fn apply_appearance(app: &tauri::AppHandle, appearance: &str) {
+    app.set_theme(match appearance {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    });
+}
 #[tauri::command]
 pub fn open_settings(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     open(&app, tab.as_deref().unwrap_or("general"))
@@ -597,6 +611,20 @@ pub fn open_settings(app: tauri::AppHandle, tab: Option<String>) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn appearance_defaults_validates_and_persists() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.appearance, "system");
+        for appearance in ["system", "light", "dark"] {
+            settings.appearance = appearance.into();
+            settings.validate().unwrap();
+            let saved = serde_json::to_string(&settings).unwrap();
+            let restored: Settings = serde_json::from_str(&saved).unwrap();
+            assert_eq!(restored.appearance, appearance);
+        }
+        settings.appearance = "sepia".into();
+        assert!(settings.validate().is_err());
+    }
     #[test]
     fn screen_settings_default_and_validate() {
         let mut settings: Settings = serde_json::from_str("{}").unwrap();

@@ -123,6 +123,7 @@ pub fn run() {
         .setup(|app| {
             let config = app.path().app_config_dir()?;
             let mut settings = crate::settings::Settings::read(&config)?;
+            crate::settings::apply_appearance(app.handle(), &settings.appearance);
             if settings.notes_folder.is_empty() {
                 settings.notes_folder = app
                     .path()

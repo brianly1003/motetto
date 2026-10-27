@@ -6,7 +6,7 @@ import type { SpeedResult } from "./SpeedResult";
 import type { Spelling } from "./Spelling";
 import type { TierId } from "./TierId";
 
-export type Settings = { version: number, notes_folder: string, open_at_login: boolean, notes_language: string, ask_on_call: boolean, app_modes: { [key in string]: Mode }, apps: Array<AppRule>, idle_stop_s: number, discard_short_s: number, 
+export type Settings = { version: number, notes_folder: string, open_at_login: boolean, appearance: string, notes_language: string, ask_on_call: boolean, app_modes: { [key in string]: Mode }, apps: Array<AppRule>, idle_stop_s: number, discard_short_s: number, 
 /**
  * Catalog ids (empty until chosen); the `*_path` fields are what the engines read.
  */
