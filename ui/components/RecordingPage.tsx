@@ -134,14 +134,14 @@ const summarizingLabel = (stage: Stage | null) =>
 export function ProcessingPage({ id, stage, durationMs }: { id: string; stage: Stage | null; durationMs: number }) {
   const at = stage?.type === "Saving" ? 3 : stage?.type === "Summarizing" || stage?.type === "Merging" ? 2 : 1;
   return <StepsPage title="Writing the notes" at={at} bar={[0, 35, 65, 90]} began={() => { const t = stageTimes(id); return [undefined, t.start, t.Summarizing ?? t.Merging, t.Saving]; }} tip="You can close this window. A notification arrives when the notes are ready." stop={{ id, hint: s.stopAfterCallHint }}
-    steps={[["Recorded both sides", durationMs ? elapsedLabel(durationMs) : ""], ["Transcribed", ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
+    steps={[["Recorded both sides", durationMs ? elapsedLabel(durationMs) : ""], [at === 1 ? "Transcribing your recording" : "Transcribed", ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
 }
 
 // Write the notes again (owner 2026-10-21): only the steps a rewrite does. A meeting with a
 // transcript starts at Summarizing; one without (Recover) transcribes first.
 export function RewritingPage({ id, stage, lines }: { id: string; stage: Stage | null; lines: number }) {
   const at = stage?.type === "Saving" ? 2 : stage?.type === "Summarizing" || stage?.type === "Merging" || (lines && !stage) ? 1 : 0;
-  const first = lines ? "Transcript ready" : stage?.type === "Transcribing" ? "Transcribing the saved audio" : "Transcribed";
+  const first = lines || at > 0 ? "Transcript ready" : "Transcribing the saved audio";
   // With a transcript, summarizing starts with the run; without, it waits for the transcription.
   const began = () => { const t = stageTimes(id); return [lines ? undefined : t.start, lines ? t.start : t.Summarizing ?? t.Merging, t.Saving]; };
   return <StepsPage title={s.rewriting} at={at} bar={[20, 55, 90]} tip={s.rewritingTip} began={began} stop={{ id, hint: s.stopNotesHint }}

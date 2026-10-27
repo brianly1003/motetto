@@ -25,7 +25,7 @@ async (page) => {
     await p.goto('http://127.0.0.1:3000/main/');
     await p.getByRole('button', { name: /Meeting at 20:52/ }).first().click();
     await labels.first().waitFor();
-    if ((await labels.allTextContents()).join('|') !== 'Recorded both sides|Transcribed|Summarizing|Saving') throw Error('Missing processing labels');
+    if ((await labels.allTextContents()).join('|') !== 'Recorded both sides|Transcribing your recording|Summarizing|Saving') throw Error('Missing processing labels');
     for (const width of [1200, 760]) {
       await p.setViewportSize({ width, height: 520 });
       const geometry = await labels.evaluateAll(els => els.map(el => {
