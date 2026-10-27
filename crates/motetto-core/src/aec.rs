@@ -89,6 +89,7 @@ fn pass(
 ) -> Result<(), Box<dyn Error>> {
     let mut mic = hound::WavReader::open(mic)?;
     let mut system = hound::WavReader::open(system)?;
+    let length = u64::from(mic.duration());
     let delay = std::iter::repeat_with(|| Ok(0.0)).take(shift.max(0) as usize);
     let mut reference = delay
         .chain(system.samples::<f32>().skip((-shift).max(0) as usize))
@@ -96,6 +97,9 @@ fn pass(
     for (i, sample) in mic.samples::<f32>().take(limit).enumerate() {
         if i % RATE == 0 {
             crate::tools::check()?;
+            if out.is_some() {
+                crate::progress::step(i as u64, length);
+            }
         }
         // The chain ends in endless zeros, so `next` always has a sample.
         let reference = reference.next().unwrap_or(Ok(0.0))?;

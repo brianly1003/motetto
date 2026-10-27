@@ -183,15 +183,7 @@ pub async fn meeting_action(
     let worker = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let stage = |stage| {
-            let _ = worker.emit(
-                "motetto://event",
-                Event::Stage {
-                    meeting_id: id.clone(),
-                    stage,
-                    percent: 0,
-                    eta_s: None,
-                },
-            );
+            let _ = worker.emit("motetto://event", Event::stage(id.clone(), stage));
         };
         if action == "retranscribe" {
             crate::rewrite::retranscribe(&root, &id, &stage)

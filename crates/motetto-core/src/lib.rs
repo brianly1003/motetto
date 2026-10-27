@@ -14,6 +14,7 @@ mod diarize;
 pub mod events;
 pub mod mics;
 pub mod ollama;
+pub mod progress;
 pub mod session;
 pub mod slice;
 pub mod summarize;

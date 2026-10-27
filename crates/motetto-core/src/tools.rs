@@ -142,6 +142,26 @@ pub fn status(command: &mut Command) -> io::Result<ExitStatus> {
     wait(&mut spawn(command)?, &CANCELLED)
 }
 
+/// `status`, with each stderr line passed to `line` as it arrives (whisper-cli's progress).
+pub fn status_lines(command: &mut Command, line: &(dyn Fn(&str) + Sync)) -> io::Result<ExitStatus> {
+    use io::BufRead;
+    check()?;
+    let mut child = spawn(command.stderr(Stdio::piped()))?;
+    let stderr = child.stderr.take();
+    std::thread::scope(|scope| {
+        if let Some(pipe) = stderr {
+            // Ends when the child exits or is killed and its end of the pipe closes.
+            scope.spawn(move || {
+                io::BufReader::new(pipe)
+                    .lines()
+                    .map_while(Result::ok)
+                    .for_each(|text| line(&text));
+            });
+        }
+        wait(&mut child, &CANCELLED)
+    })
+}
+
 /// `Command::output` with `input` on stdin, but Cancel kills the child.
 pub fn output(command: &mut Command, input: Option<&[u8]>) -> io::Result<Output> {
     check()?;
@@ -281,6 +301,21 @@ mod tests {
         let out = output(Command::new("cat").arg("-"), Some(b"hello")).unwrap();
         assert!(out.status.success());
         assert_eq!(out.stdout, b"hello");
+    }
+    #[test]
+    #[cfg(unix)]
+    fn status_lines_passes_each_stderr_line_as_it_comes() {
+        let lines = std::sync::Mutex::new(vec![]);
+        let script = "echo 'progress =  5%' >&2; echo out; echo 'progress = 100%' >&2";
+        let status = status_lines(Command::new("sh").args(["-c", script]), &|line| {
+            lines.lock().unwrap().push(line.to_string())
+        })
+        .unwrap();
+        assert!(status.success());
+        assert_eq!(
+            *lines.lock().unwrap(),
+            ["progress =  5%", "progress = 100%"]
+        );
     }
     #[test]
     fn finder_path_gets_local_tools_without_replacing_existing_order() {

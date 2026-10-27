@@ -165,15 +165,8 @@ pub fn spawn(
                     Job::Finish { id } => {
                         let mut result = match recording.as_ref().filter(|r| r.id == id) {
                             Some(record) => finish(&root, record, |stage| {
-                                let _ = app.emit(
-                                    "motetto://event",
-                                    Event::Stage {
-                                        meeting_id: id.clone(),
-                                        stage,
-                                        percent: 0,
-                                        eta_s: None,
-                                    },
-                                );
+                                let _ =
+                                    app.emit("motetto://event", Event::stage(id.clone(), stage));
                             }),
                             None => Err(
                                 "No capture was saved. Check recording permissions and try again."
@@ -354,7 +347,7 @@ fn status(root: &Path, id: &str, value: &str) -> Result<library::MeetingSummary,
     library::save(root, &summary)?;
     Ok(summary)
 }
-fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage)) -> Result<String, String> {
+fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage) + Sync) -> Result<String, String> {
     if let Some(reason) = &record.failure {
         return Err(format!(
             "Capture failed: {reason}. Partial audio is retained."
@@ -368,8 +361,12 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage)) -> Result<Stri
     motetto_core::tools::reset();
     let dir = library::folder(root, &record.id)?;
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        stage(Stage::Transcribing);
-        let heard = transcribe::transcript_parts(&record.parts, true)?;
+        stage(Stage::Transcribing { progress: None });
+        let heard = transcribe::transcript_parts(&record.parts, true, &|progress| {
+            stage(Stage::Transcribing {
+                progress: Some(progress),
+            })
+        })?;
         let transcript = heard.text;
         fs::write(dir.join("transcript.txt"), &transcript)?;
         let text = match config::var("FIX_MODEL").filter(|v| !v.is_empty()) {

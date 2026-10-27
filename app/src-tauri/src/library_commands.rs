@@ -155,14 +155,24 @@ pub(crate) async fn import_file(
         };
         let library = worker.state::<Library>();
         // The meeting shows in the list as soon as its folder exists; the rest of the app stays usable.
-        library::import(&library.root, &source, |id| {
-            library.set_job(Some(Job {
-                id: Some(id.into()),
-                import: true,
-                transcribe: false,
-            }));
-            let _ = worker.emit("motetto://library-changed", ());
-        })
+        library::import(
+            &library.root,
+            &source,
+            |id| {
+                library.set_job(Some(Job {
+                    id: Some(id.into()),
+                    import: true,
+                    transcribe: false,
+                }));
+                let _ = worker.emit("motetto://library-changed", ());
+            },
+            |id, stage| {
+                let _ = worker.emit(
+                    "motetto://event",
+                    motetto_core::events::Event::stage(id.into(), stage),
+                );
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())

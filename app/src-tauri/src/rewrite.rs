@@ -69,7 +69,11 @@ fn saved_audio(folder: &Path) -> Result<Vec<(Vec<String>, u64)>, String> {
 /// Transcribe again (owner 2026-10-21): whisper runs on the saved audio once more and replaces
 /// the transcript, the user's corrections included (the UI asks first); what was shown before is
 /// kept in `transcript.prev.txt`. The notes don't change: Write the notes again is separate.
-pub(crate) fn retranscribe(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Result<(), String> {
+pub(crate) fn retranscribe(
+    root: &Path,
+    id: &str,
+    stage: &(dyn Fn(Stage) + Sync),
+) -> Result<(), String> {
     let folder = library::folder(root, id)?;
     if crate::bookmarks::locked(root, id)? {
         return Err(crate::bookmarks::LOCKED.into());
@@ -79,9 +83,13 @@ pub(crate) fn retranscribe(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Resu
         return Err("This meeting has no saved audio to transcribe".into());
     }
     motetto_core::tools::reset();
-    stage(Stage::Transcribing);
-    let heard =
-        motetto_core::transcribe::transcript_parts(&parts, true).map_err(|e| e.to_string())?;
+    stage(Stage::Transcribing { progress: None });
+    let heard = motetto_core::transcribe::transcript_parts(&parts, true, &|progress| {
+        stage(Stage::Transcribing {
+            progress: Some(progress),
+        })
+    })
+    .map_err(|e| e.to_string())?;
     let transcript = heard.text;
     if transcript.trim().is_empty() {
         return Err("No speech was heard in the saved audio. The transcript is unchanged.".into());
@@ -119,7 +127,7 @@ pub(crate) fn regenerate(
     root: &Path,
     id: &str,
     write_in: Option<&str>,
-    stage: &dyn Fn(Stage),
+    stage: &(dyn Fn(Stage) + Sync),
 ) -> Result<(), String> {
     let folder = library::folder(root, id)?;
     if crate::bookmarks::locked(root, id)? {
@@ -132,9 +140,13 @@ pub(crate) fn regenerate(
     if meeting.transcript.trim().is_empty() && folder.join("parts.json").exists() {
         let parts = saved_audio(&folder)?;
         motetto_core::tools::reset();
-        stage(Stage::Transcribing);
-        let heard =
-            motetto_core::transcribe::transcript_parts(&parts, true).map_err(|e| e.to_string())?;
+        stage(Stage::Transcribing { progress: None });
+        let heard = motetto_core::transcribe::transcript_parts(&parts, true, &|progress| {
+            stage(Stage::Transcribing {
+                progress: Some(progress),
+            })
+        })
+        .map_err(|e| e.to_string())?;
         let path = folder.join("transcript.txt");
         fs::write(&path, &heard.text).map_err(on(&path))?;
         meeting.transcript = heard.text;

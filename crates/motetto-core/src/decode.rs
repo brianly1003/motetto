@@ -59,6 +59,8 @@ fn convert(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
     let mut decoder =
         symphonia::default::get_codecs().make_audio_decoder(params, &Default::default())?;
     let track_id = track.id;
+    // Frames decoded out of the track's length, for the steps page; unknown for some formats.
+    let (total, mut decoded) = (track.num_frames, 0u64);
     let mut writer = hound::WavWriter::create(
         destination,
         hound::WavSpec {
@@ -88,6 +90,10 @@ fn convert(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
         let mono = resample.as_mut().ok_or("missing resampler")?;
         if mono.rate != rate {
             return Err("sample rate changed within the file".into());
+        }
+        decoded += audio.frames() as u64;
+        if let Some(total) = total {
+            crate::progress::step(decoded, total);
         }
         samples.resize(audio.samples_interleaved(), 0.0);
         audio.copy_to_slice_interleaved(&mut samples);

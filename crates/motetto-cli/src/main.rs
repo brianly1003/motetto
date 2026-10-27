@@ -86,7 +86,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         inputs
     };
 
-    let heard = transcribe::transcript_parts(&[(sources, 0)], false)?;
+    // One line, rewritten in place: how far the transcription is and the time left.
+    let heard = transcribe::transcript_parts(&[(sources, 0)], false, &|p| {
+        use motetto_core::events::TranscribeStep::*;
+        let step = match p.step {
+            Converting { .. } => "converting".to_string(),
+            RemovingEcho => "removing echo".to_string(),
+            Transcribing { .. } => "transcribing".to_string(),
+            Checking { piece, of, .. } => format!("checking piece {piece} of {of}"),
+        };
+        let left = p.eta_s.map_or(String::new(), |s| {
+            format!(", about {} min left", s.div_ceil(60))
+        });
+        eprint!("\rTranscribing: {}% ({step}){left}   ", p.percent);
+    })?;
+    eprintln!();
     let transcript = heard.text;
     fs::write(format!("{base}.txt"), &transcript)?;
     // The raw transcript stays in `.txt`; the corrected one feeds the notes.

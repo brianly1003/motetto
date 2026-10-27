@@ -5,7 +5,12 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
+use crate::events::{TranscribeProgress, Who};
+use crate::progress::{self, Kind};
 use crate::{aec, config, decode, diarize, slice};
 
 /// Who a track belongs to, from its file name.
@@ -20,6 +25,14 @@ enum Speaker {
 }
 
 impl Speaker {
+    /// The track a progress step names: You for the mic, Them for the call.
+    fn side(self) -> Option<Who> {
+        match self {
+            Speaker::Me => Some(Who::You),
+            Speaker::Them => Some(Who::Them),
+            _ => None,
+        }
+    }
     /// `x.mic.wav` is Me, `x.system.wav` is Them; any other file is unlabelled.
     fn from_path(path: &str) -> Self {
         if path.ends_with(".mic.wav") {
@@ -81,15 +94,125 @@ pub struct Transcript {
 
 /// Desktop recording parts use elapsed recording time, excluding the Stop/Resume pause.
 /// Quiet mode prevents whisper from printing private transcript text to desktop logs.
+/// `report` hears how far the work is about once a second, from another thread.
 pub fn transcript_parts(
     parts: &[(Vec<String>, u64)],
     quiet: bool,
+    report: &(dyn Fn(TranscribeProgress) + Sync),
+) -> Result<Transcript, Box<dyn Error>> {
+    let run = Run::new(parts);
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !finished.load(Ordering::Relaxed) {
+                for _ in 0..10 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if finished.load(Ordering::Relaxed) {
+                        return;
+                    }
+                }
+                if let Some(progress) = run.report() {
+                    report(progress);
+                }
+            }
+        });
+        let result = transcribe_parts(parts, quiet, &run);
+        finished.store(true, Ordering::Relaxed);
+        result
+    })
+}
+
+/// The stages of one transcription, priced up front (SPEC 6.6): per track, converting, echo
+/// removal (the mic of a call), the speech check, whisper and the second-pass pieces.
+struct Run {
+    plan: Mutex<progress::Plan>,
+    clock: Instant,
+    /// Per track: the index of its first stage.
+    first: Vec<usize>,
+}
+const CONVERT: usize = 0;
+const ECHO: usize = 1;
+const SPEECH: usize = 2;
+const WHISPER: usize = 3;
+const CHECK: usize = 4;
+const RECHECK: usize = 5;
+
+impl Run {
+    fn new(parts: &[(Vec<String>, u64)]) -> Self {
+        let vad = config::var("WHISPER_VAD_MODEL").is_some_and(|v| !v.is_empty());
+        let mut items = vec![];
+        let mut first = vec![];
+        for (sources, _) in parts {
+            let system = sources.iter().any(|s| s.ends_with(".system.wav"));
+            for src in sources {
+                let speaker = Speaker::from_path(src);
+                // A WAV's length is in its header; another format's is known once converted.
+                let audio = hound::WavReader::open(src)
+                    .map(|wav| f64::from(wav.duration()) / f64::from(wav.spec().sample_rate))
+                    .unwrap_or(0.0);
+                let side = speaker.side();
+                let echo = speaker == Speaker::Me && system;
+                first.push(items.len());
+                items.extend([
+                    progress::Item::new(Kind::Convert, side, audio),
+                    progress::Item::new(Kind::Echo, side, if echo { audio } else { 0.0 }),
+                    progress::Item::new(Kind::Speech, side, if vad { audio } else { 0.0 }),
+                    // About half a call is speech until the check says.
+                    progress::Item::new(
+                        Kind::Whisper,
+                        side,
+                        progress::whisper_units(audio, None, side),
+                    ),
+                    progress::Item::new(
+                        Kind::Check,
+                        side,
+                        if vad {
+                            progress::pieces_expected(audio, side)
+                        } else {
+                            0.0
+                        },
+                    ),
+                    progress::Item::new(Kind::Check, side, 0.0),
+                ]);
+            }
+        }
+        let clock = Instant::now();
+        Self {
+            plan: Mutex::new(progress::Plan::new(items, 0.0)),
+            clock,
+            first,
+        }
+    }
+    fn plan(&self) -> std::sync::MutexGuard<'_, progress::Plan> {
+        self.plan.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    /// `track`'s `stage` begins.
+    fn begin(&self, track: usize, stage: usize) {
+        let now = self.clock.elapsed().as_secs_f64();
+        self.plan().begin(self.first[track] + stage, now);
+    }
+    /// What `track`'s `stage` will take, once measured: seconds of audio or speech, or pieces.
+    fn units(&self, track: usize, stage: usize, units: f64) {
+        self.plan().items[self.first[track] + stage].units = units;
+    }
+    fn report(&self) -> Option<TranscribeProgress> {
+        let now = self.clock.elapsed().as_secs_f64();
+        Some(self.plan().report(now, progress::done()))
+    }
+}
+
+fn transcribe_parts(
+    parts: &[(Vec<String>, u64)],
+    quiet: bool,
+    run: &Run,
 ) -> Result<Transcript, Box<dyn Error>> {
     // Transcribe each track on its own: mic = "Me", system audio = "Them". Merge by timestamp.
     // tracks are aligned by start time only (ms-level skew); fine for transcripts.
     let model = config::var("WHISPER_MODEL").ok_or("set WHISPER_MODEL to a ggml model path")?;
+    let vad = config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty());
     let mut segments = vec![];
     let mut heard: Vec<(String, usize)> = vec![];
+    let mut track = 0;
     for (sources, offset_ms) in parts {
         // The mic needs the system track decoded for echo cancellation; each track is decoded once.
         let mut decoded: Vec<String> = Vec::new();
@@ -108,11 +231,16 @@ pub fn transcript_parts(
                 .with_extension("")
                 .to_string_lossy()
                 .into_owned();
+            run.begin(track, CONVERT);
             let mut wav16 = decode16(src)?;
+            let audio = hound::WavReader::open(&wav16)
+                .map(|wav| f64::from(wav.duration()) / 16_000.0)
+                .unwrap_or(0.0);
             // Through loudspeakers the mic records the other side again: cancel that echo
             // against the system track and transcribe (and play) the cleaned mic instead.
             let system = sources.iter().find(|s| s.ends_with(".system.wav"));
             if let (Speaker::Me, Some(system)) = (speaker, system) {
+                run.begin(track, ECHO);
                 let system16 = decode16(system)?;
                 let cleaned = format!("{stem}.aec.wav");
                 let _ = fs::remove_file(&cleaned);
@@ -127,18 +255,55 @@ pub fn transcript_parts(
                     wav16 = cleaned;
                 }
             }
+            // The speech whisper will hear, found once: it prices whisper and finds the long
+            // silences and invented credits below.
+            let speech = vad.as_deref().and_then(|vad| {
+                run.begin(track, SPEECH);
+                slice::speech(Path::new(&wav16), vad)
+                    .map_err(|e| eprintln!("Long-silence check skipped for {wav16}: {e}"))
+                    .ok()
+            });
+            let spoken = speech.as_ref().map(|speech| {
+                speech
+                    .iter()
+                    .map(|(s, e)| e.saturating_sub(*s))
+                    .sum::<u64>() as f64
+                    / 1000.0
+            });
+            run.units(
+                track,
+                WHISPER,
+                progress::whisper_units(audio, spoken, speaker.side()),
+            );
+            run.begin(track, WHISPER);
             println!("Transcribing {src} with {model}...");
-            let rows = whisper(&model, &wav16, &stem, quiet)?;
+            let rows = whisper(&model, &wav16, &stem, quiet, true)?;
             let track_language = fs::read_to_string(format!("{stem}.json"))
                 .ok()
                 .and_then(|json| detected(&json));
             let _ = fs::remove_file(format!("{stem}.json"));
-            let rows = split_joined(&model, &wav16, &stem, rows, quiet)?;
+            let rows = match &speech {
+                Some(speech) => {
+                    let pieces = split_pieces(&rows, speech);
+                    run.units(track, CHECK, pieces as f64);
+                    run.begin(track, CHECK);
+                    split_joined(&model, &wav16, &stem, rows, speech, pieces, quiet)?
+                }
+                None => rows, // without VAD whisper keeps the silence and splits there itself
+            };
+            let spans = track_language
+                .as_deref()
+                .map_or(vec![], |track| rerun_spans(&rows, track));
+            run.units(track, RECHECK, spans.len() as f64);
+            if !spans.is_empty() {
+                run.begin(track, RECHECK);
+            }
             let rows = relanguage(
                 &model,
                 &wav16,
                 &stem,
                 rows,
+                &spans,
                 track_language.as_deref(),
                 quiet,
             )?;
@@ -146,7 +311,7 @@ pub fn transcript_parts(
             // invented subtitle credits (after the split, so a credit piece doesn't keep a row
             // whole).
             let loops = crate::echo::loops(&rows);
-            let invented = invented_credits(&wav16, &rows);
+            let invented = invented_credits(&rows, speech.as_deref());
             let rows: Vec<_> = rows
                 .into_iter()
                 .zip(loops.into_iter().zip(invented))
@@ -178,6 +343,7 @@ pub fn transcript_parts(
                     text,
                 });
             }
+            track += 1;
         }
     }
     Ok(Transcript {
@@ -229,8 +395,15 @@ fn name(path: &str) -> std::borrow::Cow<'_, str> {
         .map_or(path.into(), |n| n.to_string_lossy())
 }
 
-/// whisper-cli on one 16 kHz WAV: rows written to `<stem>.csv` and returned.
-fn whisper(model: &str, wav16: &str, stem: &str, quiet: bool) -> Result<Vec<Row>, Box<dyn Error>> {
+/// whisper-cli on one 16 kHz WAV: rows written to `<stem>.csv` and returned. With `progress`,
+/// its own percent becomes the stage's progress.
+fn whisper(
+    model: &str,
+    wav16: &str,
+    stem: &str,
+    quiet: bool,
+    progress: bool,
+) -> Result<Vec<Row>, Box<dyn Error>> {
     let mut whisper = crate::tools::command("whisper-cli");
     whisper.args([
         "-m",
@@ -270,7 +443,28 @@ fn whisper(model: &str, wav16: &str, stem: &str, quiet: bool) -> Result<Vec<Row>
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
     }
-    run(&mut whisper)?;
+    if progress {
+        // `-pp` prints "whisper_print_progress_callback: progress =  5%" to stderr; with -np
+        // nothing else goes there, and never the transcript.
+        whisper.arg("-pp");
+        let status = crate::tools::status_lines(&mut whisper, &|line| match line
+            .split_once("progress =")
+            .map(|(_, n)| n.trim().trim_end_matches('%'))
+        {
+            Some(percent) => {
+                if let Ok(percent) = percent.parse() {
+                    progress::step(percent, 100);
+                }
+            }
+            None if !quiet => eprintln!("{line}"),
+            None => {}
+        })?;
+        if !status.success() {
+            return Err(format!("{whisper:?} failed: {status}").into());
+        }
+    } else {
+        run(&mut whisper)?;
+    }
     let csv = format!("{stem}.csv");
     let text = fs::read_to_string(&csv).map_err(|e| format!("{}: {e}", name(&csv)))?;
     Ok(parse_csv(&text))
@@ -292,26 +486,19 @@ fn split_joined(
     wav16: &str,
     stem: &str,
     rows: Vec<Row>,
+    speech: &[(u64, u64)],
+    pieces: usize,
     quiet: bool,
 ) -> Result<Vec<Row>, Box<dyn Error>> {
-    let Some(vad) = config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty()) else {
-        return Ok(rows); // without VAD whisper keeps the silence and splits there itself
-    };
-    let speech = match slice::speech(Path::new(wav16), &vad) {
-        Ok(speech) => speech,
-        Err(e) => {
-            eprintln!("Long-silence check skipped for {wav16}: {e}");
-            return Ok(rows);
-        }
-    };
+    let mut count = Pieces::new(pieces);
     let mut out = Vec::with_capacity(rows.len());
     for (start, end, text) in rows {
-        let cuts = cuts(start, end, &speech);
+        let cuts = cuts(start, end, speech);
         if cuts.is_empty() {
             out.push((start, end, text));
             continue;
         }
-        match pieces(model, wav16, stem, start, end, &cuts, quiet) {
+        match pieces_of(model, wav16, stem, (start, end), &cuts, quiet, &mut count) {
             Ok(Some(rows)) => out.extend(rows),
             Ok(None) => out.push((start, end, text)),
             Err(e) => {
@@ -322,6 +509,34 @@ fn split_joined(
         }
     }
     Ok(out)
+}
+
+/// How many whisper runs `split_joined` will make: each row with long silences, once per piece.
+fn split_pieces(rows: &[Row], speech: &[(u64, u64)]) -> usize {
+    rows.iter()
+        .map(|(start, end, _)| cuts(*start, *end, speech).len())
+        .filter(|cuts| *cuts > 0)
+        .map(|cuts| cuts + 1)
+        .sum()
+}
+
+/// Pieces done of a pass's total, for the steps page. A piece that comes back empty ends its row
+/// early; the count then jumps past that row's other pieces.
+struct Pieces {
+    done: u64,
+    total: u64,
+}
+impl Pieces {
+    fn new(total: usize) -> Self {
+        Self {
+            done: 0,
+            total: total as u64,
+        }
+    }
+    fn done(&mut self, n: usize) {
+        self.done += n as u64;
+        progress::step(self.done, self.total);
+    }
 }
 
 /// Whisper decodes a whole track in the one language it hears in the first 30 s, and decoding in
@@ -339,15 +554,17 @@ fn relanguage(
     wav16: &str,
     stem: &str,
     rows: Vec<Row>,
+    spans: &[(usize, usize)],
     track: Option<&str>,
     quiet: bool,
 ) -> Result<Vec<Row>, Box<dyn Error>> {
     let Some(track) = track else {
         return Ok(rows);
     };
+    let mut count = Pieces::new(spans.len());
     let mut out = Vec::with_capacity(rows.len());
     let mut next = 0;
-    for (first, last) in rerun_spans(&rows, track) {
+    for &(first, last) in spans {
         out.extend_from_slice(&rows[next..first]);
         next = last + 1;
         let run = &rows[first..=last];
@@ -355,7 +572,7 @@ fn relanguage(
         let end = rows
             .get(last + 1)
             .map_or(run[run.len() - 1].1 + 1_000, |next| next.0);
-        match pieces(model, wav16, stem, run[0].0, end, &[], quiet) {
+        match pieces_of(model, wav16, stem, (run[0].0, end), &[], quiet, &mut count) {
             Ok(Some(again)) if !mostly_in(&again, track) => out.extend(again),
             Ok(_) => out.extend_from_slice(run),
             Err(e) => {
@@ -428,30 +645,39 @@ fn cuts(start: u64, end: u64, speech: &[(u64, u64)]) -> Vec<u64> {
 /// Whisper on each piece of `start..end` between `cuts`, times put back on the track. `None`
 /// when a piece comes back empty, so no words are lost.
 /// one whisper-cli per piece (model loaded each time); rare enough not to matter.
-fn pieces(
+fn pieces_of(
     model: &str,
     wav16: &str,
     stem: &str,
-    start: u64,
-    end: u64,
+    (start, end): (u64, u64),
     cuts: &[u64],
     quiet: bool,
+    count: &mut Pieces,
 ) -> Result<Option<Vec<Row>>, Box<dyn Error>> {
     let bounds: Vec<u64> = std::iter::once(start)
         .chain(cuts.iter().copied())
         .chain(std::iter::once(end))
         .collect();
+    let all = bounds.len() - 1;
     let mut out = vec![];
     for (i, piece) in bounds.windows(2).enumerate() {
         let piece_stem = format!("{stem}.piece{i}");
         let piece_wav = format!("{piece_stem}.16k.wav");
         let rows = slice::write(Path::new(wav16), Path::new(&piece_wav), piece[0], piece[1])
-            .and_then(|()| whisper(model, &piece_wav, &piece_stem, quiet));
+            .and_then(|()| whisper(model, &piece_wav, &piece_stem, quiet, false));
         let _ = fs::remove_file(&piece_wav);
         let _ = fs::remove_file(format!("{piece_stem}.csv"));
         let _ = fs::remove_file(format!("{piece_stem}.json"));
-        let rows = rows?;
+        let rows = match rows {
+            Ok(rows) => rows,
+            Err(e) => {
+                count.done(all - i);
+                return Err(e);
+            }
+        };
+        count.done(1);
         if rows.is_empty() {
+            count.done(all - i - 1);
             return Ok(None);
         }
         out.extend(
@@ -558,20 +784,17 @@ fn merge(mut segments: Vec<Segment>) -> String {
 /// the outro over music: Silero heard speech in 9 % and 21 % of the two rows on 2026-10-25,
 /// while someone reading it aloud is speech nearly all through, so their line stays. Without
 /// VAD, or if the check fails, every outro row goes: an invented line is the likelier case.
-fn invented_credits(wav16: &str, rows: &[Row]) -> Vec<bool> {
+fn invented_credits(rows: &[Row], speech: Option<&[(u64, u64)]>) -> Vec<bool> {
     let credits: Vec<bool> = rows.iter().map(|row| crate::echo::credit(&row.2)).collect();
     if !credits.contains(&true) {
         return credits;
     }
-    let Some(speech) = config::var("WHISPER_VAD_MODEL")
-        .filter(|vad| !vad.is_empty())
-        .and_then(|vad| slice::speech(Path::new(wav16), &vad).ok())
-    else {
+    let Some(speech) = speech else {
         return credits;
     };
     rows.iter()
         .zip(credits)
-        .map(|((start, end, _), credit)| credit && mostly_silent(*start, *end, &speech))
+        .map(|((start, end, _), credit)| credit && mostly_silent(*start, *end, speech))
         .collect()
 }
 

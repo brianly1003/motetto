@@ -383,6 +383,7 @@ pub fn import(
     root: &Path,
     source: &Path,
     started: impl FnOnce(&str),
+    stage: impl Fn(&str, motetto_core::events::Stage) + Sync,
 ) -> Result<Option<MeetingSummary>, String> {
     // Checked before a folder exists, so a wrong pick leaves nothing behind.
     let extension = source
@@ -428,12 +429,20 @@ pub fn import(
         return Err(format!("Couldn't create the meeting folder: {e}"));
     }
     started(&summary.id);
+    let meeting_id = summary.id.clone();
+    let report = |next| stage(&meeting_id, next);
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
         let copied = dir.join(format!("source.{extension}"));
         fs::copy(source, &copied)?;
+        report(motetto_core::events::Stage::Transcribing { progress: None });
         let heard = motetto_core::transcribe::transcript_parts(
             &[(vec![copied.to_string_lossy().into_owned()], 0)],
             true,
+            &|progress| {
+                report(motetto_core::events::Stage::Transcribing {
+                    progress: Some(progress),
+                })
+            },
         )?;
         summary.language = heard.language;
         let transcript = heard.text;
@@ -448,13 +457,14 @@ pub fn import(
         };
         let started = std::time::Instant::now();
         let spellings = used_spellings();
+        report(motetto_core::events::Stage::Summarizing { part: 1, of: 1 });
         let title = motetto_core::summarize::notes(
             &dir.join("notes").to_string_lossy(),
             &notes_input,
             "",
             summary.language.as_deref(),
             None,
-            &|_| {},
+            &report,
         )?;
         summary.titled(title);
         summary.notes_language = motetto_core::config::notes_language();
@@ -473,6 +483,9 @@ pub fn import(
         "NeedsAttention"
     }
     .into();
+    if result.is_ok() {
+        report(motetto_core::events::Stage::Saving);
+    }
     // The pipeline's error is the one people need; a failed status save is added, not swapped in.
     let saved = save(root, &summary);
     match (result, saved) {
@@ -702,7 +715,7 @@ mod tests {
     fn import_without_extension_leaves_no_folder() {
         let _imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
         let root = temp_root();
-        assert!(import(&root, Path::new("/tmp/recording"), |_| {}).is_err());
+        assert!(import(&root, Path::new("/tmp/recording"), |_| {}, |_, _| {}).is_err());
         assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
         fs::remove_dir_all(root).unwrap();
     }
@@ -714,9 +727,14 @@ mod tests {
         let missing = root.join("gone.m4a"); // copy fails: the pipeline error must surface
         // The meeting is announced once its folder exists, so the list can show it writing.
         let mut announced = None;
-        let err = import(&root, &missing, |id| {
-            announced = Some((id.to_owned(), list(&root).unwrap()[0].status.clone()));
-        })
+        let err = import(
+            &root,
+            &missing,
+            |id| {
+                announced = Some((id.to_owned(), list(&root).unwrap()[0].status.clone()));
+            },
+            |_, _| panic!("A failed copy must not announce transcription"),
+        )
         .unwrap_err();
         assert!(err.starts_with("Couldn't finish gone:"), "{err}");
         let meetings = list(&root).unwrap();
@@ -750,7 +768,7 @@ mod tests {
         let source = root.join("call.m4a");
         fs::write(&source, b"not really audio").unwrap();
         motetto_core::tools::cancel();
-        let result = import(&root, &source, |_| {});
+        let result = import(&root, &source, |_| {}, |_, _| {});
         motetto_core::tools::reset();
         assert!(matches!(result, Ok(None)), "{result:?}");
         assert!(list(&root).unwrap().is_empty());
@@ -764,7 +782,32 @@ mod tests {
         let source = PathBuf::from(std::env::var("MOTETTO_TEST_IMPORT").unwrap());
         let before = fs::read(&source).unwrap();
         let root = temp_root();
-        let imported = import(&root, &source, |_| {}).unwrap().unwrap();
+        let stages = std::sync::Mutex::new(Vec::new());
+        let imported = import(
+            &root,
+            &source,
+            |_| {},
+            |id, stage| {
+                stages.lock().unwrap().push((id.to_owned(), stage));
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let stages = stages.into_inner().unwrap();
+        assert!(stages.iter().all(|(id, _)| id == &imported.id));
+        assert!(matches!(
+            stages.first().unwrap().1,
+            motetto_core::events::Stage::Transcribing { .. }
+        ));
+        assert!(
+            stages
+                .iter()
+                .any(|(_, stage)| matches!(stage, motetto_core::events::Stage::Summarizing { .. }))
+        );
+        assert!(matches!(
+            stages.last().unwrap().1,
+            motetto_core::events::Stage::Saving
+        ));
         let meeting = read(&root, &imported.id).unwrap();
         assert_eq!(imported.status, "Ready");
         assert!(meeting.transcript.to_lowercase().contains("friday"));

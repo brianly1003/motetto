@@ -11,6 +11,7 @@ import { JumpToNow, useFollow } from "./JumpToNow";
 import { MicChip, MicMenu, MicNote, useMicReport } from "./Microphone";
 import type { AppState } from "@/lib/bindings/AppState";
 import type { Stage } from "@/lib/bindings/Stage";
+import type { TranscribeProgress } from "@/lib/bindings/TranscribeProgress";
 import type { Gap } from "@/lib/useSession";
 
 type Session = { state: AppState; gaps: Gap[]; pending: boolean; act: (command: () => Promise<void>) => Promise<void> };
@@ -108,7 +109,10 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
 // step without a detail shows how long it took, and the one being done counts up (owner 2026-10-25).
 // `stop` is the meeting being processed and what Stop keeps (owner 2026-10-25, mockup stopJob): the
 // model stops at once and nothing is lost, so there is no question; the page greys while it stops.
-function StepsPage({ title, steps, at, bar, tip, began, stop }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string; began: () => (number | undefined)[]; stop: { id: string; hint: string } }) {
+// `measured` is set for a step Rust measures (transcription, SPEC 6.6): null until the first report,
+// then its percent and time left and what it is doing now; the bar fills from the step before to its
+// own by that percent, starting empty rather than at a guess.
+function StepsPage({ title, steps, at, bar, tip, began, stop, measured, cancel }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string; began: () => (number | undefined)[]; stop?: { id: string; hint: string }; measured?: TranscribeProgress | null; cancel?: { pending: boolean; run: () => void } }) {
   const [now, setNow] = useState(Date.now);
   const [stopping, setStopping] = useState(false);
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
@@ -117,23 +121,49 @@ function StepsPage({ title, steps, at, bar, tip, began, stop }: { title: string;
     const from = times[i], to = i < at ? times[i + 1] : i === at ? Math.max(now, from ?? 0) : undefined;
     return from !== undefined && to !== undefined ? elapsedLabel(to - from) : "";
   };
-  return <div className={`writing${stopping ? " stopping" : ""}`} role="status">
+  return <div className={`writing${stopping || cancel?.pending ? " stopping" : ""}`} role="status">
     <h4>{title}</h4>
-    <div className="steps">{steps.map(([label, detail], i) => <div key={i} className={`step${i < at ? " done" : i === at ? " now" : ""}`}><span className="b"/><span>{label}</span><small>{detail || took(i)}</small></div>)}</div>
-    <div className="procbar"><i style={{ width: `${bar[at]}%` }}/></div>
+    <div className="steps">{steps.map(([label, detail], i) => i === at && measured
+      ? <div key={i} className="step now measured"><span className="b"/><span>{label}</span><small>{progressLabel(measured)}</small><span className="sub"><span>{stepLabel(measured)}</span><small>{took(i)}</small></span></div>
+      : <div key={i} className={`step${i < at ? " done" : i === at ? " now" : ""}`}><span className="b"/><span>{label}</span><small>{detail || took(i)}</small></div>)}</div>
+    <div className="procbar"><i style={{ width: `${measured !== undefined ? (bar[at - 1] ?? 0) + (bar[at] - (bar[at - 1] ?? 0)) * (measured?.percent ?? 0) / 100 : bar[at]}%` }}/></div>
     <p className="tip">{tip}</p>
-    <div className="proc-cancel"><button className="btn" disabled={stopping || !ipc.desktopAvailable()} onClick={() => { setStopping(true); ipc.stopProcessing(stop.id).catch(() => setStopping(false)); }}>{stopping ? s.stoppingJob : s.stopJob}</button><span className="hint">{stop.hint}</span></div>
+    {cancel ? <div className="proc-cancel"><button className="btn" disabled={cancel.pending || !ipc.desktopAvailable()} onClick={cancel.run}>{cancel.pending ? s.importStopping : s.importCancel}</button><span className="hint">{s.importCancelHint}</span></div>
+      : stop && <div className="proc-cancel"><button className="btn" disabled={stopping || !ipc.desktopAvailable()} onClick={() => { setStopping(true); ipc.stopProcessing(stop.id).catch(() => setStopping(false)); }}>{stopping ? s.stoppingJob : s.stopJob}</button><span className="hint">{stop.hint}</span></div>}
   </div>;
 }
+
+// "43% · about 4 min left": the time once Rust knows this run's speed (30 s in).
+export function progressLabel({ percent, eta_s }: TranscribeProgress): string {
+  if (eta_s === null) return `${percent}%`;
+  const min = Math.round(eta_s / 60);
+  const left = eta_s < 60 ? "less than a minute left" : min < 60 ? `about ${min} min left` : `about ${Math.floor(min / 60)} h ${min % 60} min left`;
+  return `${percent}% · ${left}`;
+}
+
+// What the transcription does now, for whose side: "Them: checking long lines, 37 of 148".
+export function stepLabel({ step }: TranscribeProgress): string {
+  const who = "side" in step && step.side ? `${step.side}: ` : "";
+  const what = step.type === "Converting" ? "preparing the audio" : step.type === "RemovingEcho" ? "removing the call's echo" : step.type === "Checking" ? `checking long lines, ${step.piece} of ${step.of}` : "transcribing";
+  const text = (step.type === "RemovingEcho" ? "You: " : who) + what;
+  return text[0].toUpperCase() + text.slice(1);
+}
+const measuredOf = (stage: Stage | null) => stage?.type === "Transcribing" ? stage.progress : null;
 
 // A long call is summarized in parts, then merged: say which, since each part takes minutes.
 const summarizingLabel = (stage: Stage | null) =>
   stage?.type === "Summarizing" && stage.of > 1 ? `Summarizing part ${stage.part} of ${stage.of}` : stage?.type === "Merging" ? "Summarizing: merging the parts" : "Summarizing";
 
+export function ImportingPage({ id, stage, stopping, onCancel }: { id: string; stage: Stage | null; stopping: boolean; onCancel: () => void }) {
+  const at = stage?.type === "Saving" ? 3 : stage?.type === "Summarizing" || stage?.type === "Merging" ? 2 : stage?.type === "Transcribing" ? 1 : 0;
+  return <StepsPage title="Writing the notes" at={at} bar={[0, 45, 75, 95]} measured={at === 1 ? measuredOf(stage) : undefined} began={() => { const t = stageTimes(id); return [t.start, t.Transcribing, t.Summarizing ?? t.Merging, t.Saving]; }} tip="The audio from your file is processed on this computer. You can keep using Motetto while the notes are written." cancel={{ pending: stopping, run: onCancel }}
+    steps={[[at === 0 ? "Preparing your file" : "File ready", ""], [at <= 1 ? "Transcribing the audio" : "Transcript ready", ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
+}
+
 // After Stop: honest steps while the local models write the notes.
 export function ProcessingPage({ id, stage, durationMs }: { id: string; stage: Stage | null; durationMs: number }) {
   const at = stage?.type === "Saving" ? 3 : stage?.type === "Summarizing" || stage?.type === "Merging" ? 2 : 1;
-  return <StepsPage title="Writing the notes" at={at} bar={[0, 35, 65, 90]} began={() => { const t = stageTimes(id); return [undefined, t.start, t.Summarizing ?? t.Merging, t.Saving]; }} tip="You can close this window. A notification arrives when the notes are ready." stop={{ id, hint: s.stopAfterCallHint }}
+  return <StepsPage title="Writing the notes" at={at} bar={[0, 45, 75, 95]} measured={at === 1 ? measuredOf(stage) : undefined} began={() => { const t = stageTimes(id); return [undefined, t.start, t.Summarizing ?? t.Merging, t.Saving]; }} tip="You can close this window. A notification arrives when the notes are ready." stop={{ id, hint: s.stopAfterCallHint }}
     steps={[["Recorded both sides", durationMs ? elapsedLabel(durationMs) : ""], [at === 1 ? "Transcribing your recording" : "Transcribed", ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
 }
 
@@ -144,12 +174,12 @@ export function RewritingPage({ id, stage, lines }: { id: string; stage: Stage |
   const first = lines || at > 0 ? "Transcript ready" : "Transcribing the saved audio";
   // With a transcript, summarizing starts with the run; without, it waits for the transcription.
   const began = () => { const t = stageTimes(id); return [lines ? undefined : t.start, lines ? t.start : t.Summarizing ?? t.Merging, t.Saving]; };
-  return <StepsPage title={s.rewriting} at={at} bar={[20, 55, 90]} tip={s.rewritingTip} began={began} stop={{ id, hint: s.stopNotesHint }}
+  return <StepsPage title={s.rewriting} at={at} bar={[45, 80, 95]} measured={at === 0 ? measuredOf(stage) : undefined} tip={s.rewritingTip} began={began} stop={{ id, hint: s.stopNotesHint }}
     steps={[[first, lines ? `${lines} ${lines === 1 ? "line" : "lines"}` : ""], [summarizingLabel(stage), ""], ["Saving", ""]]}/>;
 }
 
 // Transcribe again (owner 2026-10-21): whisper reads the saved audio, then the transcript is saved.
 export function RetranscribingPage({ id, stage }: { id: string; stage: Stage | null }) {
-  return <StepsPage title={s.retranscribing} at={stage?.type === "Saving" ? 1 : 0} bar={[35, 90]} tip={s.retranscribingTip} began={() => { const t = stageTimes(id); return [t.start, t.Saving]; }} stop={{ id, hint: s.stopTranscriptHint }}
+  return <StepsPage title={s.retranscribing} at={stage?.type === "Saving" ? 1 : 0} bar={[95, 100]} measured={stage?.type === "Saving" ? undefined : measuredOf(stage)} tip={s.retranscribingTip} began={() => { const t = stageTimes(id); return [t.start, t.Saving]; }} stop={{ id, hint: s.stopTranscriptHint }}
     steps={[["Transcribing the saved audio", ""], ["Saving", ""]]}/>;
 }

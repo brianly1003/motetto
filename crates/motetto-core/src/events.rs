@@ -228,10 +228,65 @@ pub struct Display {
 #[serde(tag = "type")]
 pub enum Stage {
     Recording,
-    Transcribing,
-    Summarizing { part: u32, of: u32 },
+    /// `progress` once the work is measured (SPEC 6.6); None while it starts.
+    Transcribing {
+        progress: Option<TranscribeProgress>,
+    },
+    Summarizing {
+        part: u32,
+        of: u32,
+    },
     Merging,
     Saving,
+}
+/// How far a transcription is: `percent` of the expected time, and the seconds left once this
+/// run's speed is known (from 30 s in).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct TranscribeProgress {
+    pub percent: u8,
+    pub eta_s: Option<u32>,
+    pub step: TranscribeStep,
+}
+/// The work a transcription is doing now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type")]
+pub enum TranscribeStep {
+    Converting {
+        side: Option<Who>,
+    },
+    RemovingEcho,
+    Transcribing {
+        side: Option<Who>,
+    },
+    /// The second pass over long lines and lines in the wrong language, one piece at a time.
+    Checking {
+        side: Option<Who>,
+        piece: u32,
+        of: u32,
+    },
+}
+/// The track a step works on: the microphone (You) or the call (Them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum Who {
+    You,
+    Them,
+}
+impl Event {
+    /// A `Stage` event, its `percent` and `eta_s` taken from a measured transcription.
+    pub fn stage(meeting_id: String, stage: Stage) -> Self {
+        let (percent, eta_s) = match &stage {
+            Stage::Transcribing {
+                progress: Some(progress),
+            } => (progress.percent, progress.eta_s),
+            _ => (0, None),
+        };
+        Event::Stage {
+            meeting_id,
+            stage,
+            percent,
+            eta_s,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ActionItem {

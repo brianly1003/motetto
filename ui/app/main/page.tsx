@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Duet from "@/components/MotettoMark";
 import RecentlyDeleted from "@/components/RecentlyDeleted";
 import MeetingDocument from "@/components/MeetingDocument";
+import { ImportingPage } from "@/components/RecordingPage";
 import { notesText, deletable } from "@/components/MeetingActions";
 import { Dots, MenuIcon, MenuItem } from "@/components/MenuIcon";
 import {meetingDate,meetingGroup,meetingTitle,durationLabel,fileSize,timeLabel} from "@/lib/document";
@@ -40,17 +41,28 @@ export default function Main(){
   // in the list and on its own page; only Record and a second Import wait (owner, 2026-10-20).
   const [job,setJob]=useState<ipc.Job|null>(null);
   const jobRef=useRef<ipc.Job|null>(null);
-  // Write the notes again reports its step for its meeting's page (owner 2026-10-21).
   const [jobStage,setJobStage]=useState<Stage|null>(null);
+  const latestStage=useRef<{id:string;stage:Stage}|null>(null);
+  const jobId=job?.id;
   const rewritingId=job&&!job.import?job.id:null;
+  // Listen before the file picker opens: a short file can reach transcription before its row loads.
   useEffect(()=>{
-    setJobStage(null);
-    if(!rewritingId||!ipc.desktopAvailable())return;
-    startRun(rewritingId);
+    if(!ipc.desktopAvailable())return;
     let active=true,off:(()=>void)|undefined;
-    void ipc.onSessionEvent(event=>{if(active&&event.type==="Stage"&&event.meeting_id===rewritingId){markStage(rewritingId,event.stage.type);setJobStage(event.stage);}}).then(stop=>{if(active)off=stop;else stop();});
+    void ipc.onSessionEvent(event=>{
+      if(!active||event.type!=="Stage")return;
+      latestStage.current={id:event.meeting_id,stage:event.stage};
+      if(event.meeting_id===jobRef.current?.id){markStage(event.meeting_id,event.stage.type);setJobStage(event.stage);}
+    }).then(stop=>{if(active)off=stop;else stop();});
     return ()=>{active=false;off?.();};
-  },[rewritingId]);
+  },[]);
+  useEffect(()=>{
+    if(!jobId){setJobStage(null);latestStage.current=null;return;}
+    startRun(jobId);
+    const first=latestStage.current?.id===jobId?latestStage.current.stage:null;
+    if(first)markStage(jobId,first.type);
+    setJobStage(first);
+  },[jobId]);
   // Cancel import: the tool stops in Rust, then the import resolves with nothing and the toast says so.
   const [stopping,setStopping]=useState(false);
   const stoppingRef=useRef(false);
@@ -221,8 +233,7 @@ export default function Main(){
       {quitPending&&<Alert title="Saving before quitting">{s.quitPending}</Alert>}
       {loading?<div className="empty" role="status"><p>{s.loading}</p></div>
         :trashOpen?<RecentlyDeleted deleted={deleted} refresh={refresh} notify={notify} onError={setError}/>
-        :selected&&job?.import&&job.id===selected.summary.id?<div className="home"><h1>{meetingTitle(selected.summary)}</h1><div className={`empty processing${stopping?" stopping":""}`} role="status"><Duet/><h2>{s.processing}</h2><p>{s.processingBody}</p><div className="progress"/>
-          {job.import&&<div className="proc-cancel"><button className="btn" onClick={cancelImport} disabled={stopping||!desktop}>{stopping?s.importStopping:s.importCancel}</button><span className="hint">{s.importCancelHint}</span></div>}</div></div>
+        :selected&&job?.import&&job.id===selected.summary.id?<article className="document"><header className="dochead"><h1>{meetingTitle(selected.summary)}</h1><div className="document-meta"><span>{meetingDate(selected.summary.created_ms)}</span></div></header><ImportingPage id={selected.summary.id} stage={jobStage} stopping={stopping} onCancel={cancelImport}/></article>
         :selected?<MeetingDocument key={selected.summary.id+(found?.id===selected.summary.id?`-${found.n}`:"")} find={found?.id===selected.summary.id?found:undefined} session={session} meeting={selected} rewriting={rewritingId===selected.summary.id?{stage:jobStage,transcribe:!!job?.transcribe}:undefined} onToast={(text,undo)=>notify(text,undo)} onChange={setSelected} onError={setError} renameRequest={rename?.id===selected.summary.id?rename.n:0} onRename={title=>renameMeeting(selected.summary.id,title)} onDelete={()=>void deleteMeeting(selected.summary.id)} onChanged={async removed=>{await refresh();if(removed){selection.current++;setSelected(null);}else await select(selected.summary.id);}}/>
         :meetings.length?<LibraryHome version={version} onOpen={id=>void select(id)} onImport={importRecording} dropText={dragging?importBlocked||s.dropRelease:undefined} onError={setError} onCount={setOpenCount} disabled={!desktop||!!importBlocked} disabledReason={importBlocked} onDone={undo=>notify(s.itemDone,undo)} interrupted={meetings.filter(meeting=>meeting.status==="Interrupted"&&meeting.id!==job?.id)} onRecover={ids=>void recover(ids)} onDiscard={ids=>void discardRecovery(ids)}/>
         :<div className="home"><h1>{s.meetings}</h1><div className="empty"><Duet className="mark lg"/><b>{meetings.length?s.libraryTitle:s.emptyTitle}</b><span>{meetings.length?s.libraryBody:s.emptyBody}</span>

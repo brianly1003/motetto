@@ -47,11 +47,27 @@ async (page) => {
   for (let i = 0; i < 20 && await item.isDisabled(); i++) await p.waitForTimeout(50); // waits for the audio list
   await item.click();
   const ask = await p.getByRole('alertdialog').innerText();
-  if (!/Your 2 corrections to the transcript will be replaced/.test(ask) || !/transcript\.prev\.txt/.test(ask) || !/notes don't change/.test(ask)) fails.push('question: ' + ask);
+  // Only the question and what it replaces, like Write the notes again (owner 2026-10-25).
+  if (!/Your 2 corrections to the transcript will be replaced\./.test(ask) || /transcript\.prev\.txt/.test(ask)) fails.push('question: ' + ask);
   await p.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click();
   await p.locator('.writing').getByText('Transcribing again').waitFor();
   const steps = () => p.locator('.writing .step').evaluateAll(rows => rows.map(r => `${r.className.replace('step', '').trim() || 'todo'}:${r.children[1].textContent}`).join(' | '));
   if (await steps() !== 'now:Transcribing the saved audio | todo:Saving') fails.push('steps at start: ' + await steps());
+  // Measured progress (SPEC 6.6): percent and time left on the step, what it does below, the bar
+  // filling the step's share (0 to 95 %).
+  const progress = (percent, eta_s, step) => p.evaluate(a => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: { type: 'Transcribing', progress: a }, percent: a.percent, eta_s: a.eta_s }), { percent, eta_s, step });
+  const now = () => p.locator('.writing .step.now').evaluate(r => [r.children[2].textContent, r.querySelector('.sub > span')?.textContent ?? ''].join(' / '));
+  const bar = () => p.locator('.procbar i').evaluate(i => Math.round(i.getBoundingClientRect().width / i.parentElement.getBoundingClientRect().width * 1000) / 10);
+  await p.waitForTimeout(500);
+  if (await bar() !== 0) fails.push('bar before the first measurement is ' + await bar());
+  await progress(12, null, { type: 'Converting', side: 'Them' }); await p.waitForTimeout(500);
+  if (await now() !== '12% / Them: preparing the audio') fails.push('before the time is known: ' + await now());
+  await progress(43, 250, { type: 'Checking', side: 'Them', piece: 37, of: 148 }); await p.waitForTimeout(500);
+  if (await now() !== '43% · about 4 min left / Them: checking long lines, 37 of 148') fails.push('measured: ' + await now());
+  if (Math.abs(await bar() - 40.9) > 0.6) fails.push('bar at 43% is ' + await bar());
+  await p.locator('.writing').screenshot({ path: '.playwright-out/transcribe-progress.png' });
+  await progress(97, 40, { type: 'RemovingEcho' }); await p.waitForTimeout(100);
+  if (await now() !== '97% · less than a minute left / You: removing the call\'s echo') fails.push('last minute: ' + await now());
   await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: { type: 'Saving' }, percent: 0, eta_s: null }));
   await p.waitForTimeout(100);
   if (await steps() !== 'done:Transcribing the saved audio | now:Saving') fails.push('steps at Saving: ' + await steps());
