@@ -64,6 +64,11 @@ pub struct WindowInfo {
 }
 
 pub fn pick_window(windows: &[WindowInfo], rule: &AppRule, rules: &[AppRule]) -> Option<u32> {
+    // Any browser window could be a bank or mail tab, not the call: only rules that name the call
+    // (an app of its own, or a title like Meet's) offer a window; a browser call records a display.
+    if rule.app_id == "browser" {
+        return None;
+    }
     let ids = if rule.mac_ids.is_empty() {
         &rules.iter().find(|r| r.app_id == "browser")?.mac_ids
     } else {
@@ -263,6 +268,8 @@ mod tests {
             window(6, "com.google.Chrome", "Inbox", 1500.0, 900.0),
         ];
         assert_eq!(pick_window(&windows, meet, &rules), Some(5));
+        let browser = rules.iter().find(|r| r.app_id == "browser").unwrap();
+        assert_eq!(pick_window(&windows, browser, &rules), None);
     }
 
     #[test]
