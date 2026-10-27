@@ -127,6 +127,13 @@ export async function meetingMedia(id: string): Promise<MeetingMedia> {
   const {convertFileSrc} = await import('@tauri-apps/api/core');
   return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
 }
+/** macOS plays meeting audio natively (WebKit's WAV playback can freeze the window); false
+ *  where the page plays it with audio elements (Windows, fixtures). */
+export const playbackOpen=(id:string)=>invoke<boolean>('playback_open',{id}).then(native=>native===true,()=>false);
+/** Plays or pauses at `rate`, from `atMs` when given; resolves to the meeting position in ms. */
+export const playbackSet=(id:string,playing:boolean,atMs:number|null,rate:number)=>invoke<number>('playback_set',{id,playing,atMs,rate});
+export const playbackPosition=(id:string)=>invoke<number>('playback_position',{id});
+export const playbackClose=(id:string)=>invoke<void>('playback_close',{id});
 export const setActionItemDone = (id:string, line:number, done:boolean, expected:string) => invoke<string>('set_action_item_done',{id,line,done,expected});
 export const saveNotes = (id:string, markdown:string, expected:string) => invoke<string>('save_notes',{id,markdown,expected});
 export const saveTranscriptLine = (id:string, index:number, text:string) => invoke<string>('save_transcript_line',{id,index,text});

@@ -117,7 +117,8 @@ pub fn transcript_parts(
                 let cleaned = format!("{stem}.aec.wav");
                 let _ = fs::remove_file(&cleaned);
                 if let Some(echo) =
-                    aec::cancel(Path::new(&wav16), Path::new(&system16), Path::new(&cleaned))?
+                    aec::cancel(Path::new(&wav16), Path::new(&system16), Path::new(&cleaned))
+                        .map_err(|e| format!("echo cancellation of {}: {e}", name(src)))?
                 {
                     println!(
                         "Removed loudspeaker echo from {src} ({} ms behind, match {:.2})",
@@ -221,6 +222,13 @@ fn detected(json: &str) -> Option<String> {
     (!language.is_empty() && language != "auto").then(|| language.to_string())
 }
 
+/// The file name alone, for errors shown in the app.
+fn name(path: &str) -> std::borrow::Cow<'_, str> {
+    Path::new(path)
+        .file_name()
+        .map_or(path.into(), |n| n.to_string_lossy())
+}
+
 /// whisper-cli on one 16 kHz WAV: rows written to `<stem>.csv` and returned.
 fn whisper(model: &str, wav16: &str, stem: &str, quiet: bool) -> Result<Vec<Row>, Box<dyn Error>> {
     let mut whisper = crate::tools::command("whisper-cli");
@@ -263,7 +271,9 @@ fn whisper(model: &str, wav16: &str, stem: &str, quiet: bool) -> Result<Vec<Row>
             .stderr(std::process::Stdio::null());
     }
     run(&mut whisper)?;
-    Ok(parse_csv(&fs::read_to_string(format!("{stem}.csv"))?))
+    let csv = format!("{stem}.csv");
+    let text = fs::read_to_string(&csv).map_err(|e| format!("{}: {e}", name(&csv)))?;
+    Ok(parse_csv(&text))
 }
 
 /// A silence at least this long inside one row means whisper joined two utterances.

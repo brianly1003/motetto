@@ -93,8 +93,37 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     ipc.meetingMedia(meeting.summary.id).then(value=>{if(active)setMedia(value);}).catch(error=>{if(active)onError(String(error));});
     return()=>{active=false;};
   },[meeting.summary.id,live,writing]);
+  // null until known: native audio (macOS) or the audio elements below.
+  const [nativeAudio,setNativeAudio]=useState<boolean|null>(null);
   useEffect(()=>{
-    if(!playing || !media) return;
+    if(!media?.tracks.length)return;
+    const id=meeting.summary.id;let active=true;
+    void ipc.playbackOpen(id).then(native=>{if(active)setNativeAudio(native);});
+    return()=>{active=false;setNativeAudio(null);void ipc.playbackClose(id).catch(()=>{});};
+  },[meeting.summary.id,media]);
+  useEffect(()=>{
+    if(!playing || !media || !nativeAudio) return;
+    const id=meeting.summary.id;
+    let active=true,asking=false;
+    // Starting always places the audio at the cursor; later ticks only read the clock.
+    seekRequested.current=true;
+    const tick=()=>{
+      if(asking)return;asking=true;
+      const explicitSeek=seekRequested.current;seekRequested.current=false;
+      (explicitSeek?ipc.playbackSet(id,true,cursor.current,rate):ipc.playbackPosition(id)).then(ms=>{
+        // A seek made while this answer was on its way wins over the old position.
+        if(!active||seekRequested.current)return;
+        const time=Math.min(media.duration_ms,ms);
+        cursor.current=time;setPosition(time);
+        if(time>=media.duration_ms){setPlaying(false);return;}
+        if(stopAt.current!==null&&time>=stopAt.current){stopAt.current=null;setPlaying(false);}
+      }).catch(error=>{if(active){setPlaying(false);onError(`Couldn't play this audio: ${String(error)}`);}}).finally(()=>{asking=false;});
+    };
+    tick();const timer=setInterval(tick,50);
+    return()=>{active=false;clearInterval(timer);void ipc.playbackSet(id,false,null,rate).catch(()=>{});};
+  },[playing,media,rate,nativeAudio]);
+  useEffect(()=>{
+    if(!playing || !media || nativeAudio!==false) return;
     let active=true;
     let lastTick=performance.now();
     const positioned=new Set<HTMLAudioElement>();
@@ -144,7 +173,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     };
     tick();const timer=setInterval(tick,50);
     return()=>{active=false;clearInterval(timer);audio.current.forEach(element=>element?.pause());};
-  },[playing,media,rate]);
+  },[playing,media,rate,nativeAudio]);
   const stopAt=useRef<number|null>(null);
   function replay(start:number,end:number){seek(start);stopAt.current=end;}
   function seek(time:number){
@@ -219,7 +248,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
       </aside>}
     </div>
     {tab!=='Video'&&(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><div className="bar"><i style={{width:`${position/duration*100}%`}}/></div><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
-    {tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
+    {nativeAudio===false&&tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
     </>}
   </article>;
 }

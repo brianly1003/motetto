@@ -27,6 +27,10 @@ pub fn run() {
             library_commands::list_meetings,
             library_commands::library_bytes,
             crate::meeting_media::meeting_media,
+            crate::playback::playback_open,
+            crate::playback::playback_set,
+            crate::playback::playback_position,
+            crate::playback::playback_close,
             crate::note_items::set_action_item_done,
             crate::note_items::save_notes,
             crate::transcript_edits::save_transcript_line,
@@ -173,6 +177,7 @@ pub fn run() {
             app.manage(crate::live::State::default());
             app.manage(crate::translations::Running::default());
             app.manage(crate::microphone::Clipping::default());
+            app.manage(crate::playback::Playback::start());
             let busy = Arc::new(AtomicBool::new(false));
             let allow_exit = Arc::new(AtomicBool::new(false));
             let (sender, receiver) = mpsc::channel();

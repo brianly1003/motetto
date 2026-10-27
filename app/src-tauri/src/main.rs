@@ -20,6 +20,9 @@ mod note_items;
 mod notes_engine;
 mod notifications;
 mod permissions;
+mod playback;
+#[cfg(target_os = "macos")]
+mod playback_macos;
 mod recording;
 mod recording_screen;
 mod rewrite;

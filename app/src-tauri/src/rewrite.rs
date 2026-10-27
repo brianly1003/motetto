@@ -2,7 +2,15 @@
 //! notes again (the transcript). Both run one at a time under `busy` and report `Stage`s.
 use crate::library;
 use motetto_core::events::Stage;
-use std::{fs, path::Path};
+use std::{fs, io, path::Path};
+
+/// A file error that names the file: a bare "No such file or directory" can't be traced.
+fn on(path: &Path) -> impl Fn(io::Error) -> String + '_ {
+    move |e| {
+        let name = path.file_name().unwrap_or(path.as_os_str());
+        format!("{}: {e}", name.to_string_lossy())
+    }
+}
 
 /// A fresh `.regenerating` folder. One left behind means a run was cut off (the app quit or
 /// crashed mid-way, 2026-10-21); `busy` allows one run at a time, so no live run owns it.
@@ -86,17 +94,19 @@ pub(crate) fn retranscribe(root: &Path, id: &str, stage: &dyn Fn(Stage)) -> Resu
     };
     stage(Stage::Saving);
     let previous = crate::transcript_edits::current(&folder)?;
-    fs::write(folder.join("transcript.prev.txt"), previous).map_err(|e| e.to_string())?;
+    let prev = folder.join("transcript.prev.txt");
+    fs::write(&prev, previous).map_err(on(&prev))?;
     let next = folder.join("transcript.txt.new");
-    fs::write(&next, &transcript).map_err(|e| e.to_string())?;
-    fs::rename(&next, folder.join("transcript.txt")).map_err(|e| e.to_string())?;
+    fs::write(&next, &transcript).map_err(on(&next))?;
+    fs::rename(&next, folder.join("transcript.txt")).map_err(on(&next))?;
     for stale in [crate::transcript_edits::EDITED, "transcript.fixed.txt"] {
         if folder.join(stale).exists() {
-            fs::remove_file(folder.join(stale)).map_err(|e| e.to_string())?;
+            fs::remove_file(folder.join(stale)).map_err(on(&folder.join(stale)))?;
         }
     }
     if let Some(fixed) = fixed {
-        fs::write(folder.join("transcript.fixed.txt"), fixed).map_err(|e| e.to_string())?;
+        let path = folder.join("transcript.fixed.txt");
+        fs::write(&path, fixed).map_err(on(&path))?;
     }
     let mut summary = library::summary(root, id)?;
     summary.language = heard.language;
@@ -125,7 +135,8 @@ pub(crate) fn regenerate(
         stage(Stage::Transcribing);
         let heard =
             motetto_core::transcribe::transcript_parts(&parts, true).map_err(|e| e.to_string())?;
-        fs::write(folder.join("transcript.txt"), &heard.text).map_err(|e| e.to_string())?;
+        let path = folder.join("transcript.txt");
+        fs::write(&path, &heard.text).map_err(on(&path))?;
         meeting.transcript = heard.text;
         language = heard.language;
     }
@@ -162,11 +173,12 @@ pub(crate) fn regenerate(
         .map_err(|e| e.to_string())?;
         if !notes.trim().is_empty() {
             use std::io::Write;
+            let path = staging.join("notes.md");
             let mut output = fs::OpenOptions::new()
                 .append(true)
-                .open(staging.join("notes.md"))
-                .map_err(|e| e.to_string())?;
-            write!(output, "\n\n## My notes\n\n{notes}").map_err(|e| e.to_string())?;
+                .open(&path)
+                .map_err(on(&path))?;
+            write!(output, "\n\n## My notes\n\n{notes}").map_err(on(&path))?;
         }
         if library::read(root, id)?.notes_md != meeting.notes_md {
             return Err(
@@ -174,10 +186,10 @@ pub(crate) fn regenerate(
             );
         }
         stage(Stage::Saving);
-        fs::write(staging.join("previous.md"), meeting.notes_md).map_err(|e| e.to_string())?;
-        fs::rename(staging.join("previous.md"), folder.join("notes.prev.md"))
-            .map_err(|e| e.to_string())?;
-        fs::rename(staging.join("notes.md"), folder.join("notes.md")).map_err(|e| e.to_string())?;
+        let (previous, written) = (staging.join("previous.md"), staging.join("notes.md"));
+        fs::write(&previous, meeting.notes_md).map_err(on(&previous))?;
+        fs::rename(&previous, folder.join("notes.prev.md")).map_err(on(&previous))?;
+        fs::rename(&written, folder.join("notes.md")).map_err(on(&written))?;
         let mut summary = library::summary(root, id)?;
         summary.notes_ms = Some(started.elapsed().as_millis() as u64);
         summary.spellings = spellings;
@@ -282,6 +294,12 @@ mod tests {
         );
         assert!(!root.join("789/transcript.prev.txt").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_file_error_names_the_file() {
+        let path = Path::new("/no/such/folder/transcript.txt");
+        let error = fs::write(path, "x").map_err(on(path)).unwrap_err();
+        assert!(error.starts_with("transcript.txt: "), "{error}");
     }
     #[test]
     fn staging_replaces_a_folder_left_by_a_cut_off_run() {

@@ -2,3 +2,10 @@
 members = ["crates/motetto-core", "crates/motetto-cli", "app/src-tauri"]
 default-members = ["crates/motetto-cli", "crates/motetto-core"]
 resolver = "3"
+
+# The desktop app is installed from debug bundles; unoptimized, echo cancellation ran at 0.6x
+# real time (a 100-minute call took hours) against 120x optimized. Keep the pipeline optimized.
+[profile.dev.package.motetto-core]
+opt-level = 3
+[profile.dev.package."*"]
+opt-level = 3
