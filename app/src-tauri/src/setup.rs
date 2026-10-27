@@ -637,6 +637,7 @@ fn test_recording_now(app: &tauri::AppHandle) -> Result<Heard, String> {
             stop.clone(),
             None,
             crate::microphone::for_capture(app).as_deref(),
+            None,
         );
         #[cfg(not(target_os = "macos"))]
         let captured = motetto_core::capture::record(&base, stop.clone());

@@ -27,6 +27,7 @@ fn action(state: &SessionState, importing: bool) -> Action {
 }
 /// What the menu was last built from; elapsed-time ticks change none of it.
 struct Built {
+    screen: bool,
     action: Action,
     ask_on_call: bool,
 }
@@ -72,8 +73,13 @@ fn header_text(state: &AppState) -> String {
     let seconds = state.elapsed_ms / 1000;
     match &state.state {
         SessionState::Recording => format!(
-            "Recording · {} · {:02}:{:02}",
+            "Recording · {}{} · {:02}:{:02}",
             state.app.as_deref().unwrap_or("Manual"),
+            if state.screen.as_ref().is_some_and(|s| s.current().is_some()) {
+                " · screen"
+            } else {
+                ""
+            },
             seconds / 60,
             seconds % 60
         ),
@@ -95,6 +101,7 @@ fn menu(
     ask_on_call: bool,
     off: &[(String, String)],
     header_label: &str,
+    screen: bool,
 ) -> tauri::Result<(Menu<tauri::Wry>, MenuItem<tauri::Wry>)> {
     let header = MenuItemBuilder::with_id("status", header_label)
         .enabled(false)
@@ -148,6 +155,19 @@ fn menu(
         };
         builder = builder.item(&item.build(app)?);
     }
+    if action == Action::Stop && cfg!(target_os = "macos") {
+        builder = builder.item(
+            &MenuItemBuilder::with_id(
+                "screen",
+                if screen {
+                    "Stop recording the screen"
+                } else {
+                    "Record the screen too"
+                },
+            )
+            .build(app)?,
+        );
+    }
     if matches!(action, Action::Record | Action::Stop) {
         builder = builder.item(
             &CheckMenuItemBuilder::with_id("ask-on-call", "Ask when a call starts")
@@ -196,6 +216,7 @@ pub fn initial(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         ask_on_call,
         &off_apps(app),
         "Motetto · ready for calls",
+        false,
     )?;
     if let Ok(mut state) = app.state::<State>().0.lock() {
         state.header = Some(header);
@@ -211,24 +232,33 @@ pub fn update(app: &tauri::AppHandle, state: &AppState, importing: bool) -> Resu
         .map_err(|_| "Tray menu state is unavailable")?;
     let next = action(&state.state, importing);
     let changed = previous.stale
-        || previous
-            .built
-            .as_ref()
-            .is_none_or(|b| b.action != next || b.ask_on_call != state.ask_on_call);
+        || previous.built.as_ref().is_none_or(|b| {
+            b.action != next
+                || b.ask_on_call != state.ask_on_call
+                || b.screen != state.screen.is_some()
+        });
     let label = header_text(state);
     if changed {
         let tray = app
             .tray_by_id("motetto")
             .ok_or("Tray menu is unavailable")?;
         let off = off_apps(app);
-        let (menu, header) =
-            menu(app, next, state.ask_on_call, &off, &label).map_err(|e| e.to_string())?;
+        let (menu, header) = menu(
+            app,
+            next,
+            state.ask_on_call,
+            &off,
+            &label,
+            state.screen.is_some(),
+        )
+        .map_err(|e| e.to_string())?;
         previous.header = Some(header);
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
         tray.set_icon(Some(icon(next == Action::Stop)))
             .map_err(|e| e.to_string())?;
         tray.set_icon_as_template(true).map_err(|e| e.to_string())?;
         previous.built = Some(Built {
+            screen: state.screen.is_some(),
             action: next,
             ask_on_call: state.ask_on_call,
         });

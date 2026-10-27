@@ -1,4 +1,5 @@
 "use client";
+import {ScreenControl, ShareVideoOffer} from "@/components/ScreenMenu";
 import { useEffect, useRef, useState } from "react";
 import * as ipc from "@/lib/ipc";
 import { useSession } from "@/lib/useSession";
@@ -143,7 +144,7 @@ export default function Companion() {
   const discarded = !asking && state.state.type === "Idle" ? state.discarded : null;
   // Asking and the Undo prompts are Pill-only: Rust sizes them (Ask card, then Pill), never Dot or Tucked.
   const prompting = !!(asking || offPending || discarded);
-  if (asking && state.companion.size === "Ask") return <AskCard app={asking.app} callId={asking.call_id}/>;
+  if (asking && state.companion.size === "Ask") return <AskCard key={asking.call_id} app={asking.app} callId={asking.call_id}/>;
   const dot = state.companion.size === "Dot" && !state.quit_pending && !stopped && !paused && !prompting;
   const sidecar = state.companion.size === "Sidecar" && !stopped && !state.quit_pending && !prompting;
   const tucked = state.companion.size === "Tucked" && !stopped && !state.quit_pending && !prompting;
@@ -152,7 +153,7 @@ export default function Companion() {
   const gapsBefore = (index: number) => gaps.filter(gap => lines.findIndex(line => line.ms !== null && line.ms >= gap.at_ms) === index);
   const gapRows = (index: number) => gapsBefore(index).map(gap => <div className="line gap" key={`gap-${gap.at_ms}`}><span className="ts">{elapsedLabel(gap.at_ms)}</span><span className="who"/><span className="tx">{s.pausedFor} {gapLabel(gap.ms)}</span></div>);
   const latest = lines.at(-1);
-  return <><main className="pill" data-size={dot ? "dot" : tucked ? "tucked" : sidecar ? "sidecar" : "pill"} data-peek={state.companion.peeking} data-leaving={leaving || undefined} data-asking={prompting || undefined} role="toolbar" tabIndex={0} aria-label={s.companion}
+  return <><main className="pill" data-screen={state.screen&&!state.screen.waiting&&state.state.type==="Recording"?"on":undefined} data-size={dot ? "dot" : tucked ? "tucked" : sidecar ? "sidecar" : "pill"} data-peek={state.companion.peeking} data-leaving={leaving || undefined} data-asking={prompting || undefined} role="toolbar" tabIndex={0} aria-label={s.companion}
     onKeyDown={event => {
       if (event.code === "Space" && event.target === event.currentTarget && state.state.type === "Recording") { event.preventDefault(); void mark(); }
       if (event.key === "Escape" && (state.state.type === "Recording" || paused)) {
@@ -218,6 +219,7 @@ export default function Companion() {
           <Duet you={<button type="button" className={`lm micbtn${mic.report?.issue ? " warn" : ""}`} aria-haspopup="menu" aria-expanded={!!micMenu}
             aria-label={`Your microphone: ${mic.report?.active?.name ?? "system default"}${mic.report?.issue ? ", needs attention" : ""}. Change`}
             onClick={event => { if (micMenu || !mic.report) setMicMenu(null); else openMicMenu(event.currentTarget); }}>You</button>} />
+          <ScreenControl state={state} companion/>
           <button className="iconbtn markbtn" disabled={pending} onClick={mark} aria-label={s.markMoment} title={markedAt === null ? s.markMoment : `${s.marked} ${elapsedLabel(markedAt)}`} aria-pressed={markedAt !== null}>⚑</button>
           <button className="iconbtn" disabled={pending} onClick={() => act(async () => { await flushNotes.current(); await ipc.pauseRecording(); })} aria-label={s.pauseRecording} title={s.pauseTitle}><svg viewBox="0 0 16 16" fill="currentColor" stroke="none" aria-hidden="true"><rect x="4" y="3" width="2.6" height="10" rx="1"/><rect x="9.4" y="3" width="2.6" height="10" rx="1"/></svg></button>
           <button className="stop" disabled={pending} onClick={() => act(stop)}>{s.pillStop}</button>
@@ -238,6 +240,7 @@ export default function Companion() {
     {markedAt !== null && <span className="sr-only" role="status">{s.marked} {elapsedLabel(markedAt)}</span>}
     {notice && <span className="sr-only" role="alert">{notice}</span>}
   </main>
+  {recordingOrPaused&&<ShareVideoOffer state={state}/>}
   {/* Outside the Pill: its rounded clip would cut the menu off. */}
   {micMenu && mic.report && <div ref={micMenuBox} className="micmenu-host" style={{ position: "fixed", left: micMenu.left, top: micMenu.top, zIndex: 60 }}>
     <MicMenu report={mic.report} recording={state.state.type === "Recording"} done={micDone} onClose={() => setMicMenu(null)} style={{ position: "static" }}/></div>}

@@ -61,7 +61,14 @@ export async function onOpenMeeting(callback: (id: string) => void) {
   return listen<string>("motetto://open-meeting", event => callback(event.payload));
 }
 
-export const answerAsk = (callId: string, record: boolean) => invoke<void>("answer_ask", { callId, record });
+import type {ScreenPick} from './bindings/ScreenPick';
+import type {ScreenOption} from './bindings/ScreenOption';
+export const answerAsk = (callId: string, record: boolean, screen: ScreenPick|null = null) => invoke<void>("answer_ask", { callId, record, screen });
+export const listScreenSources = () => invoke<ScreenOption[]>('list_screen_sources');
+export const setScreen = (screen: ScreenPick|null) => invoke<void>('set_screen', {screen});
+export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});
+export const deleteVideo = (id:string) => invoke<void>('delete_video',{id});
+export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});
 export const dontAskForApp = (callId: string) => invoke<void>("dont_ask_for_app", { callId });
 export const undoDontAsk = (appId: string) => invoke<void>("undo_dont_ask", { appId });
 export const holdAsk = (hold: boolean) => invoke<void>("hold_ask", { hold });
@@ -118,7 +125,7 @@ import type { MeetingMedia } from './bindings/MeetingMedia';
 export async function meetingMedia(id: string): Promise<MeetingMedia> {
   const media = await invoke<MeetingMedia>('meeting_media', {id});
   const {convertFileSrc} = await import('@tauri-apps/api/core');
-  return {...media, tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
+  return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
 }
 export const setActionItemDone = (id:string, line:number, done:boolean, expected:string) => invoke<string>('set_action_item_done',{id,line,done,expected});
 export const saveNotes = (id:string, markdown:string, expected:string) => invoke<string>('save_notes',{id,markdown,expected});

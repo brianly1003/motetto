@@ -77,6 +77,11 @@ pub fn run() {
             resume_remaining_ms,
             notification_permission,
             answer_ask,
+            set_screen,
+            answer_share_video,
+            list_screen_sources,
+            crate::meeting_actions::delete_video,
+            crate::meeting_actions::restore_video,
             dont_ask_for_app,
             undo_dont_ask,
             hold_ask,
@@ -156,6 +161,7 @@ pub fn run() {
             if let Err(error) = crate::settings_storage::retain(
                 &root,
                 &app.state::<crate::settings::Store>().get()?.keep_audio,
+                &app.state::<crate::settings::Store>().get()?.keep_video,
             ) {
                 eprintln!("Motetto couldn't apply audio retention: {error}");
             }
@@ -204,6 +210,16 @@ pub fn run() {
             crate::shortcuts::install(app.handle())?;
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
+            crate::screen::watch(app.handle().clone())?;
+            dispatch(
+                app.handle().clone(),
+                Action::ShareVideoAsk(
+                    app.state::<crate::settings::Store>()
+                        .get()?
+                        .screen_on_own_share
+                        == "ask",
+                ),
+            );
             app.manage(crate::setup::Setup::default());
             app.manage(crate::tray::State::default());
             let menu = crate::tray::initial(app.handle())?;
@@ -223,6 +239,24 @@ pub fn run() {
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
                     "stop" => dispatch(app.clone(), Action::Stop),
+                    "screen" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let current = app
+                                .state::<Controller>()
+                                .state()
+                                .ok()
+                                .and_then(|s| s.screen);
+                            let pick = if current.is_some() {
+                                None
+                            } else {
+                                crate::screen::sources(&app).first().map(|s| s.pick.clone())
+                            };
+                            if current.is_some() || pick.is_some() {
+                                dispatch(app, Action::SetScreen(pick));
+                            }
+                        });
+                    }
                     "mark" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || {
@@ -248,7 +282,14 @@ pub fn run() {
                         }) = app.state::<Controller>().state()
                         {
                             let record = event.id.as_ref() == "ask-record";
-                            dispatch(app.clone(), Action::AnswerAsk { call_id, record });
+                            dispatch(
+                                app.clone(),
+                                Action::AnswerAsk {
+                                    call_id,
+                                    record,
+                                    screen: None,
+                                },
+                            );
                         }
                     }
                     "ask-on-call" => {
@@ -440,9 +481,53 @@ async fn dismiss_problem(app: tauri::AppHandle, id: u64) -> Result<(), String> {
     act(app, Action::Dismiss(id)).await
 }
 #[tauri::command]
-async fn answer_ask(app: tauri::AppHandle, call_id: String, record: bool) -> Result<(), String> {
-    act(app, Action::AnswerAsk { call_id, record }).await
+async fn answer_ask(
+    app: tauri::AppHandle,
+    call_id: String,
+    record: bool,
+    screen: Option<motetto_core::events::ScreenPick>,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    if screen.is_some() {
+        return Err("Screen recording is available on macOS only.".into());
+    }
+    act(
+        app,
+        Action::AnswerAsk {
+            call_id,
+            record,
+            screen,
+        },
+    )
+    .await
 }
+#[tauri::command]
+async fn set_screen(
+    app: tauri::AppHandle,
+    screen: Option<motetto_core::events::ScreenPick>,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    if screen.is_some() {
+        return Err("Screen recording is available on macOS only.".into());
+    }
+    act(app, Action::SetScreen(screen)).await
+}
+#[tauri::command]
+async fn answer_share_video(
+    app: tauri::AppHandle,
+    display: Option<motetto_core::events::ScreenPick>,
+) -> Result<(), String> {
+    act(app, Action::AnswerShareVideo(display)).await
+}
+#[tauri::command]
+async fn list_screen_sources(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::screen::ScreenOption>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::screen::sources(&app))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn dont_ask_for_app(app: tauri::AppHandle, call_id: String) -> Result<(), String> {
     act(app, Action::DontAsk { call_id }).await
@@ -538,7 +623,7 @@ impl Host for Desktop {
                 crate::window_native::tray_title(&tray, title).map_err(|e| e.to_string())?;
                 tray.set_tooltip(Some(match state.state {
                     SessionState::Recording => {
-                        "Motetto - Recording microphone and system audio; Stop in this menu"
+                        if state.screen.as_ref().is_some_and(|s| s.current().is_some()) { "Motetto - Recording microphone, system audio and screen; Stop in this menu" } else { "Motetto - Recording microphone and system audio; Stop in this menu" }
                     }
                     SessionState::Paused => "Motetto - Paused, not recording; Resume in this menu",
                     _ => "Motetto - On this computer",
@@ -565,6 +650,23 @@ impl Host for Desktop {
     }
     /// No OS notice (SPEC 7.5): a visible companion or library window is the confirmation.
     fn announce(&self) -> Result<(), String> {
+        if let Ok(state) = self.app.state::<Controller>().state()
+            && let Some(pick) = state
+                .screen
+                .as_ref()
+                .and_then(motetto_core::events::ScreenState::current)
+        {
+            let source = match pick.choice {
+                motetto_core::events::ScreenChoice::CallWindow { .. } => "its window".to_string(),
+                _ => format!("the {}", pick.name),
+            };
+            let body = format!(
+                "Recording this {} call and {source}.",
+                state.app.as_deref().unwrap_or("manual")
+            );
+            crate::notifications::quiet(&self.app, "Recording", &body);
+            let _ = self.app.emit("motetto://notice", body);
+        }
         if crate::companion::available(&self.app) {
             return Ok(());
         }

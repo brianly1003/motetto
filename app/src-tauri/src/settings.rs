@@ -65,6 +65,12 @@ pub struct Settings {
     pub call_language: String,
     pub part_chars: u32,
     pub keep_audio: String,
+    pub screen_offer_on_ask: bool,
+    pub screen_source: String,
+    pub screen_on_own_share: String,
+    pub screen_preset: String,
+    pub screen_cursor: bool,
+    pub keep_video: String,
     pub recording_reminder: bool,
     /// The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
     pub mic_device: Option<String>,
@@ -105,6 +111,12 @@ impl Default for Settings {
                 .filter(|n| (8000..=48000).contains(n))
                 .unwrap_or(24000),
             keep_audio: "30_days".into(),
+            screen_offer_on_ask: true,
+            screen_source: "call_window".into(),
+            screen_on_own_share: "ask".into(),
+            screen_preset: "sharp".into(),
+            screen_cursor: true,
+            keep_video: "same_as_audio".into(),
             recording_reminder: true,
             mic_device: None,
             sounds: true,
@@ -257,6 +269,10 @@ impl Settings {
             || (self.notes_language != "same_as_call"
                 && motetto_core::summarize::language_name(&self.notes_language).is_none())
             || !["30_days", "forever", "after_notes"].contains(&self.keep_audio.as_str())
+            || !["call_window", "display"].contains(&self.screen_source.as_str())
+            || !["ask", "keep_window"].contains(&self.screen_on_own_share.as_str())
+            || !["sharp", "smaller"].contains(&self.screen_preset.as_str())
+            || !["same_as_audio", "7_days", "forever"].contains(&self.keep_video.as_str())
             || !["pill", "dot"].contains(&self.companion.default_size.as_str())
         {
             return Err("Choose a supported language, retention or companion size.".into());
@@ -460,6 +476,10 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
                 .store(false, std::sync::atomic::Ordering::SeqCst);
         }
         if result.is_ok() {
+            crate::desktop::dispatch(
+                app.clone(),
+                crate::controller::Action::ShareVideoAsk(settings.screen_on_own_share == "ask"),
+            );
             crate::tray::invalidate(&app);
             crate::desktop::refresh_tray(&app);
             let _ = app.emit("motetto://settings-changed", ());
@@ -577,6 +597,18 @@ pub fn open_settings(app: tauri::AppHandle, tab: Option<String>) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn screen_settings_default_and_validate() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.screen_offer_on_ask && settings.screen_cursor);
+        assert_eq!(settings.keep_video, "same_as_audio");
+        assert_eq!(settings.screen_source, "call_window");
+        settings.screen_preset = "huge".into();
+        assert!(settings.validate().is_err());
+        settings.screen_preset = "smaller".into();
+        assert!(settings.validate().is_ok());
+    }
+
     #[test]
     fn old_settings_preserve_audio_and_failed_saves_preserve_memory() {
         let root =

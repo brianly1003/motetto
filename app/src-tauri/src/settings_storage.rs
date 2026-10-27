@@ -12,11 +12,21 @@ pub struct StorageSummary {
     #[ts(type = "number")]
     pub audio_bytes: u64,
     #[ts(type = "number")]
+    pub video_bytes: u64,
+    #[ts(type = "number")]
     pub notes_bytes: u64,
     #[ts(type = "number")]
     pub free_bytes: u64,
 }
+fn video(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with(".screen.mp4"))
+        || path.components().any(|c| c.as_os_str() == "deleted-video")
+}
 fn audio(path: &Path) -> bool {
+    if video(path) {
+        return false;
+    }
     path.extension().is_some_and(|s| {
         [
             "wav", "mp3", "m4a", "aac", "mp4", "mov", "flac", "aiff", "ogg", "opus", "webm", "csv",
@@ -36,7 +46,9 @@ fn count(path: &Path, total: &mut StorageSummary) -> Result<(), String> {
             count(&item.path(), total)?;
         } else if kind.is_file() {
             let bytes = item.metadata().map_err(|e| e.to_string())?.len();
-            if audio(&item.path()) {
+            if video(&item.path()) {
+                total.video_bytes = total.video_bytes.saturating_add(bytes);
+            } else if audio(&item.path()) {
                 total.audio_bytes = total.audio_bytes.saturating_add(bytes);
             } else {
                 total.notes_bytes = total.notes_bytes.saturating_add(bytes);
@@ -223,7 +235,7 @@ fn remove_audio(dir: &Path) -> Result<(), String> {
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.file_type().map_err(|e| e.to_string())?;
-        if kind.is_dir() {
+        if kind.is_dir() && entry.file_name() != "deleted-video" {
             remove_audio(&entry.path())?;
         } else if kind.is_file() && audio(&entry.path()) {
             fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
@@ -231,12 +243,46 @@ fn remove_audio(dir: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-/// Remove audio only from Ready meetings after their notes are complete; never follow links.
-pub fn retain(root: &Path, policy: &str) -> Result<(), String> {
-    if policy == "forever" {
+fn remove_video(dir: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.file_type().map_err(|e| e.to_string())?.is_file()
+            && (crate::screen_files::video_name(&name)
+                || ["screen.json", "screen-moments.json"].contains(&name.as_str()))
+        {
+            fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+fn purge_video(dir: &Path) -> Result<(), String> {
+    let deleted = dir.join("deleted-video");
+    if !deleted
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_dir())
+    {
         return Ok(());
     }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    for entry in fs::read_dir(deleted).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir()
+            && let Ok(time) = entry.file_name().to_string_lossy().parse::<u128>()
+            && now.saturating_sub(time) >= 30 * 86400 * 1000
+        {
+            fs::remove_dir_all(entry.path()).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+/// Remove audio only from Ready meetings after their notes are complete; never follow links.
+pub fn retain(root: &Path, policy: &str, keep_video: &str) -> Result<(), String> {
     for dir in meeting_dirs(root)? {
+        purge_video(&dir)?;
         let Ok(meta) = library::text(&dir.join("meeting.json")) else {
             continue;
         };
@@ -250,16 +296,100 @@ pub fn retain(root: &Path, policy: &str) -> Result<(), String> {
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.elapsed().ok());
-        if age.is_none() || (policy == "30_days" && age.is_some_and(|a| a.as_secs() < 30 * 86400)) {
+        let Some(age) = age else {
             continue;
+        };
+        if policy == "after_notes" || (policy == "30_days" && age.as_secs() >= 30 * 86400) {
+            let audio = remove_audio(&dir);
+            let video = remove_video(&dir);
+            let recovery = dir.join("deleted-video");
+            let removed = if recovery
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_dir())
+            {
+                fs::remove_dir_all(recovery).map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            };
+            audio.and(video).and(removed)?;
+        } else if keep_video == "7_days" && age.as_secs() >= 7 * 86400 {
+            remove_video(&dir)?;
         }
-        remove_audio(&dir)?;
     }
     Ok(())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn seven_day_video_retention_keeps_audio_and_purges_old_recovery() {
+        let root = std::env::temp_dir().join(format!("motetto-video-days-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("1/deleted-video/1")).unwrap();
+        let dir = root.join("1");
+        fs::write(
+            dir.join("meeting.json"),
+            r#"{"id":"1","title":"Fixture","created_ms":0,"status":"Ready"}"#,
+        )
+        .unwrap();
+        fs::write(dir.join("notes.md"), b"notes").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 86400);
+        fs::File::options()
+            .write(true)
+            .open(dir.join("notes.md"))
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        for name in [
+            "part-0000.screen.mp4",
+            "screen.json",
+            "screen-moments.json",
+            "part-0000.mic.wav",
+        ] {
+            fs::write(dir.join(name), b"fixture").unwrap();
+        }
+        fs::write(
+            dir.join("deleted-video/1/part-0000.screen.mp4"),
+            b"old video",
+        )
+        .unwrap();
+        retain(&root, "forever", "7_days").unwrap();
+        assert!(!dir.join("part-0000.screen.mp4").exists());
+        assert!(!dir.join("screen.json").exists());
+        assert!(dir.join("part-0000.mic.wav").exists());
+        assert!(!dir.join("deleted-video/1").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn video_is_counted_apart_and_never_outlives_audio() {
+        let root =
+            std::env::temp_dir().join(format!("motetto-video-retain-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("1")).unwrap();
+        let dir = root.join("1");
+        let meta = serde_json::json!({"id":"1", "title":"Fixture", "created_ms":0, "status":"Ready", "marks_ms":[]});
+        fs::write(dir.join("meeting.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
+        fs::write(dir.join("notes.md"), b"notes").unwrap();
+        fs::write(dir.join("call.mp4"), b"audio").unwrap();
+        fs::write(dir.join("part-0000.screen.mp4"), [0; 10]).unwrap();
+        let total = summary(&root).unwrap();
+        assert_eq!(total.video_bytes, 10);
+        assert_eq!(total.audio_bytes, 5);
+        fs::create_dir_all(dir.join("deleted-video/1")).unwrap();
+        fs::write(
+            dir.join("deleted-video/1/part-0000.screen.mp4"),
+            b"old video",
+        )
+        .unwrap();
+        retain(&root, "after_notes", "forever").unwrap();
+        assert!(!dir.join("deleted-video").exists());
+        assert!(!dir.join("part-0000.screen.mp4").exists());
+        assert!(!dir.join("call.mp4").exists());
+        assert!(dir.join("notes.md").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn retention_keeps_documents_and_unfinished_audio() {
         let root = std::env::temp_dir().join(format!("motetto-retain-{}", std::process::id()));
@@ -278,10 +408,10 @@ mod tests {
             fs::write(root.join(id).join("mic.wav"), "audio").unwrap();
             fs::write(root.join(id).join("transcript.txt"), "transcript").unwrap();
         }
-        retain(&root, "forever").unwrap();
-        retain(&root, "30_days").unwrap();
+        retain(&root, "forever", "same_as_audio").unwrap();
+        retain(&root, "30_days", "same_as_audio").unwrap();
         assert!(root.join("1/mic.wav").exists());
-        retain(&root, "after_notes").unwrap();
+        retain(&root, "after_notes", "same_as_audio").unwrap();
         assert!(!root.join("1/mic.wav").exists());
         for file in ["1/notes.md", "1/transcript.txt", "2/mic.wav", "3/mic.wav"] {
             assert!(root.join(file).exists());

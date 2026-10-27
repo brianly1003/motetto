@@ -168,10 +168,9 @@ pub(crate) async fn import_file(
     .map_err(|e| e.to_string())
     .and_then(|r| r);
     if result.as_ref().is_ok_and(|r| r.is_some())
-        && let Err(error) = app
-            .state::<crate::settings::Store>()
-            .get()
-            .and_then(|s| crate::settings_storage::retain(&state.root, &s.keep_audio))
+        && let Err(error) = app.state::<crate::settings::Store>().get().and_then(|s| {
+            crate::settings_storage::retain(&state.root, &s.keep_audio, &s.keep_video)
+        })
     {
         let _ = app.emit(
             "motetto://notice",

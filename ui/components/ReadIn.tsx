@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Meeting } from "@/lib/bindings/Meeting";
 import * as ipc from "@/lib/ipc";
-import { englishName, matches, nativeName, NOTE_LANGUAGES, systemLanguages, withTicks } from "@/lib/languages";
+import { englishName, matches, nativeName, NOTE_LANGUAGES, originalNotesLanguage, systemLanguages, withTicks } from "@/lib/languages";
 import { strings as s } from "@/lib/strings";
 import { Alert } from "./Alert";
 import { MenuIcon } from "./MenuIcon";
@@ -28,6 +28,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
   const id = meeting.summary.id;
   // The notes may already be written in a language (Write in): reading in it is the original.
   const written = meeting.summary.notes_language ?? null;
+  const original = originalNotesLanguage(written, meeting.summary.language);
   const desktop = ipc.desktopAvailable();
   const [saved, setSavedState] = useState<ipc.Translation[]>([]);
   // Kept as it was when nothing changed: a re-render moves Find's place in the page (DocumentFind).
@@ -48,7 +49,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
     if (!desktop) return;
     let active = true;
     setView(null); setShown(null); setFailed(null); setDismissed(notNow); wanted.current = null;
-    void list().then(found => { if (!active) return; setSaved(found); const p = stored(PREFERRED); if (p && p !== written && found.some(t => t.code === p)) setView(p); });
+    void list().then(found => { if (!active) return; setSaved(found); const p = stored(PREFERRED); if (p && p !== original && found.some(t => t.code === p)) setView(p); });
     void ipc.translating().then(now => { if (active) setRunning(now || null); }).catch(() => {});
     return () => { active = false; };
   }, [id]);
@@ -88,18 +89,18 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
   /** Pick from Read in: null is the original, and you stop reading meetings in a language. */
   function choose(code: string | null) {
     remember(code);
-    if (!code || code === written) { setView(null); return; }
+    if (!code || code === original) { setView(null); return; }
     if (saved.some(t => t.code === code)) { setFailed(null); setView(code); } else translate(code);
   }
   const busyHere = running && running.id === id ? running : null;
-  const viewing = view && view !== written ? view : null;
+  const viewing = view && view !== original ? view : null;
   const translation = viewing && shown?.code === viewing ? shown : null;
   async function toggle(line: number, done: boolean) {
     try { onChange({ ...meeting, notes_md: await ipc.setActionItemDone(id, line, done, meeting.notes_md) }); }
     catch (error) { onError(String(error)); }
   }
   return {
-    desktop, saved, view: viewing, written, preferred, running, busyHere, failed, dismissed,
+    desktop, saved, view: viewing, written, original, preferred, running, busyHere, failed, dismissed,
     /** What the Notes tab shows instead of notes.md, with the notes' own ticks while it matches them. */
     markdown: translation ? (translation.stale ? translation.markdown : withTicks(translation.markdown, meeting.notes_md)) : null,
     stale: !!translation?.stale,
@@ -151,13 +152,13 @@ export function ReadInPicker({ readIn, meeting }: { readIn: ReadIn; meeting: Mee
       const fresh = [...new Set(codes)].filter(code => !seen.has(code) && matches(code, query));
       fresh.forEach((code, i) => { seen.add(code); out.push({ code, group: i === 0 ? group : undefined }); });
     };
-    if (readIn.written) seen.add(readIn.written);
+    if (readIn.original) seen.add(readIn.original);
     if (!query.trim()) out.push({ code: null });
     add(s.readInSaved, readIn.saved.map(t => t.code));
     add(s.readInSuggested, [...(readIn.preferred ? [readIn.preferred] : []), ...recent(), ...systemLanguages()]);
     add(s.readInAll, [...NOTE_LANGUAGES].sort((a, b) => englishName(a).localeCompare(englishName(b))));
     return out;
-  }, [query, readIn.saved, readIn.preferred, readIn.written, open]);
+  }, [query, readIn.saved, readIn.preferred, readIn.original, open]);
   useEffect(() => { setActive(0); }, [query]);
   useEffect(() => { list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active]);
   function pick(code: string | null) { setOpen(false); setQuery(""); readIn.choose(code); button.current?.focus(); }
@@ -223,7 +224,7 @@ export function ReadInBar({ readIn, onWriteIn }: { readIn: ReadIn; onWriteIn?: (
     </div>;
   }
   const p = readIn.preferred;
-  if (!p || p === readIn.written) return null;
+  if (!p || p === readIn.original) return null;
   // You were reading in your language and looked at the original: one click back.
   if (readIn.saved.some(t => t.code === p)) return <div className="readin-bar quiet" role="status">
     <TranslateIcon/><div className="readin-text"><span>{s.showingOriginal}</span></div>

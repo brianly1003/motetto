@@ -18,6 +18,12 @@ pub enum Action {
     Pause,
     /// Another mic was chosen: a new part when recording, nothing otherwise.
     SwitchMic,
+    SetScreen(Option<ScreenPick>),
+    AnswerShareVideo(Option<ScreenPick>),
+    ShareVideoAsk(bool),
+    ScreenFound,
+    ScreenLost,
+    ScreenDiskLow,
     Keep,
     Discard,
     UndoDiscard,
@@ -33,6 +39,7 @@ pub enum Action {
     AnswerAsk {
         call_id: String,
         record: bool,
+        screen: Option<ScreenPick>,
     },
     DontAsk {
         call_id: String,
@@ -49,6 +56,18 @@ pub enum Action {
     },
 }
 pub enum Message {
+    ScreenSnapshot(mpsc::Sender<Option<(AppState, Stop)>>),
+    ScreenWatch {
+        part: Stop,
+        action: Action,
+    },
+    ScreenEnded {
+        id: String,
+        part: Stop,
+        lost: bool,
+        restart: bool,
+        reason: Option<String>,
+    },
     Mark(mpsc::Sender<Result<u64, String>>),
     Action(Action, mpsc::Sender<Result<(), String>>),
     Watch(WatchEvent),
@@ -67,6 +86,8 @@ pub enum Job {
         id: String,
         offset_ms: u64,
         stop: Stop,
+        screen: Option<ScreenPick>,
+        while_sharing: bool,
     },
     Finish {
         id: String,
@@ -129,12 +150,40 @@ impl Controller {
                     // Advance deadlines even under a continuous stream of UI commands.
                     engine.apply(Command::Tick, now);
                     match message {
+                        Ok(Message::ScreenSnapshot(reply)) => {
+                            let value = (engine.session.app.state == SessionState::Recording)
+                                .then(|| {
+                                    engine
+                                        .stop
+                                        .clone()
+                                        .map(|part| (engine.session.app.clone(), part))
+                                })
+                                .flatten();
+                            let _ = reply.send(value);
+                        }
+                        Ok(Message::ScreenWatch { part, action }) => {
+                            if engine
+                                .stop
+                                .as_ref()
+                                .is_some_and(|current| Arc::ptr_eq(current, &part))
+                                && !part.load(Ordering::Acquire)
+                            {
+                                let _ = engine.action(action, now);
+                            }
+                        }
                         Ok(Message::Mark(reply)) => {
                             let _ = reply.send(engine.mark());
                         }
                         Ok(Message::Action(action, reply)) => {
                             let _ = reply.send(engine.action(action, now));
                         }
+                        Ok(Message::ScreenEnded {
+                            id,
+                            part,
+                            lost,
+                            restart,
+                            reason,
+                        }) => engine.screen_ended(&id, &part, lost, restart, reason, now),
                         Ok(Message::Watch(event)) => engine.watch(event, now),
                         Ok(Message::CaptureFailed { id, reason })
                             if engine.session.app.meeting_id.as_ref() == Some(&id) =>
@@ -196,6 +245,14 @@ impl Controller {
             }
             _ => 0,
         })
+    }
+    pub fn screen_snapshot(&self) -> Option<(AppState, Stop)> {
+        let (tx, rx) = mpsc::channel();
+        self.sender.send(Message::ScreenSnapshot(tx)).ok()?;
+        rx.recv().ok().flatten()
+    }
+    pub fn screen_watch(&self, part: Stop, action: Action) {
+        let _ = self.sender.send(Message::ScreenWatch { part, action });
     }
     pub fn state(&self) -> Result<AppState, String> {
         self.state
@@ -275,6 +332,7 @@ impl<H: Host> Engine<H> {
             (Action::Start, SessionState::Asking { call_id, .. }) => Action::AnswerAsk {
                 call_id: call_id.clone(),
                 record: true,
+                screen: None,
             },
             (action, _) => action,
         };
@@ -297,12 +355,14 @@ impl<H: Host> Engine<H> {
             Action::AnswerAsk {
                 call_id,
                 record: true,
+                screen,
             } => {
                 self.reserve(now)?;
                 self.apply(
                     Command::AnswerAsk {
                         call_id,
                         record: true,
+                        screen,
                     },
                     now,
                 );
@@ -312,10 +372,34 @@ impl<H: Host> Engine<H> {
                 }
                 return Ok(());
             }
-            Action::AnswerAsk { call_id, record } => Command::AnswerAsk { call_id, record },
+            Action::AnswerAsk {
+                call_id,
+                record,
+                screen,
+            } => Command::AnswerAsk {
+                call_id,
+                record,
+                screen,
+            },
             Action::DontAsk { call_id } => Command::DontAskForApp { call_id },
             Action::UndoDontAsk { app_id } => Command::UndoDontAsk { app_id },
             Action::AppMode { app_id, mode } => return self.host.set_app_mode(&app_id, mode),
+            Action::SetScreen(screen) => Command::SetScreen(screen),
+            Action::AnswerShareVideo(display) => Command::AnswerShareVideo { display },
+            Action::ShareVideoAsk(on) => Command::SetShareVideoAsk(on),
+            Action::ScreenFound => Command::ScreenFound,
+            Action::ScreenLost => Command::ScreenEnded {
+                lost: true,
+                restart: true,
+            },
+            Action::ScreenDiskLow => {
+                self.host
+                    .notice("Not enough space for the video. Recording audio only.");
+                Command::ScreenEnded {
+                    lost: false,
+                    restart: true,
+                }
+            }
             Action::HoldAsk(hold) => Command::HoldAsk(hold),
             Action::AskOnCall(on) => {
                 self.host.set_ask_on_call(on)?;
@@ -526,6 +610,33 @@ impl<H: Host> Engine<H> {
             self.release();
         }
     }
+    fn screen_ended(
+        &mut self,
+        id: &str,
+        part: &Stop,
+        lost: bool,
+        restart: bool,
+        reason: Option<String>,
+        now: u64,
+    ) {
+        if self.session.app.meeting_id.as_deref() != Some(id)
+            || self.session.app.state != SessionState::Recording
+            || !self
+                .stop
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, part))
+            || part.load(Ordering::Acquire)
+        {
+            return;
+        }
+        self.apply(Command::ScreenEnded { lost, restart }, now);
+        if let Some(reason) = reason {
+            self.host.notice(&format!(
+                "The screen recording stopped: {reason}. The audio goes on."
+            ));
+        }
+    }
+
     fn effects(&mut self, effects: Vec<Effect>, now: u64) {
         for effect in effects {
             let result = match effect {
@@ -538,6 +649,19 @@ impl<H: Host> Engine<H> {
                         id: meeting_id,
                         offset_ms: self.session.app.elapsed_ms,
                         stop,
+                        screen: self
+                            .session
+                            .app
+                            .screen
+                            .as_ref()
+                            .and_then(ScreenState::current)
+                            .cloned(),
+                        while_sharing: self
+                            .session
+                            .app
+                            .screen
+                            .as_ref()
+                            .is_some_and(|s| s.while_sharing.is_some()),
                     })
                 }
                 Effect::StopCapture => {

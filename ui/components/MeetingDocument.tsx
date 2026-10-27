@@ -1,3 +1,4 @@
+import VideoTab from "./VideoTab";
 import {useEffect, useRef, useState} from 'react';
 import type {Meeting} from '@/lib/bindings/Meeting';
 import type {MeetingMedia} from '@/lib/bindings/MeetingMedia';
@@ -69,6 +70,8 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   useEffect(()=>{if(renameRequest)startRename();},[renameRequest]);
   const [media,setMedia]=useState<MeetingMedia|null>(null);
   const [playing,setPlaying]=useState(false);
+  const [rate,setRate]=useState(1);
+  useEffect(()=>{audio.current.forEach(element=>{if(element&&element.playbackRate!==rate)element.playbackRate=rate;});},[rate]);
   // Space plays or pauses on the Notes and Audio tabs too (owner 2026-10-25) when nothing has
   // focus; the Transcript tab has its own handler, and a focused note block keeps Space for typing.
   useEffect(()=>{
@@ -108,7 +111,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
         // The playing audio owns the clock. Buffering must not skip recorded speech.
         if(element && positioned.has(element))time=track.offset_ms+element.currentTime*1000;
       }else if(!explicitSeek && !media.tracks.some(track=>time>=track.offset_ms && time<track.offset_ms+track.duration_ms)){
-        time+=now-lastTick;
+        time+=(now-lastTick)*rate;
       }
       lastTick=now;
       time=Math.min(media.duration_ms,time);
@@ -141,7 +144,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
     };
     tick();const timer=setInterval(tick,50);
     return()=>{active=false;clearInterval(timer);audio.current.forEach(element=>element?.pause());};
-  },[playing,media]);
+  },[playing,media,rate]);
   const stopAt=useRef<number|null>(null);
   function replay(start:number,end:number){seek(start);stopAt.current=end;}
   function seek(time:number){
@@ -201,22 +204,22 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
       </div>}
     </header>
     {live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage id={meeting.summary.id} stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage id={meeting.summary.id} stage={rewriting.stage}/>:rewriting?<RewritingPage id={meeting.summary.id} stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
-    <div className="doctools"><div className="tabs" role="tablist" aria-label={s.meetingViews}>{['Notes','Transcript','Audio'].map((name,index)=><button key={name} id={`tab-${name}`} type="button" role="tab" aria-selected={tab===name} aria-controls="meeting-panel" tabIndex={tab===name?0:-1} onClick={()=>setTab(name)} onKeyDown={event=>{
+    <div className="doctools"><div className="tabs" role="tablist" aria-label={s.meetingViews}>{['Notes','Transcript',...(media?.videos?.length?['Video']:[]),'Audio'].map((name,index)=><button key={name} id={`tab-${name}`} type="button" role="tab" aria-selected={tab===name} aria-controls="meeting-panel" tabIndex={tab===name?0:-1} onClick={()=>setTab(name)} onKeyDown={event=>{
       if(event.key===' ' && name===tab && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();event.stopPropagation();togglePlay();return;}
-      const names=['Notes','Transcript','Audio'];let next=index;
-      if(event.key==='ArrowRight')next=(index+1)%3;else if(event.key==='ArrowLeft')next=(index+2)%3;else if(event.key==='Home')next=0;else if(event.key==='End')next=2;else return;
+      const names=['Notes','Transcript',...(media?.videos?.length?['Video']:[]),'Audio'];let next=index;
+      if(event.key==='ArrowRight')next=(index+1)%names.length;else if(event.key==='ArrowLeft')next=(index+names.length-1)%names.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=names.length-1;else return;
       event.preventDefault();setTab(names[next]);document.getElementById(`tab-${names[next]}`)?.focus();
     }}>{name}</button>)}</div>{tab==='Notes'&&meeting.notes_md&&readIn.desktop&&<ReadInPicker readIn={readIn} meeting={meeting}/>}<DocumentFind tab={tab} body={body} start={find?.query}/></div>
     <div ref={body} className="docbody" id="meeting-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
-      {tab==='Notes'?(meeting.notes_md?<div className="readin-col"><ReadInBar readIn={readIn} onWriteIn={locked||!deletable(meeting.summary.status)?undefined:code=>setWriteIn({code})}/><NotesView key={readIn.markdown===null?'notes':readIn.view} id={meeting.summary.id} markdown={readIn.markdown??meeting.notes_md} locked={locked} translated={readIn.markdown===null?undefined:{hint:readIn.stale?s.translatedStaleHint:s.translatedHint,labelOf:line=>headings.get(line),onToggle:readIn.toggle}} durationMs={duration} onSeek={duration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError}/></div>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined} running={playing}/>:<div className="notes"><section><h3>Audio</h3>{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
-      <aside className="meeting-aside">
+      {tab==='Notes'?(meeting.notes_md?<div className="readin-col"><ReadInBar readIn={readIn} onWriteIn={locked||!deletable(meeting.summary.status)?undefined:code=>setWriteIn({code})}/><NotesView key={readIn.markdown===null?'notes':readIn.view} id={meeting.summary.id} markdown={readIn.markdown??meeting.notes_md} locked={locked} translated={readIn.markdown===null?undefined:{hint:readIn.stale?s.translatedStaleHint:s.translatedHint,labelOf:line=>headings.get(line),onToggle:readIn.toggle}} durationMs={duration} onSeek={duration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError}/></div>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined} running={playing}/>:tab==='Video'&&media?<VideoTab media={media} position={position} playing={playing} seek={seek} togglePlay={togglePlay} rate={rate} setRate={setRate} lines={transcriptLines(meeting.transcript,[])} meetingId={meeting.summary.id} onToast={onToast} onError={onError} onMediaChange={value=>{setPlaying(false);setMedia(value);if(!value.videos.length)setTab('Audio');else setTab('Video');}}/>:<div className="notes"><section><h3>Audio</h3>{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
+      {tab!=='Video'&&<aside className="meeting-aside">
         <div className="panel"><h5>This meeting</h5><dl className="kv"><dt>Length</dt><dd>{duration?timeLabel(duration):'Not recorded'}</dd><dt>Language</dt><dd>{languageName(meeting.summary.language)}</dd><dt>Notes in</dt><dd>{meeting.summary.notes_ms!=null?notesTime(meeting.summary.notes_ms):"Not recorded"}</dd><dt>Marks</dt><dd>{meeting.summary.marks_ms.length}</dd></dl></div>
         <div className="panel"><h5>Spellings used</h5>{meeting.summary.spellings?.length?<div className="spelling-chips">{meeting.summary.spellings.map(term=><span key={term} className="chip plain">{term}</span>)}</div>:<p className="tip">No saved spellings</p>}</div>
         <div className="panel"><h5>Stays on this computer</h5><p className="tip">No account, no upload. Folder: <span>{media?.folder??'Loading…'}</span></p></div>
-      </aside>
+      </aside>}
     </div>
-    {(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><div className="bar"><i style={{width:`${position/duration*100}%`}}/></div><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
-    {tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;}} src={track.path} preload="metadata"/>)}
+    {tab!=='Video'&&(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><div className="bar"><i style={{width:`${position/duration*100}%`}}/></div><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
+    {tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
     </>}
   </article>;
 }

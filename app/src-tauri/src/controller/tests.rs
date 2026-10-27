@@ -3,6 +3,7 @@ use super::*;
 struct Fake {
     log: Arc<Mutex<Vec<String>>>,
     stops: Arc<Mutex<Vec<Stop>>>,
+    screens: Arc<Mutex<Vec<Option<ScreenPick>>>>,
     allowed: Arc<AtomicBool>,
     announce_ok: bool,
     preferences: (u32, u32, bool),
@@ -50,8 +51,12 @@ impl Host for Fake {
     fn job(&self, job: Job) -> Result<(), String> {
         let value = match job {
             Job::Capture {
-                stop, offset_ms, ..
+                stop,
+                offset_ms,
+                screen,
+                ..
             } => {
+                self.screens.lock().unwrap().push(screen);
                 self.stops.lock().unwrap().push(stop);
                 format!("capture:{offset_ms}")
             }
@@ -95,6 +100,7 @@ fn engine() -> Engine<Fake> {
         Fake {
             log: Arc::default(),
             stops: Arc::default(),
+            screens: Arc::default(),
             allowed: Arc::new(AtomicBool::new(true)),
             announce_ok: true,
             preferences: (30, 20, false),
@@ -371,6 +377,7 @@ fn detected_call_asks_and_records_only_after_answer() {
         Action::AnswerAsk {
             call_id,
             record: true,
+            screen: None,
         },
         1_000,
     )
@@ -392,7 +399,8 @@ fn answer_while_importing_is_refused_and_keeps_asking() {
         e.action(
             Action::AnswerAsk {
                 call_id,
-                record: true
+                record: true,
+                screen: None,
             },
             1_000
         )
@@ -409,6 +417,7 @@ fn not_this_call_and_stale_answers_take_no_reservation() {
         Action::AnswerAsk {
             call_id: "zoom-0".into(),
             record: true,
+            screen: None,
         },
         500,
     )
@@ -419,6 +428,7 @@ fn not_this_call_and_stale_answers_take_no_reservation() {
         Action::AnswerAsk {
             call_id,
             record: false,
+            screen: None,
         },
         1_000,
     )
@@ -632,4 +642,61 @@ fn notes_model_ready_resolves_only_the_missing_notes_model() {
     // Nothing pending: nothing changes.
     e.action(Action::NotesModelReady, 2_000).unwrap();
     assert_eq!(e.session.problems().len(), 1);
+}
+
+#[test]
+fn screen_failure_ignores_an_old_part_of_the_same_meeting() {
+    let mut e = engine();
+    e.action(Action::Start, 0).unwrap();
+    let first = e.stop.clone().unwrap();
+    let pick = ScreenPick {
+        choice: ScreenChoice::Display { id: 1 },
+        name: "Display".into(),
+    };
+    e.action(Action::SetScreen(Some(pick.clone())), 1).unwrap();
+    let current = e.stop.clone().unwrap();
+    let id = e.session.app.meeting_id.clone().unwrap();
+    e.screen_ended(&id, &first, false, true, Some("old failure".into()), 2);
+    assert_eq!(e.session.app.screen.as_ref().unwrap().pick, pick);
+    e.screen_ended(&id, &current, false, true, Some("encoder failed".into()), 3);
+    assert!(e.session.app.screen.is_none());
+    assert_eq!(e.session.app.state, SessionState::Recording);
+    assert!(current.load(Ordering::Acquire));
+    assert!(!e.stop.as_ref().unwrap().load(Ordering::Acquire));
+}
+
+#[test]
+fn capture_jobs_use_the_current_picture_and_skip_a_waiting_window() {
+    let mut e = engine();
+    e.action(Action::Start, 0).unwrap();
+    let window = ScreenPick {
+        choice: ScreenChoice::CallWindow {
+            app_id: "zoom".into(),
+        },
+        name: "Zoom window".into(),
+    };
+    e.action(Action::SetScreen(Some(window.clone())), 1)
+        .unwrap();
+    assert_eq!(
+        e.host.screens.lock().unwrap().last(),
+        Some(&Some(window.clone()))
+    );
+    e.apply(
+        Command::ScreenEnded {
+            lost: true,
+            restart: true,
+        },
+        2,
+    );
+    assert_eq!(e.host.screens.lock().unwrap().last(), Some(&None));
+    e.apply(Command::ScreenFound, 3);
+    assert_eq!(e.host.screens.lock().unwrap().last(), Some(&Some(window)));
+    e.action(Action::Sharing(true), 4).unwrap();
+    let display = ScreenPick {
+        choice: ScreenChoice::Display { id: 1 },
+        name: "Display".into(),
+    };
+    e.action(Action::AnswerShareVideo(Some(display.clone())), 5)
+        .unwrap();
+    assert_eq!(e.host.screens.lock().unwrap().last(), Some(&Some(display)));
 }

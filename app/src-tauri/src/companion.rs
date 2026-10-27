@@ -337,7 +337,7 @@ const ASK_MENU_HEIGHT: f64 = 76.0;
 fn dimensions(size: CompanionSize, compact: bool) -> (f64, f64) {
     if size == CompanionSize::Ask {
         // The 460 px card plus 10 px each side for its hover close button.
-        return (480.0, 124.0);
+        return (480.0, 164.0);
     }
     if compact {
         // Stopped and the quit question show a Pill with its caption row, as in the mockup.
@@ -438,8 +438,8 @@ mod tests {
 
     #[test]
     fn ask_card_is_fixed_and_sits_top_middle_of_the_work_area() {
-        assert_eq!(dimensions(CompanionSize::Ask, true), (480.0, 124.0));
-        assert_eq!(dimensions(CompanionSize::Ask, false), (480.0, 124.0));
+        assert_eq!(dimensions(CompanionSize::Ask, true), (480.0, 164.0));
+        assert_eq!(dimensions(CompanionSize::Ask, false), (480.0, 164.0));
         assert_eq!(dimensions(CompanionSize::Pill, true), (460.0, 72.0));
         // 1440 px wide at 2x under a 25 px menu bar: 960 px card, centred, 12 px down.
         assert_eq!(

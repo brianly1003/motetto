@@ -25,3 +25,5 @@ pub mod tools;
 pub mod watch;
 
 pub mod echo;
+
+pub mod video;

@@ -1,4 +1,5 @@
 "use client";
+import {ScreenControl} from "./ScreenMenu";
 import { useEffect, useRef, useState } from "react";
 import * as ipc from "@/lib/ipc";
 import { elapsedLabel } from "@/lib/session";
@@ -67,6 +68,7 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
       <span className="tip">{stopped ? <>The notes start in {remaining ?? "…"} s</> : paused ? "Not recording. Resume when you're ready." : marked !== null ? `${s.marked} ${elapsedLabel(marked)}.` : `Both sides · ${count} line${count === 1 ? "" : "s"}`}</span>
       <span className="sp"/>
       {!stopped && <MicChip report={mic.report} open={!!micMenu} onToggle={button => { if (micMenu) setMicMenu(null); else openMicMenu(button); }}/>}
+      {!stopped&&<ScreenControl state={state} chip onToast={onToast}/>}
       {stopped || paused
         ? <><button className="doc-action primary" disabled={pending || (stopped && remaining === 0)} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
           {stopped && <button className="doc-action ghost" disabled={pending || remaining === 0} title={s.pillDiscardTitle} onClick={() => act(ipc.discardRecording)}>{s.pillDiscard}</button>}

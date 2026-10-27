@@ -22,8 +22,24 @@ pub struct AudioTrack {
     pub waveform: Vec<f32>,
 }
 #[derive(Debug, Serialize, TS)]
+pub struct VideoPart {
+    pub path: String,
+    #[ts(type = "number")]
+    pub offset_ms: u64,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub source: String,
+    pub while_sharing: bool,
+    pub width: u32,
+    pub height: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+#[derive(Debug, Serialize, TS)]
 pub struct MeetingMedia {
     pub tracks: Vec<AudioTrack>,
+    pub videos: Vec<VideoPart>,
+    pub moments: Vec<crate::screen::Moment>,
     #[ts(type = "number")]
     pub duration_ms: u64,
     pub folder: String,
@@ -53,17 +69,25 @@ fn files(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
     }
     Ok(files)
 }
-pub fn duration(root: &Path, id: &str) -> Result<Option<u64>, String> {
-    let dir = library::folder(root, id)?;
-    let mut duration = None;
-    for (file, offset) in files(&dir)? {
+/// The meeting's existing audio files with their offsets, each checked to sit in its folder.
+pub fn audio(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
+    let mut checked = Vec::new();
+    for (file, offset) in files(dir)? {
         if !file.try_exists().map_err(|e| e.to_string())? {
             continue;
         }
         let path = file.canonicalize().map_err(|e| e.to_string())?;
-        if path.parent() != Some(dir.as_path()) {
+        if path.parent() != Some(dir) {
             return Err("Audio points outside its meeting".into());
         }
+        checked.push((path, offset));
+    }
+    Ok(checked)
+}
+pub fn duration(root: &Path, id: &str) -> Result<Option<u64>, String> {
+    let dir = library::folder(root, id)?;
+    let mut duration = None;
+    for (path, offset) in audio(&dir)? {
         let reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
         if reader.spec().sample_rate == 0 {
             return Err("Invalid audio rate".into());
@@ -78,16 +102,8 @@ pub fn duration(root: &Path, id: &str) -> Result<Option<u64>, String> {
 
 pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
     let dir = library::folder(root, id)?;
-    let files = files(&dir)?;
     let mut tracks = Vec::new();
-    for (file, offset_ms) in files {
-        if !file.try_exists().map_err(|e| e.to_string())? {
-            continue;
-        }
-        let path = file.canonicalize().map_err(|e| e.to_string())?;
-        if path.parent() != Some(dir.as_path()) {
-            return Err("Audio points outside its meeting".into());
-        }
+    for (path, offset_ms) in audio(&dir)? {
         let mut reader = hound::WavReader::open(&path).map_err(|e| e.to_string())?;
         let spec = reader.spec();
         if spec.sample_rate == 0 || spec.channels == 0 {
@@ -128,7 +144,7 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
                 0.0
             });
         }
-        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let speaker = if name.contains(".mic.") {
             "You"
         } else if name.contains(".system.") {
@@ -151,7 +167,55 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
         .map(|t| t.offset_ms.saturating_add(t.duration_ms))
         .max()
         .unwrap_or(0);
+    let parts: Vec<crate::screen::ScreenPart> = crate::screen_files::read(&dir, "screen.json");
+    let mut videos = vec![];
+    for part in parts {
+        if !crate::screen_files::video_name(&part.file) {
+            continue;
+        }
+        let Some(path) = crate::screen_files::safe_file(&dir, &part.file) else {
+            continue;
+        };
+        let Some(duration_ms) = tracks
+            .iter()
+            .filter(|t| {
+                t.offset_ms == part.offset_ms
+                    && t.name.split('.').next() == part.file.split('.').next()
+            })
+            .map(|t| t.duration_ms)
+            .max()
+        else {
+            continue;
+        };
+        let bytes = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+        if bytes == 0 {
+            continue;
+        }
+        videos.push(VideoPart {
+            path: path.to_string_lossy().into_owned(),
+            offset_ms: part.offset_ms,
+            duration_ms,
+            source: part.source.name,
+            while_sharing: part.while_sharing,
+            width: part.width,
+            height: part.height,
+            bytes,
+        });
+    }
+    videos.sort_by_key(|v| v.offset_ms);
+    let moments: Vec<crate::screen::Moment> =
+        crate::screen_files::read(&dir, "screen-moments.json");
+    let moments = moments
+        .into_iter()
+        .filter(|m| {
+            videos
+                .iter()
+                .any(|v| m.ms >= v.offset_ms && m.ms < v.offset_ms.saturating_add(v.duration_ms))
+        })
+        .collect();
     Ok(MeetingMedia {
+        videos,
+        moments,
         tracks,
         duration_ms,
         folder: dir.to_string_lossy().into_owned(),
@@ -164,9 +228,14 @@ pub async fn meeting_media(app: tauri::AppHandle, id: String) -> Result<MeetingM
     let media = tauri::async_runtime::spawn_blocking(move || read(&root, &id))
         .await
         .map_err(|e| e.to_string())??;
-    for track in &media.tracks {
+    for path in media
+        .tracks
+        .iter()
+        .map(|t| &t.path)
+        .chain(media.videos.iter().map(|v| &v.path))
+    {
         app.asset_protocol_scope()
-            .allow_file(&track.path)
+            .allow_file(path)
             .map_err(|e| e.to_string())?;
     }
     Ok(media)
@@ -204,6 +273,31 @@ mod tests {
         assert_eq!(media.tracks[0].speaker, "You");
         assert_eq!(media.tracks[0].waveform.len(), 200);
         assert!(media.tracks[0].waveform.iter().all(|v| *v == 0.5));
+        assert!(media.videos.is_empty());
+        let video = "part-0000.screen.mp4";
+        fs::write(root.join("1").join(video), b"video fixture").unwrap();
+        crate::screen_files::write(
+            &root.join("1"),
+            "screen.json",
+            &vec![crate::screen::ScreenPart {
+                file: video.into(),
+                offset_ms: 500,
+                source: crate::screen::ScreenSourceInfo {
+                    kind: "window".into(),
+                    name: "Zoom window".into(),
+                },
+                while_sharing: false,
+                width: 1280,
+                height: 720,
+            }],
+        )
+        .unwrap();
+        let with_video = read(&root, "1").unwrap();
+        assert_eq!(with_video.videos.len(), 1);
+        assert_eq!(with_video.videos[0].offset_ms, 500);
+        assert_eq!(with_video.videos[0].duration_ms, 1000);
+        fs::remove_file(root.join("1").join(video)).unwrap();
+        assert!(read(&root, "1").unwrap().videos.is_empty());
         // The echo-cancelled mic plays in its place, still as You.
         fs::copy(&path, root.join("1/part-0000.mic.aec.wav")).unwrap();
         let media = read(&root, "1").unwrap();

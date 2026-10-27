@@ -8,3 +8,6 @@ pub(crate) mod macos_calls;
 pub(crate) mod macos_mics;
 #[cfg(target_os = "windows")]
 pub mod windows;
+
+#[cfg(target_os = "macos")]
+pub(crate) mod macos_video;

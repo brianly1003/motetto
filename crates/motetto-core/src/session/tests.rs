@@ -60,6 +60,7 @@ fn recording() -> Session {
         Command::AnswerAsk {
             call_id: "c1".into(),
             record: true,
+            screen: None,
         },
     )
     .0
@@ -131,6 +132,7 @@ fn detected_call_asks_and_never_captures_until_record() {
         Command::AnswerAsk {
             call_id: "c1".into(),
             record: true,
+            screen: None,
         },
     );
     assert_eq!(s.app.state, SessionState::Recording);
@@ -159,6 +161,7 @@ fn not_for_this_call_and_call_end_return_idle_without_work() {
         Command::AnswerAsk {
             call_id: "c1".into(),
             record: false,
+            screen: None,
         },
     );
     assert_eq!(no.app.state, SessionState::Idle);
@@ -260,6 +263,7 @@ fn stale_record_after_call_ended_starts_nothing() {
         Command::AnswerAsk {
             call_id: "c1".into(),
             record: true,
+            screen: None,
         },
     );
     assert_eq!(s.app.state, SessionState::Idle);
@@ -275,6 +279,7 @@ fn ask_accept_decline_and_stale_answers() {
         Command::AnswerAsk {
             call_id: "old".into(),
             record: true,
+            screen: None,
         },
     );
     assert_eq!(unchanged.app, s.app);
@@ -285,6 +290,7 @@ fn ask_accept_decline_and_stale_answers() {
         Command::AnswerAsk {
             call_id: "c1".into(),
             record: true,
+            screen: None,
         },
     );
     assert_eq!(yes.app.state, SessionState::Recording);
@@ -1289,6 +1295,7 @@ fn a_second_call_while_asking_replaces_the_question_and_restarts_the_card() {
     let answer = |call_id: &str| Command::AnswerAsk {
         call_id: call_id.into(),
         record: true,
+        screen: None,
     };
     let (s, fx) = step(s, 26_000, answer("c1"));
     assert!(matches!(s.app.state, SessionState::Asking { .. }));
@@ -1328,6 +1335,7 @@ fn a_call_detected_while_finishing_asks_once_the_notes_are_done() {
         Command::AnswerAsk {
             call_id: "c2".into(),
             record: true,
+            screen: None,
         },
     );
     assert_eq!(s.app.meeting_id.as_deref(), Some("m2"));
@@ -1398,4 +1406,238 @@ fn a_call_that_ends_while_recording_starts_the_idle_stop() {
         step(s, 60_000, Command::Tick).0.app.state,
         SessionState::Recording
     );
+}
+
+fn zoom_window() -> ScreenPick {
+    ScreenPick {
+        choice: ScreenChoice::CallWindow {
+            app_id: "zoom".into(),
+        },
+        name: "Zoom window".into(),
+    }
+}
+fn display() -> ScreenPick {
+    ScreenPick {
+        choice: ScreenChoice::Display { id: 1 },
+        name: "Display".into(),
+    }
+}
+fn screen_recording() -> Session {
+    let s = detect(fresh(), Mode::Ask).0;
+    step(
+        s,
+        1,
+        Command::AnswerAsk {
+            call_id: "c1".into(),
+            record: true,
+            screen: Some(zoom_window()),
+        },
+    )
+    .0
+}
+fn restarted(effects: Vec<Effect>) {
+    assert_eq!(
+        work(effects),
+        vec![
+            Effect::StopCapture,
+            Effect::StartCapture {
+                meeting_id: "m1".into(),
+                resume: true
+            }
+        ]
+    );
+}
+
+#[test]
+fn answer_ask_with_screen_records_the_picture() {
+    let s = detect(fresh(), Mode::Ask).0;
+    let (s, effects) = step(
+        s,
+        1,
+        Command::AnswerAsk {
+            call_id: "c1".into(),
+            record: true,
+            screen: Some(zoom_window()),
+        },
+    );
+    assert_eq!(s.app.screen.unwrap().pick, zoom_window());
+    assert!(matches!(&effects[0], Effect::Emit(Event::StateChanged(s)) if s.screen.is_some()));
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|e| matches!(e, Effect::StartCapture { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn set_screen_starts_a_new_part_only_while_recording() {
+    let (s, effects) = step(
+        start(fresh(), false),
+        1,
+        Command::SetScreen(Some(zoom_window())),
+    );
+    restarted(effects);
+    let (s, effects) = step(s, 2, Command::SetScreen(Some(zoom_window())));
+    assert!(work(effects).is_empty());
+    let s = step(s, 3, Command::PauseRecording).0;
+    let (s, effects) = step(s, 4, Command::SetScreen(Some(display())));
+    assert_eq!(s.app.screen.unwrap().pick, display());
+    assert!(work(effects).is_empty());
+    let (s, effects) = step(
+        start(fresh(), true),
+        1,
+        Command::SetScreen(Some(zoom_window())),
+    );
+    assert!(s.app.screen.is_none());
+    assert!(work(effects).is_empty());
+}
+
+#[test]
+fn pause_resume_keeps_screen_and_idle_clears_it() {
+    let s = step(screen_recording(), 2, Command::PauseRecording).0;
+    let (s, effects) = step(s, 3, Command::ResumeRecording);
+    assert_eq!(s.app.screen.as_ref().unwrap().pick, zoom_window());
+    assert_eq!(
+        work(effects),
+        vec![
+            Effect::NotifyRecording {
+                reason: StartReason::App { app: "Zoom".into() }
+            },
+            Effect::StartCapture {
+                meeting_id: "m1".into(),
+                resume: true
+            }
+        ]
+    );
+    let s = step(s, 4, Command::StopRecording).0;
+    let s = step(s, 5, Command::ResumeRecording).0;
+    assert!(s.app.screen.is_some());
+    let s = step(s, 6, Command::StopRecording).0;
+    let s = step(s, 7, Command::DiscardRecording).0;
+    assert!(s.app.screen.is_none());
+    assert!(!s.app.share_video_offer);
+    let s = step(
+        s,
+        8,
+        Command::StartManual {
+            meeting_id: "m2".into(),
+            notes_only: false,
+        },
+    )
+    .0;
+    assert!(s.app.screen.is_none());
+}
+
+#[test]
+fn share_offer_swaps_to_display_and_back() {
+    let s = step(screen_recording(), 2, Command::SetSharing(true)).0;
+    assert!(s.app.share_video_offer);
+    let (s, effects) = step(
+        s,
+        3,
+        Command::AnswerShareVideo {
+            display: Some(display()),
+        },
+    );
+    restarted(effects);
+    assert_eq!(s.app.screen.as_ref().unwrap().current(), Some(&display()));
+    let s = step(s, 4, Command::SetSharing(true)).0;
+    assert!(!s.app.share_video_offer);
+    let (s, effects) = step(s, 5, Command::SetSharing(false));
+    restarted(effects);
+    assert_eq!(
+        s.app.screen.as_ref().unwrap().current(),
+        Some(&zoom_window())
+    );
+    let s = step(s, 6, Command::SetSharing(true)).0;
+    let s = step(s, 7, Command::AnswerShareVideo { display: None }).0;
+    let s = step(s, 8, Command::SetSharing(true)).0;
+    assert!(!s.app.share_video_offer);
+    let s = step(s, 9, Command::SetSharing(false)).0;
+    let s = step(s, 10, Command::SetShareVideoAsk(false)).0;
+    assert!(
+        !step(s, 11, Command::SetSharing(true))
+            .0
+            .app
+            .share_video_offer
+    );
+    let s = step(screen_recording(), 2, Command::SetScreen(Some(display()))).0;
+    assert!(
+        !step(s, 3, Command::SetSharing(true))
+            .0
+            .app
+            .share_video_offer
+    );
+}
+
+#[test]
+fn screen_lost_restarts_audio_only_then_found_resumes() {
+    let (s, effects) = step(
+        screen_recording(),
+        2,
+        Command::ScreenEnded {
+            lost: true,
+            restart: true,
+        },
+    );
+    restarted(effects);
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert!(s.app.screen.as_ref().unwrap().current().is_none());
+    let (s, effects) = step(s, 3, Command::ScreenFound);
+    restarted(effects);
+    assert_eq!(
+        s.app.screen.as_ref().unwrap().current(),
+        Some(&zoom_window())
+    );
+    assert!(work(step(s, 4, Command::ScreenFound).1).is_empty());
+}
+
+#[test]
+fn screen_failure_turns_screen_off() {
+    for restart in [false, true] {
+        let (s, effects) = step(
+            screen_recording(),
+            2,
+            Command::ScreenEnded {
+                lost: false,
+                restart,
+            },
+        );
+        assert_eq!(s.app.state, SessionState::Recording);
+        assert!(s.app.screen.is_none());
+        if restart {
+            restarted(effects);
+        } else {
+            assert!(work(effects).is_empty());
+        }
+    }
+}
+
+#[test]
+fn stale_share_answer_and_window_signals_do_not_start_capture() {
+    let (s, effects) = step(
+        screen_recording(),
+        2,
+        Command::AnswerShareVideo {
+            display: Some(display()),
+        },
+    );
+    assert_eq!(
+        s.app.screen.as_ref().unwrap().current(),
+        Some(&zoom_window())
+    );
+    assert!(work(effects).is_empty());
+    let s = step(s, 3, Command::StopRecording).0;
+    let (s, effects) = step(
+        s,
+        4,
+        Command::ScreenEnded {
+            lost: true,
+            restart: true,
+        },
+    );
+    assert!(!s.app.screen.as_ref().unwrap().waiting);
+    assert!(work(effects).is_empty());
 }

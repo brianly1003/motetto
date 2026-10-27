@@ -44,6 +44,8 @@ pub struct AppState {
     pub dnd_active: bool,
     pub onboarding_done: bool,
     pub sharing: Option<Sharing>,
+    pub screen: Option<ScreenState>,
+    pub share_video_offer: bool,
     pub companion: CompanionState,
     pub ask_off_pending: Option<AskOffPending>,
     /// While the call's app has let go of the mic: the recording time (`elapsed_ms`) at which it
@@ -54,6 +56,36 @@ pub struct AppState {
     /// After Discard in the Stopped Pill: the meeting went to Recently deleted; the Pill offers
     /// Undo until `until_ms` (owner, 2026-10-20).
     pub discarded: Option<Discarded>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind")]
+pub enum ScreenChoice {
+    CallWindow { app_id: String },
+    Display { id: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ScreenPick {
+    pub choice: ScreenChoice,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ScreenState {
+    pub pick: ScreenPick,
+    pub while_sharing: Option<ScreenPick>,
+    pub waiting: bool,
+}
+
+impl ScreenState {
+    pub fn current(&self) -> Option<&ScreenPick> {
+        if self.waiting {
+            None
+        } else {
+            Some(self.while_sharing.as_ref().unwrap_or(&self.pick))
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -78,6 +110,8 @@ impl Default for AppState {
             dnd_active: false,
             onboarding_done: false,
             sharing: None,
+            screen: None,
+            share_video_offer: false,
             companion: CompanionState {
                 visible: false,
                 size: CompanionSize::Pill,
@@ -334,6 +368,7 @@ pub enum Command {
     AnswerAsk {
         call_id: String,
         record: bool,
+        screen: Option<ScreenPick>,
     },
     StopRecording,
     /// Explicit Stop restores the library, which owns Resume/Discard during the grace period.
@@ -348,6 +383,16 @@ pub enum Command {
     ResumeRecording,
     /// The user picked another microphone: the current part ends and the next one records from it.
     SwitchMicrophone,
+    SetScreen(Option<ScreenPick>),
+    AnswerShareVideo {
+        display: Option<ScreenPick>,
+    },
+    ScreenEnded {
+        lost: bool,
+        restart: bool,
+    },
+    ScreenFound,
+    SetShareVideoAsk(bool),
     CallEnded {
         call_id: String,
     },
@@ -410,6 +455,41 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_state_current_prefers_share_display_and_hides_while_waiting() {
+        let pick = ScreenPick {
+            choice: ScreenChoice::CallWindow {
+                app_id: "zoom".into(),
+            },
+            name: "Zoom window".into(),
+        };
+        let display = ScreenPick {
+            choice: ScreenChoice::Display { id: 1 },
+            name: "Display".into(),
+        };
+        let mut screen = ScreenState {
+            pick: pick.clone(),
+            while_sharing: None,
+            waiting: false,
+        };
+        assert_eq!(screen.current(), Some(&pick));
+        screen.while_sharing = Some(display.clone());
+        assert_eq!(screen.current(), Some(&display));
+        screen.waiting = true;
+        assert_eq!(screen.current(), None);
+    }
+
+    #[test]
+    fn screen_choice_serializes_with_a_kind_tag() {
+        assert_eq!(
+            serde_json::to_string(&ScreenChoice::CallWindow {
+                app_id: "zoom".into()
+            })
+            .unwrap(),
+            r#"{"kind":"CallWindow","app_id":"zoom"}"#
+        );
+    }
 
     #[test]
     fn state_event_round_trips_with_tagged_state_and_numeric_milliseconds() {

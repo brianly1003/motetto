@@ -25,6 +25,13 @@ export function systemLanguages(list: readonly string[] = typeof navigator === '
   return [...new Set(list.map(tag => tag.split('-')[0].toLowerCase()).map(code => code === 'fil' ? 'tl' : code === 'nb' || code === 'nn' ? 'no' : code))].filter(code => known.has(code));
 }
 
+/** Null notes language means the call's own language; mixed calls have no single original. */
+export function originalNotesLanguage(written?: string | null, call?: string | null) {
+  if (written) return written;
+  const languages = [...new Set((call ?? '').split(',').map(code => code.trim()).filter(Boolean))];
+  return languages.length === 1 ? languages[0] : null;
+}
+
 /** A translation has the notes' exact lines (motetto_core::translate), so it shows their ticks. */
 export function withTicks(translated: string, notes: string) {
   const ticks = notes.split('\n');

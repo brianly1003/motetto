@@ -107,6 +107,7 @@ pub struct Session {
     keep: bool,
     peek_until: Option<u64>,
     before_share: CompanionSize,
+    share_video_ask: bool,
     pause_remind_at: Option<u64>,
 }
 
@@ -129,12 +130,26 @@ impl Session {
             keep: false,
             peek_until: None,
             before_share: CompanionSize::Pill,
+            share_video_ask: true,
             pause_remind_at: None,
         }
     }
 
     fn audio(&self) -> bool {
         self.app.started_by != Some(StartReason::NotesOnly)
+    }
+
+    fn restart_part(&self, effects: &mut Vec<Effect>) {
+        if self.app.state == SessionState::Recording
+            && self.audio()
+            && let Some(meeting_id) = self.app.meeting_id.clone()
+        {
+            effects.push(Effect::StopCapture);
+            effects.push(Effect::StartCapture {
+                meeting_id,
+                resume: true,
+            });
+        }
     }
 
     /// Every open problem, the shown one first or not; the desktop resolves some by cause.
@@ -148,6 +163,9 @@ impl Session {
         self.app.app = None;
         self.app.elapsed_ms = 0;
         self.app.started_by = None;
+        self.app.screen = None;
+        self.app.share_video_offer = false;
+        self.app.sharing = None;
         self.ask = None;
         self.call = None;
         self.apps.clear();
@@ -466,7 +484,11 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 session.ask(call, meeting_id, now, &mut effects);
             }
         }
-        Command::AnswerAsk { call_id, record } => {
+        Command::AnswerAsk {
+            call_id,
+            record,
+            screen,
+        } => {
             if session
                 .ask
                 .as_ref()
@@ -481,6 +503,11 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                             StartReason::App { app: ask.call.app },
                             &mut effects,
                         );
+                        session.app.screen = screen.map(|pick| ScreenState {
+                            pick,
+                            while_sharing: None,
+                            waiting: false,
+                        });
                     }
                 } else if !record {
                     session.idle();
@@ -595,16 +622,74 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             session.idle_since = None;
             session.pause_remind_at = Some(now.saturating_add(PAUSE_REMIND_MS));
         }
-        // A new part on the new mic, like Resume without the pause; already announced.
-        Command::SwitchMicrophone
-            if session.app.state == SessionState::Recording && session.audio() =>
+        Command::SwitchMicrophone => session.restart_part(&mut effects),
+        Command::SetShareVideoAsk(on) => {
+            session.share_video_ask = on;
+            if !on {
+                session.app.share_video_offer = false;
+            }
+        }
+        Command::SetScreen(pick)
+            if matches!(
+                session.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) && session.audio() =>
         {
-            if let Some(meeting_id) = session.app.meeting_id.clone() {
-                effects.push(Effect::StopCapture);
-                effects.push(Effect::StartCapture {
-                    meeting_id,
-                    resume: true,
-                });
+            let screen = pick.map(|pick| ScreenState {
+                pick,
+                while_sharing: None,
+                waiting: false,
+            });
+            if screen != session.app.screen {
+                session.app.screen = screen;
+                session.app.share_video_offer = false;
+                session.restart_part(&mut effects);
+            }
+        }
+        Command::AnswerShareVideo { display } if session.app.share_video_offer => {
+            session.app.share_video_offer = false;
+            if let Some(
+                display @ ScreenPick {
+                    choice: ScreenChoice::Display { .. },
+                    ..
+                },
+            ) = display
+                && let Some(screen) = session.app.screen.as_mut()
+            {
+                screen.while_sharing = Some(display);
+                screen.waiting = false;
+                session.restart_part(&mut effects);
+            }
+        }
+        Command::ScreenEnded { lost, restart }
+            if matches!(
+                session.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) && session.app.screen.is_some() =>
+        {
+            if lost {
+                if let Some(screen) = session.app.screen.as_mut() {
+                    screen.waiting = true;
+                }
+            } else {
+                session.app.screen = None;
+                session.app.share_video_offer = false;
+            }
+            if restart {
+                session.restart_part(&mut effects);
+            }
+        }
+        Command::ScreenFound
+            if matches!(
+                session.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) =>
+        {
+            if let Some(screen) = session.app.screen.as_mut()
+                && screen.waiting
+            {
+                screen.waiting = false;
+                session.restart_part(&mut effects);
             }
         }
         Command::MicActivity { app_id, active }
@@ -661,6 +746,12 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             ) =>
         {
             if active && session.app.sharing.is_none() {
+                session.app.share_video_offer = session.share_video_ask
+                    && session.audio()
+                    && session.app.screen.as_ref().is_some_and(|s| {
+                        matches!(s.pick.choice, ScreenChoice::CallWindow { .. })
+                            && s.while_sharing.is_none()
+                    });
                 session.before_share = session.app.companion.size;
                 session.app.sharing = Some(Sharing {
                     hidden_from_capture: None,
@@ -670,6 +761,13 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 session.app.companion.size = CompanionSize::Dot;
             } else if !active && session.app.sharing.is_some() {
                 session.app.sharing = None;
+                session.app.share_video_offer = false;
+                if let Some(screen) = session.app.screen.as_mut()
+                    && screen.while_sharing.take().is_some()
+                {
+                    screen.waiting = false;
+                    session.restart_part(&mut effects);
+                }
                 session.app.companion.size = session.before_share;
             }
             session.app.companion.peeking = false;

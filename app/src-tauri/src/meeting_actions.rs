@@ -221,6 +221,35 @@ pub async fn meeting_action(
     result
 }
 
+#[tauri::command]
+pub async fn delete_video(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    video_action(app, id, false).await
+}
+#[tauri::command]
+pub async fn restore_video(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    video_action(app, id, true).await
+}
+async fn video_action(app: tauri::AppHandle, id: String, restore: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let library = app.state::<Library>();
+        if library.busy.swap(true, Ordering::SeqCst) {
+            return Err(
+                "Wait until recording and processing finish before changing video files.".into(),
+            );
+        }
+        let result = if restore {
+            crate::screen_files::restore(&library.root, &id)
+        } else {
+            crate::screen_files::delete(&library.root, &id)
+        };
+        library.busy.store(false, Ordering::SeqCst);
+        let _ = app.emit("motetto://library-changed", ());
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,7 +22,7 @@ adopted: { [key in string]: string },
 /**
  * Resolved and written only by Rust after verification; empty means not ready.
  */
-speech_path: string, vad_path: string, notes_path: string, call_language: string, part_chars: number, keep_audio: string, recording_reminder: boolean, 
+speech_path: string, vad_path: string, notes_path: string, call_language: string, part_chars: number, keep_audio: string, screen_offer_on_ask: boolean, screen_source: string, screen_on_own_share: string, screen_preset: string, screen_cursor: boolean, keep_video: string, recording_reminder: boolean, 
 /**
  * The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
  */

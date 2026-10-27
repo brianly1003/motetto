@@ -3,6 +3,7 @@ import type { AskOffPending } from "./AskOffPending";
 import type { CompanionState } from "./CompanionState";
 import type { Discarded } from "./Discarded";
 import type { ProblemInfo } from "./ProblemInfo";
+import type { ScreenState } from "./ScreenState";
 import type { SessionState } from "./SessionState";
 import type { Sharing } from "./Sharing";
 import type { StartReason } from "./StartReason";
@@ -11,7 +12,7 @@ export type AppState = { state: SessionState, meeting_id: string | null, app: st
 /**
  * Master switch for the Ask card on detected calls (Settings > Calls); default on.
  */
-ask_on_call: boolean, problem: ProblemInfo | null, more_problems: number, quit_pending: boolean, dnd_active: boolean, onboarding_done: boolean, sharing: Sharing | null, companion: CompanionState, ask_off_pending: AskOffPending | null, 
+ask_on_call: boolean, problem: ProblemInfo | null, more_problems: number, quit_pending: boolean, dnd_active: boolean, onboarding_done: boolean, sharing: Sharing | null, screen: ScreenState | null, share_video_offer: boolean, companion: CompanionState, ask_off_pending: AskOffPending | null, 
 /**
  * While the call's app has let go of the mic: the recording time (`elapsed_ms`) at which it
  * stops by itself, so the Pill can count down. None while someone is talking or after Keep

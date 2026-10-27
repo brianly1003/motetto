@@ -37,6 +37,8 @@ pub fn spawn(
                         id,
                         offset_ms,
                         stop,
+                        screen,
+                        while_sharing,
                     } => {
                         if recording.as_ref().is_none_or(|r| r.id != id) {
                             recording = Some(Recording {
@@ -69,16 +71,76 @@ pub fn spawn(
                                 )?;
                             }
                             #[cfg(target_os = "macos")]
-                            // Windows records the default mic; its picker needs WASAPI ids.
-                            #[cfg(target_os = "macos")]
-                            let mic = crate::microphone::for_capture(&app);
-                            let result = motetto_core::capture::record_with_levels(
-                                base,
-                                stop.clone(),
-                                Some(app.state::<crate::live::State>().meters.clone()),
-                                mic.as_deref(),
-                            )
-                            .map_err(|e| e.to_string());
+                            let result = {
+                                let mic = crate::microphone::for_capture(&app);
+                                let (mut picture, progress) = crate::recording_screen::prepare(
+                                    &app,
+                                    &results,
+                                    &id,
+                                    base,
+                                    offset_ms,
+                                    &stop,
+                                    screen.as_ref().map(|pick| (pick, while_sharing)),
+                                )
+                                .unwrap_or_else(|reason| {
+                                    let _ = results.send(Message::ScreenEnded {
+                                        id: id.clone(),
+                                        part: stop.clone(),
+                                        lost: false,
+                                        restart: false,
+                                        reason: Some(reason),
+                                    });
+                                    (None, None)
+                                });
+                                if stop.load(Ordering::Acquire) {
+                                    picture.take();
+                                    if let Some(progress) = progress {
+                                        let _ = progress.join();
+                                    }
+                                    let empty = motetto_core::video::VideoOutcome {
+                                        path: format!("{base}.screen.mp4"),
+                                        width: 0,
+                                        height: 0,
+                                        moments_ms: vec![],
+                                        lost: false,
+                                        error: None,
+                                    };
+                                    crate::recording_screen::finish(
+                                        base,
+                                        offset_ms,
+                                        screen.as_ref(),
+                                        while_sharing,
+                                        &empty,
+                                        &app,
+                                    );
+                                    return Ok(vec![]);
+                                }
+                                let result = motetto_core::capture::record_with_levels(
+                                    base,
+                                    stop.clone(),
+                                    Some(app.state::<crate::live::State>().meters.clone()),
+                                    mic.as_deref(),
+                                    picture.as_ref(),
+                                )
+                                .map_err(|e| e.to_string());
+                                picture.take();
+                                if let Some(progress) = progress {
+                                    let _ = progress.join();
+                                }
+                                if let Ok(captured) = &result
+                                    && let Some(video) = &captured.video
+                                {
+                                    crate::recording_screen::finish(
+                                        base,
+                                        offset_ms,
+                                        screen.as_ref(),
+                                        while_sharing,
+                                        video,
+                                        &app,
+                                    );
+                                }
+                                result.map(|captured| captured.files)
+                            };
                             #[cfg(target_os = "windows")]
                             let result = motetto_core::capture::record(base, stop.clone())
                                 .map_err(|e| e.to_string());
@@ -130,11 +192,9 @@ pub fn spawn(
                             reason.push_str(&format!(" Status could not be saved: {e}"));
                         }
                         if result.is_ok() {
-                            match app
-                                .state::<crate::settings::Store>()
-                                .get()
-                                .and_then(|s| crate::settings_storage::retain(&root, &s.keep_audio))
-                            {
+                            match app.state::<crate::settings::Store>().get().and_then(|s| {
+                                crate::settings_storage::retain(&root, &s.keep_audio, &s.keep_video)
+                            }) {
                                 Ok(()) => {}
                                 Err(error) => {
                                     let _ = app.emit(

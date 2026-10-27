@@ -51,12 +51,17 @@ pub fn match_app<'a>(rules: &'a [AppRule], bundle_id: &str) -> Option<&'a AppRul
 /// The rule whose title pattern matches a window title. `^` at the start means "starts with",
 /// anything else is a plain substring.
 pub fn match_title<'a>(rules: &'a [AppRule], title: &str) -> Option<&'a AppRule> {
-    rules.iter().find(|r| {
-        r.title_patterns.iter().any(|p| match p.strip_prefix('^') {
-            Some(prefix) => title.starts_with(prefix),
-            None => title.contains(p.as_str()),
-        })
-    })
+    rules
+        .iter()
+        .find(|r| r.title_patterns.iter().any(|p| title_matches(p, title)))
+}
+
+/// Match a title by prefix (`^`) or literal substring, as the call detector does.
+pub fn title_matches(pattern: &str, title: &str) -> bool {
+    match pattern.strip_prefix('^') {
+        Some(prefix) => title.starts_with(prefix),
+        None => title.contains(pattern),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

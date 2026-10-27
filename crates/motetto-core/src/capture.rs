@@ -2,150 +2,30 @@
 
 use crate::events::Stop;
 use crate::mics::Meters;
+pub use crate::platform::macos_video::displays;
+use crate::platform::macos_video::{Encoding, Input, Picture, Writer};
+use crate::video::{self, Captured, ScreenCapture, ScreenTarget, VideoOutcome};
 use screencapturekit::prelude::*;
 use std::error::Error;
-use std::fs::File;
-use std::io::{BufWriter, Seek, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-type Wav = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
-
-struct Track {
-    path: String,
-    wav: Wav,
-    errors: mpsc::Sender<Result<(), String>>,
-    level: Option<Arc<AtomicU32>>,
-    /// Mic only: clipped samples since the desktop last looked (`mics::too_loud`).
-    clips: Option<Arc<AtomicU32>>,
-}
-
-impl SCStreamOutputTrait for Track {
-    fn did_output_sample_buffer(&self, buf: CMSampleBuffer, _: SCStreamOutputType) {
-        if let Err(error) = self.write_buffer(buf) {
-            // The receiver may already be gone while capture is stopping.
-            let _ = self.errors.send(Err(format!(
-                "cannot save {}: {error}; check free disk space and folder permissions",
-                self.path
-            )));
-        }
-    }
-}
-
-impl Track {
-    fn write_buffer(&self, buf: CMSampleBuffer) -> Result<(), Box<dyn Error>> {
-        let frames = buf.num_samples() as usize;
-        let Ok(list) = buf.audio_buffer_list() else {
-            return Ok(());
-        };
-        let Some(first) = list.get(0) else {
-            return Ok(());
-        };
-        if frames == 0 {
-            return Ok(());
-        }
-        // Built-in mics deliver f32; a Bluetooth headset mic in call mode delivers 16-bit integers.
-        let format = buf.format_description();
-        let float = format.as_ref().is_none_or(|f| f.audio_is_float());
-        let bits = format
-            .as_ref()
-            .and_then(|f| f.audio_bits_per_channel())
-            .unwrap_or(32);
-        let samples = to_f32(first.data(), float, bits)
-            .ok_or_else(|| format!("unsupported audio format ({bits}-bit, float: {float})"))?;
-        // Non-interleaved: buffer 0 is channel 0. Interleaved: take every Nth sample.
-        let stride = (samples.len() / frames).max(1);
-
-        if let Some(level) = &self.level {
-            level.store(
-                rms(samples.iter().step_by(stride).copied()).to_bits(),
-                Ordering::Relaxed,
-            );
-        }
-        if let Some(clips) = &self.clips {
-            let n = samples
-                .iter()
-                .step_by(stride)
-                .filter(|s| s.abs() >= crate::mics::CLIP)
-                .count();
-            clips.fetch_add(n as u32, Ordering::Relaxed);
-        }
-        let mut wav = self.wav.lock().map_err(|_| "audio writer lock poisoned")?;
-        if wav.is_none() {
-            let rate = buf
-                .format_description()
-                .and_then(|f| f.audio_sample_rate())
-                .unwrap_or(48_000.0) as u32;
-            let spec = hound::WavSpec {
-                channels: 1,
-                sample_rate: rate,
-                bits_per_sample: 32,
-                sample_format: hound::SampleFormat::Float,
-            };
-            *wav = Some(hound::WavWriter::create(&self.path, spec)?);
-        }
-        if let Some(writer) = wav.as_mut() {
-            write_samples(writer, samples.iter().step_by(stride).copied())?;
-        }
-        Ok(())
-    }
-}
-
-fn to_f32(data: &[u8], float: bool, bits: u32) -> Option<Vec<f32>> {
-    Some(match (float, bits) {
-        (true, 32) => data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| f32::from_ne_bytes(*b))
-            .collect(),
-        (false, 16) => data
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| f32::from(i16::from_ne_bytes(*b)) / 32768.0)
-            .collect(),
-        (false, 32) => data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| i32::from_ne_bytes(*b) as f32 / 2_147_483_648.0)
-            .collect(),
-        _ => return None,
-    })
-}
-
-fn rms(samples: impl Iterator<Item = f32>) -> f32 {
-    let (sum, count) = samples
-        .filter(|v| v.is_finite())
-        .fold((0.0_f64, 0_u64), |(sum, count), v| {
-            (sum + f64::from(v).powi(2), count + 1)
-        });
-    if count == 0 {
-        0.0
-    } else {
-        ((sum / count as f64).sqrt() as f32).min(1.0)
-    }
-}
-
-fn write_samples<W: Write + Seek>(
-    writer: &mut hound::WavWriter<W>,
-    samples: impl Iterator<Item = f32>,
-) -> Result<(), hound::Error> {
-    for sample in samples {
-        writer.write_sample(sample)?;
-    }
-    Ok(())
-}
+mod screen;
+mod track;
+use screen::picture_filter;
+pub use screen::{screen_windows, window_display};
+use track::{Track, Wav};
 
 fn wait_for_stop(
     stop: &Stop,
     errors: &mpsc::Receiver<Result<(), String>>,
+    picture_ended: &AtomicBool,
     mut flush: impl FnMut() -> Result<(), String>,
 ) -> Result<(), String> {
     let mut flushed = Instant::now();
-    while !stop.load(Ordering::Relaxed) {
+    while !stop.load(Ordering::Relaxed) && !picture_ended.load(Ordering::Acquire) {
         match errors.recv_timeout(Duration::from_millis(50)) {
             Ok(result) => return result,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -164,23 +44,26 @@ fn wait_for_stop(
 
 /// Records both tracks until `stop` is set or writing fails; returns tracks that got audio.
 pub fn record(base: &str, stop: Stop) -> Result<Vec<String>, Box<dyn Error>> {
-    record_with_levels(base, stop, None, None)
+    record_with_levels(base, stop, None, None, None).map(|captured| captured.files)
 }
 
 /// The desktop's recording: optional meters, and `mic` (a `mics::Mic` id) to record instead of
-/// the system default input.
+/// the system default input. Picture capture uses a separate stream so its filter never
+/// changes the audio scope; picture errors are reported separately while WAV recording continues.
 pub fn record_with_levels(
     base: &str,
     stop: Stop,
     meters: Option<Meters>,
     mic: Option<&str>,
-) -> Result<Vec<String>, Box<dyn Error>> {
-    let display = SCShareableContent::get()?
+    screen: Option<&ScreenCapture>,
+) -> Result<Captured, Box<dyn Error>> {
+    let content = SCShareableContent::get()?;
+    let display = content
         .displays()
         .into_iter()
         .next()
         .ok_or("no display found")?;
-    let filter = SCContentFilter::create()
+    let audio_filter = SCContentFilter::create()
         .with_display(&display)
         .with_excluding_windows(&[])
         .build()?;
@@ -197,9 +80,62 @@ pub fn record_with_levels(
         None => config,
     };
 
-    let mut stream = SCStream::new(&filter, &config)?;
-    let mut tracks = vec![];
+    let mut outcome = screen.map(|s| VideoOutcome {
+        path: s.path.clone(),
+        width: 0,
+        height: 0,
+        moments_ms: vec![],
+        lost: false,
+        error: None,
+    });
+    let mut encoding = None;
+    let mut picture = None;
+    if let Some(screen) = screen {
+        let prepared = picture_filter(&content, screen).and_then(|(filter, width, height)| {
+            let writer = Writer::create(
+                std::path::Path::new(&screen.path),
+                width,
+                height,
+                screen.preset,
+            )?;
+            let video = Arc::new(Encoding::new(writer));
+            let config = SCStreamConfiguration::new()
+                .with_width(width)
+                .with_height(height)
+                .with_minimum_frame_interval(&CMTime::new(1, screen.preset.fps()))
+                .with_captures_audio(false)
+                .with_shows_cursor(screen.cursor)
+                .with_pixel_format(PixelFormat::BGRA)
+                .with_preserves_aspect_ratio(true)
+                .map_err(|e| e.to_string())?;
+            let mut stream =
+                SCStream::new_with_delegate(&filter, &config, PictureDelegate(video.clone()))
+                    .map_err(|e| e.to_string())?;
+            stream
+                .add_output_handler(Picture(video.clone()), SCStreamOutputType::Screen)
+                .map_err(|e| e.to_string())?;
+            Ok((stream, video, width, height))
+        });
+        match prepared {
+            Ok((stream, video, width, height)) => {
+                if let Some(outcome) = outcome.as_mut() {
+                    outcome.width = width;
+                    outcome.height = height;
+                }
+                picture = Some(stream);
+                encoding = Some(video);
+            }
+            Err(error) => {
+                if let Some(outcome) = outcome.as_mut() {
+                    outcome.error = Some(error);
+                }
+            }
+        }
+    }
     let (errors, stopped) = mpsc::channel();
+    let mut stream =
+        SCStream::new_with_delegate(&audio_filter, &config, AudioDelegate(errors.clone()))?;
+    let mut tracks = vec![];
     for (suffix, kind) in [
         ("system", SCStreamOutputType::Audio),
         ("mic", SCStreamOutputType::Microphone),
@@ -209,6 +145,12 @@ pub fn record_with_levels(
         stream.add_output_handler(
             Track {
                 path: path.clone(),
+                video: encoding.clone(),
+                input: if suffix == "system" {
+                    Input::Them
+                } else {
+                    Input::Me
+                },
                 wav: wav.clone(),
                 errors: errors.clone(),
                 level: meters
@@ -226,7 +168,15 @@ pub fn record_with_levels(
 
     println!("Recording system audio + mic. Press Enter to stop.");
     stream.start_capture()?;
-    let mut result = wait_for_stop(&stop, &stopped, || {
+    if let Some(picture) = picture.as_mut()
+        && let Err(error) = picture.start_capture()
+        && let Some(video) = &encoding
+    {
+        video.fail(error.to_string());
+    }
+    let mut reported = None;
+    let mut video_done = false;
+    let mut result = wait_for_stop(&stop, &stopped, &AtomicBool::new(false), || {
         for (path, wav) in &tracks {
             let mut wav = wav
                 .lock()
@@ -235,6 +185,41 @@ pub fn record_with_levels(
                 writer
                     .flush()
                     .map_err(|e| format!("cannot flush {path}: {e}; check free disk space"))?;
+            }
+        }
+        if let Some(video) = outcome.as_mut() {
+            if let Some(encoder) = &encoding {
+                let (moments, error) = encoder.snapshot();
+                video.moments_ms = moments;
+                video.error = error;
+                if encoder.failed() && !video_done {
+                    if let Some(ScreenCapture {
+                        target: ScreenTarget::Window(id),
+                        ..
+                    }) = screen
+                    {
+                        video.lost = screen_windows()
+                            .ok()
+                            .is_some_and(|windows| !windows.iter().any(|w| w.id == *id));
+                    }
+                    if let Some(picture) = picture.as_mut() {
+                        let _ = picture.stop_capture();
+                    }
+                    let (moments, error) = encoder.finish();
+                    video.moments_ms = moments;
+                    video.error = if video.lost { None } else { error };
+                    video_done = true;
+                }
+            }
+            if reported.as_ref() != Some(video) {
+                if let Some(progress) = screen.and_then(|s| s.progress.as_ref()) {
+                    if video.lost || video.error.is_some() {
+                        let _ = progress.send(video.clone());
+                    } else {
+                        let _ = progress.try_send(video.clone());
+                    }
+                }
+                reported = Some(video.clone());
             }
         }
         Ok(())
@@ -269,6 +254,23 @@ pub fn record_with_levels(
         // Attempt both tracks even if the first one failed; keep the first error.
         result = result.and(finalized);
     }
+    if let Some(video) = outcome.as_mut() {
+        if !video_done
+            && let Some(picture) = picture.as_mut()
+            && let Err(error) = picture.stop_capture()
+            && let Some(encoder) = &encoding
+        {
+            encoder.fail(error.to_string());
+        }
+        if !video_done && let Some(encoding) = &encoding {
+            let (moments, error) = encoding.finish();
+            video.moments_ms = moments;
+            video.error = error;
+        }
+        if let Some(progress) = screen.and_then(|s| s.progress.as_ref()) {
+            let _ = progress.send(video.clone());
+        }
+    }
     result?;
     if files.is_empty() {
         return Err(
@@ -276,58 +278,108 @@ pub fn record_with_levels(
                 .into(),
         );
     }
-    Ok(files)
+    Ok(Captured {
+        files,
+        video: outcome,
+    })
+}
+
+struct AudioDelegate(mpsc::Sender<Result<(), String>>);
+impl SCStreamDelegateTrait for AudioDelegate {
+    fn did_stop_with_error(&self, error: screencapturekit::error::SCError) {
+        let _ = self.0.send(Err(format!("audio capture stopped: {error}")));
+    }
+}
+struct PictureDelegate(Arc<Encoding>);
+impl SCStreamDelegateTrait for PictureDelegate {
+    fn did_stop_with_error(&self, error: screencapturekit::error::SCError) {
+        self.0.fail(error.to_string());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{self, Cursor, SeekFrom};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     #[test]
-    fn meter_uses_real_signal_and_rejects_non_finite_samples() {
-        assert_eq!(rms([0.0, 0.0].into_iter()), 0.0);
-        assert_eq!(rms([0.5, -0.5].into_iter()), 0.5);
-        assert_eq!(rms([f32::NAN, f32::INFINITY].into_iter()), 0.0);
-        assert_eq!(rms([4.0].into_iter()), 1.0);
-    }
-
-    #[test]
-    fn integer_mic_buffers_become_float_samples() {
-        let int16: Vec<u8> = [16384_i16, -32768]
-            .iter()
-            .flat_map(|v| v.to_ne_bytes())
-            .collect();
-        assert_eq!(to_f32(&int16, false, 16), Some(vec![0.5, -1.0]));
-        assert_eq!(to_f32(&0.25_f32.to_ne_bytes(), true, 32), Some(vec![0.25]));
-        assert_eq!(
-            to_f32(&(i32::MIN).to_ne_bytes(), false, 32),
-            Some(vec![-1.0])
+    #[ignore = "needs Screen Recording and Microphone permission; records the main display for five seconds"]
+    fn records_a_display_part_with_picture() {
+        let display = SCShareableContent::get()
+            .unwrap()
+            .displays()
+            .into_iter()
+            .next()
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "motetto-screen-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let base = dir.join("part-0000").to_string_lossy().into_owned();
+        let screen = ScreenCapture {
+            target: ScreenTarget::Display(display.display_id()),
+            preset: video::Preset::Smaller,
+            cursor: true,
+            path: format!("{base}.screen.mp4"),
+            scale: 1.0,
+            progress: None,
+        };
+        let stop = Stop::default();
+        let timer = stop.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            timer.store(true, Ordering::Relaxed);
+        });
+        eprintln!(
+            "Recording the main display and both audio tracks for five seconds; output: {}",
+            dir.display()
         );
-        assert_eq!(to_f32(&[0; 3], false, 24), None);
-    }
-    struct FailingWriter {
-        bytes: Cursor<Vec<u8>>,
-        fail: Arc<AtomicBool>,
-    }
-
-    impl Write for FailingWriter {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if self.fail.load(Ordering::Relaxed) {
-                return Err(io::Error::other("disk full"));
+        let result = record_with_levels(&base, stop, None, None, Some(&screen));
+        thread.join().unwrap();
+        let captured = result.unwrap();
+        assert_eq!(captured.files.len(), 2);
+        let video = captured.video.unwrap();
+        assert_eq!(video.error, None);
+        assert!(!video.lost);
+        assert_eq!(video.moments_ms.first(), Some(&0));
+        assert!(std::fs::metadata(&screen.path).unwrap().len() > 10_000);
+        match std::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0",
+                &screen.path,
+            ])
+            .output()
+        {
+            Ok(output) => {
+                assert!(output.status.success());
+                let codecs = String::from_utf8(output.stdout).unwrap();
+                assert_eq!(codecs.lines().filter(|c| *c == "h264").count(), 1);
+                assert_eq!(codecs.lines().filter(|c| *c == "aac").count(), 2);
             }
-            self.bytes.write(bytes)
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("ffprobe unavailable; codec check skipped")
+            }
+            Err(e) => panic!("cannot run ffprobe: {e}"),
         }
     }
 
-    impl Seek for FailingWriter {
-        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-            self.bytes.seek(pos)
-        }
+    #[test]
+    fn lost_window_ends_the_wait_like_a_stop() {
+        let (_sender, receiver) = mpsc::channel();
+        let stop = Stop::default();
+        assert_eq!(
+            wait_for_stop(&stop, &receiver, &AtomicBool::new(true), || Ok(())),
+            Ok(())
+        );
+        assert!(!stop.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -336,45 +388,27 @@ mod tests {
         let stop = Stop::default();
         sender.send(Err("disk full".into())).unwrap();
         assert_eq!(
-            wait_for_stop(&stop, &receiver, || Ok(())),
+            wait_for_stop(&stop, &receiver, &AtomicBool::new(false), || Ok(())),
             Err("disk full".into())
         );
         stop.store(true, Ordering::Relaxed);
-        assert_eq!(wait_for_stop(&stop, &receiver, || Ok(())), Ok(()));
+        assert_eq!(
+            wait_for_stop(&stop, &receiver, &AtomicBool::new(false), || Ok(())),
+            Ok(())
+        );
     }
 
     #[test]
     fn periodic_flush_failure_reaches_the_recorder() {
         let (_sender, receiver) = mpsc::channel();
         assert_eq!(
-            wait_for_stop(&Stop::default(), &receiver, || Err("flush failed".into())),
+            wait_for_stop(
+                &Stop::default(),
+                &receiver,
+                &AtomicBool::new(false),
+                || Err("flush failed".into())
+            ),
             Err("flush failed".into())
-        );
-    }
-
-    #[test]
-    fn sample_write_failure_is_returned() {
-        let fail = Arc::new(AtomicBool::new(false));
-        let mut writer = hound::WavWriter::new(
-            FailingWriter {
-                bytes: Cursor::new(Vec::new()),
-                fail: fail.clone(),
-            },
-            hound::WavSpec {
-                channels: 1,
-                sample_rate: 48000,
-                bits_per_sample: 32,
-                sample_format: hound::SampleFormat::Float,
-            },
-        )
-        .unwrap();
-        write_samples(&mut writer, [0.5].into_iter()).unwrap();
-        fail.store(true, Ordering::Relaxed);
-        assert!(
-            write_samples(&mut writer, [0.5].into_iter())
-                .unwrap_err()
-                .to_string()
-                .contains("disk full")
         );
     }
 }
