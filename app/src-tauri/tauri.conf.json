@@ -18,7 +18,8 @@
         "width": 1200,
         "height": 800,
         "minWidth": 760,
-        "minHeight": 520
+        "minHeight": 520,
+        "contentProtected": true
       }
     ],
     "security": {

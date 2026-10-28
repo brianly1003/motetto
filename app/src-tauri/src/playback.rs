@@ -113,6 +113,17 @@ impl Player {
     }
 }
 
+/// Opens other audio (a rehearsal) under its own key; `playback_set` and the rest then take it.
+pub fn open_tracks(
+    app: &tauri::AppHandle,
+    key: String,
+    tracks: Vec<(PathBuf, u64)>,
+) -> Result<(), String> {
+    app.state::<Playback>()
+        .ask(Command::Open(key, tracks))
+        .map(|_| ())
+}
+
 /// True when this meeting's audio plays natively; false means the page plays it.
 #[tauri::command]
 pub async fn playback_open(app: tauri::AppHandle, id: String) -> Result<bool, String> {

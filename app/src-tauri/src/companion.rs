@@ -16,37 +16,39 @@ pub struct State {
 
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.manage(State::default());
-    let window = WebviewWindowBuilder::new(app, "companion", WebviewUrl::App("companion/".into()))
-        .title("Motetto recording controls")
-        .inner_size(460.0, 72.0)
-        .decorations(false)
-        .transparent(true)
-        // The page draws each size's own shadow; the native one outlines the whole transparent
-        // window as a dark rectangle around the Ask card and the Pill.
-        .shadow(false)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .visible_on_all_workspaces(true)
-        .content_protected(!motetto_core::config::allow_screenshots())
-        .focused(false)
-        .visible(false)
-        .on_page_load(|webview, _| {
-            webview
-                .app_handle()
-                .state::<State>()
-                .ready
-                .store(false, Ordering::SeqCst);
-            if webview
-                .app_handle()
-                .state::<crate::controller::Controller>()
-                .state()
-                .is_ok_and(|s| s.companion.visible)
-            {
-                crate::desktop::show(webview.app_handle());
-            }
-        })
-        .build()?;
+    let window = crate::window_native::protect(
+        app,
+        WebviewWindowBuilder::new(app, "companion", WebviewUrl::App("companion/".into())),
+    )
+    .title("Motetto recording controls")
+    .inner_size(460.0, 72.0)
+    .decorations(false)
+    .transparent(true)
+    // The page draws each size's own shadow; the native one outlines the whole transparent
+    // window as a dark rectangle around the Ask card and the Pill.
+    .shadow(false)
+    .resizable(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible_on_all_workspaces(true)
+    .focused(false)
+    .visible(false)
+    .on_page_load(|webview, _| {
+        webview
+            .app_handle()
+            .state::<State>()
+            .ready
+            .store(false, Ordering::SeqCst);
+        if webview
+            .app_handle()
+            .state::<crate::controller::Controller>()
+            .state()
+            .is_ok_and(|s| s.companion.visible)
+        {
+            crate::desktop::show(webview.app_handle());
+        }
+    })
+    .build()?;
     crate::window_native::configure(&window)?;
     if let Some(monitor) = window.primary_monitor()? {
         let area = monitor.work_area();

@@ -57,6 +57,27 @@ pub fn record_with_levels(
     mic: Option<&str>,
     screen: Option<&ScreenCapture>,
 ) -> Result<Captured, Box<dyn Error>> {
+    record_tracks(base, stop, meters, mic, screen, true)
+}
+
+/// The microphone alone (a rehearsal, SPEC 14.6): system audio is never captured, and only
+/// `<base>.mic.wav` is written.
+pub fn record_mic_only(
+    base: &str,
+    stop: Stop,
+    mic: Option<&str>,
+) -> Result<Captured, Box<dyn Error>> {
+    record_tracks(base, stop, None, mic, None, false)
+}
+
+fn record_tracks(
+    base: &str,
+    stop: Stop,
+    meters: Option<Meters>,
+    mic: Option<&str>,
+    screen: Option<&ScreenCapture>,
+    system: bool,
+) -> Result<Captured, Box<dyn Error>> {
     let content = SCShareableContent::get()?;
     let display = content
         .displays()
@@ -72,7 +93,7 @@ pub fn record_with_levels(
         .with_width(2)
         .with_height(2)
         .with_minimum_frame_interval(&CMTime::new(1, 1))
-        .with_captures_audio(true)
+        .with_captures_audio(system)
         .with_channel_count(1)
         .with_captures_microphone(true)?;
     let config = match mic {
@@ -140,6 +161,9 @@ pub fn record_with_levels(
         ("system", SCStreamOutputType::Audio),
         ("mic", SCStreamOutputType::Microphone),
     ] {
+        if suffix == "system" && !system {
+            continue;
+        }
         let path = format!("{base}.{suffix}.wav");
         let wav: Wav = Arc::default();
         stream.add_output_handler(
@@ -166,7 +190,9 @@ pub fn record_with_levels(
         tracks.push((path, wav));
     }
 
-    println!("Recording system audio + mic. Press Enter to stop.");
+    if system {
+        println!("Recording system audio + mic. Press Enter to stop.");
+    }
     stream.start_capture()?;
     if let Some(picture) = picture.as_mut()
         && let Err(error) = picture.start_capture()
@@ -300,6 +326,26 @@ impl SCStreamDelegateTrait for PictureDelegate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "needs Microphone permission; records the microphone for two seconds"]
+    fn records_the_mic_only() {
+        let dir = std::env::temp_dir().join(format!("motetto-mic-only-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("rehearsal").to_string_lossy().into_owned();
+        let stop = Stop::default();
+        let timer = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            timer.store(true, Ordering::SeqCst);
+        });
+        let captured = record_mic_only(&base, stop, None).unwrap();
+        assert_eq!(captured.files, [format!("{base}.mic.wav")]);
+        assert!(!std::path::Path::new(&format!("{base}.system.wav")).exists());
+        let reader = hound::WavReader::open(format!("{base}.mic.wav")).unwrap();
+        let seconds = reader.duration() as f64 / f64::from(reader.spec().sample_rate);
+        assert!(seconds > 1.0, "{seconds} s");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     #[ignore = "needs Screen Recording and Microphone permission; records the main display for five seconds"]
     fn records_a_display_part_with_picture() {

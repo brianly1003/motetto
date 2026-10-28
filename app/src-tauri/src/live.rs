@@ -65,13 +65,25 @@ pub fn start(
                 std::thread::sleep(Duration::from_millis(100));
             };
             let _guard = guard;
-            let mut server = match crate::speech::Server::start(&stop) {
-                Ok(server) => server,
+            let server = match crate::speech::Server::start(&stop) {
+                Ok(server) => std::sync::Arc::new(Mutex::new(server)),
                 Err(_) => {
                     failed(&app, &id, &stop);
                     return;
                 }
             };
+            // The script strip follows the voice on this same server (follow.rs).
+            *app.state::<crate::follow::State>()
+                .server
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(server.clone());
+            crate::follow::start(
+                app.clone(),
+                format!("{base}.mic.wav").into(),
+                stop.clone(),
+                false,
+            );
+            let _shared = Shared(app.clone());
             let vad = motetto_core::config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty());
             let mut cursor = 0;
             let mut recent = Vec::new();
@@ -100,14 +112,8 @@ pub fn start(
                     else {
                         return Ok(None);
                     };
-                    let segments = transcribe_slice(
-                        &mut server,
-                        &base,
-                        &directory,
-                        (cursor, end),
-                        offset,
-                        &stop,
-                    )?;
+                    let segments =
+                        transcribe_slice(&server, &base, &directory, (cursor, end), offset, &stop)?;
                     recent.extend(segments);
                     recent.sort_by_key(|segment| segment.0);
                     let rows: Vec<_> = recent
@@ -174,6 +180,19 @@ pub fn start(
 }
 type Row = (u64, u64, &'static str, String);
 
+/// Takes the shared server back when the caption thread ends, so following stops using it.
+struct Shared(tauri::AppHandle);
+impl Drop for Shared {
+    fn drop(&mut self) {
+        *self
+            .0
+            .state::<crate::follow::State>()
+            .server
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
 static SLICING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// True while a live slice is being transcribed; the notes engine waits on it under 16 GB.
 pub fn slicing() -> bool {
@@ -194,7 +213,7 @@ impl Drop for Slicing {
 
 /// Transcribes `cursor..end` of both tracks, skipping a track that is digital silence.
 fn transcribe_slice(
-    server: &mut crate::speech::Server,
+    server: &crate::follow::Shared,
     base: &str,
     directory: &Path,
     (cursor, end): (u64, u64),
@@ -215,7 +234,11 @@ fn transcribe_slice(
         if samples.iter().any(|sample| sample.abs() > 0.005) {
             let prompt = motetto_core::config::terms();
             let _slicing = Slicing::begin();
-            for segment in server.transcribe(&samples, offset + cursor, prompt.as_deref(), stop)? {
+            let heard = server
+                .lock()
+                .map_err(|_| "The speech server is unavailable")?
+                .transcribe(&samples, offset + cursor, prompt.as_deref(), stop)?;
+            for segment in heard {
                 segments.push((segment.start_ms, segment.end_ms, side, segment.text));
             }
         }
@@ -344,7 +367,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("motetto-measure-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
-        let mut server = crate::speech::Server::start(&stop).unwrap();
+        let server = std::sync::Arc::new(Mutex::new(crate::speech::Server::start(&stop).unwrap()));
         // MOTETTO_MEASURE_VAD=0 measures the energy rule alone.
         let vad = motetto_core::config::var("WHISPER_VAD_MODEL").filter(|v| {
             !v.is_empty() && std::env::var("MOTETTO_MEASURE_VAD").as_deref() != Ok("0")
@@ -368,7 +391,7 @@ mod tests {
             clock += asked.elapsed().as_millis() as u64;
             let started = std::time::Instant::now();
             let rows =
-                transcribe_slice(&mut server, &base, &directory, (cursor, end), 0, &stop).unwrap();
+                transcribe_slice(&server, &base, &directory, (cursor, end), 0, &stop).unwrap();
             let took = started.elapsed().as_millis() as u64;
             (slices, busy) = (slices + 1, busy + took);
             clock = clock.max(end) + took;

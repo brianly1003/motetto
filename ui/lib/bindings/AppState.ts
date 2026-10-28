@@ -8,17 +8,21 @@ import type { SessionState } from "./SessionState";
 import type { Sharing } from "./Sharing";
 import type { StartReason } from "./StartReason";
 
-export type AppState = { state: SessionState, meeting_id: string | null, app: string | null, elapsed_ms: number, started_by: StartReason | null, 
+export type AppState = { state: SessionState, meeting_id: string | null, app: string | null, elapsed_ms: number, started_by: StartReason | null,
 /**
  * Master switch for the Ask card on detected calls (Settings > Calls); default on.
  */
-ask_on_call: boolean, problem: ProblemInfo | null, more_problems: number, quit_pending: boolean, dnd_active: boolean, onboarding_done: boolean, sharing: Sharing | null, screen: ScreenState | null, share_video_offer: boolean, companion: CompanionState, ask_off_pending: AskOffPending | null, 
+ask_on_call: boolean, problem: ProblemInfo | null, more_problems: number, quit_pending: boolean, dnd_active: boolean, onboarding_done: boolean, sharing: Sharing | null,
+/**
+ * Motetto's windows show in screen shares (SPEC 14.1); false hides every one of them.
+ */
+share_visible: boolean, screen: ScreenState | null, share_video_offer: boolean, companion: CompanionState, ask_off_pending: AskOffPending | null,
 /**
  * While the call's app has let go of the mic: the recording time (`elapsed_ms`) at which it
  * stops by itself, so the Pill can count down. None while someone is talking or after Keep
  * recording (owner, 2026-10-20: "the call ended but Motetto still records").
  */
-stops_at_ms: number | null, 
+stops_at_ms: number | null,
 /**
  * After Discard in the Stopped Pill: the meeting went to Recently deleted; the Pill offers
  * Undo until `until_ms` (owner, 2026-10-20).

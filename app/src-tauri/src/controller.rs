@@ -31,6 +31,9 @@ pub enum Action {
     Size(CompanionSize),
     Pin(bool),
     Sharing(bool),
+    /// Hidden / Shown in screen shares (SPEC 14.1).
+    ShareVisible(bool),
+    ShareReset(bool),
     RequestQuit,
     Quit(bool),
     Dismiss(u64),
@@ -425,6 +428,8 @@ impl<H: Host> Engine<H> {
             Action::Size(size) => Command::SetCompanionSize(size),
             Action::Pin(pinned) => Command::SetCompanionPinned(pinned),
             Action::Sharing(active) => Command::SetSharing(active),
+            Action::ShareVisible(on) => Command::SetShareVisible(on),
+            Action::ShareReset(on) => Command::SetShareReset(on),
             Action::StopMeeting(id) => {
                 if self.session.app.meeting_id.as_ref() != Some(&id) {
                     return Ok(());

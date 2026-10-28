@@ -109,6 +109,7 @@ pub struct Session {
     before_share: CompanionSize,
     share_video_ask: bool,
     pause_remind_at: Option<u64>,
+    share_reset: bool,
 }
 
 impl Session {
@@ -132,6 +133,14 @@ impl Session {
             before_share: CompanionSize::Pill,
             share_video_ask: true,
             pause_remind_at: None,
+            share_reset: true,
+        }
+    }
+
+    /// A share ended: its "Shown" choice ends with it unless Settings keeps it (SPEC 14.1).
+    fn end_share(&mut self) {
+        if self.app.sharing.take().is_some() && self.share_reset {
+            self.app.share_visible = false;
         }
     }
 
@@ -165,7 +174,7 @@ impl Session {
         self.app.started_by = None;
         self.app.screen = None;
         self.app.share_video_offer = false;
-        self.app.sharing = None;
+        self.end_share();
         self.ask = None;
         self.call = None;
         self.apps.clear();
@@ -295,7 +304,7 @@ impl Session {
         self.app.app = self.call.as_ref().map(|c| c.app.clone());
         self.app.started_by = Some(reason.clone());
         self.app.companion.size = CompanionSize::Pill;
-        self.app.sharing = None;
+        self.end_share();
         self.app.companion.peeking = false;
         self.peek_until = None;
         self.idle_since = None;
@@ -576,6 +585,8 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 });
             }
         }
+        Command::SetShareVisible(on) => session.app.share_visible = on,
+        Command::SetShareReset(on) => session.share_reset = on,
         Command::SetAskOnCall(on) => {
             session.app.ask_on_call = on;
             effects.push(Effect::SetAskOnCall(on));
@@ -760,7 +771,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 });
                 session.app.companion.size = CompanionSize::Dot;
             } else if !active && session.app.sharing.is_some() {
-                session.app.sharing = None;
+                session.end_share();
                 session.app.share_video_offer = false;
                 if let Some(screen) = session.app.screen.as_mut()
                     && screen.while_sharing.take().is_some()

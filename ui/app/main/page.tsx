@@ -13,6 +13,8 @@ import CommandPalette from "@/components/CommandPalette";
 import NotificationPermission from "@/components/NotificationPermission";
 import SessionControls from "@/components/SessionControls";
 import LibraryHome, { openItems } from "@/components/LibraryHome";
+import ScriptsPage from "@/components/ScriptsPage";
+import type { Rehearsal } from "@/lib/bindings/Rehearsal";
 import * as ipc from "@/lib/ipc";
 import { strings as s } from "@/lib/strings";
 import type { Meeting } from "@/lib/bindings/Meeting";
@@ -72,6 +74,10 @@ export default function Main(){
   const [quitPending,setQuitPending]=useState(false);
   // Recently deleted is a page you open, never part of the list (SPEC 7.7).
   const [trashOpen,setTrashOpen]=useState(false);
+  const [scriptsOpen,setScriptsOpen]=useState(false);
+  // A rehearsal ended: its report opens on the Scripts page (SPEC 14.6), wherever the library was.
+  const [rehearsed,setRehearsed]=useState<Rehearsal|null>(null);
+  useEffect(()=>{const off=ipc.listen<Rehearsal>("motetto://rehearsal",r=>{if(r.duration_ms===null)return;selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);setRehearsed(r);});return()=>{void off.then(fn=>fn());};},[]);
   const [rowMenu,setRowMenu]=useState<{id:string;left:number;top:number}|null>(null);
   const [rename,setRename]=useState<{id:string;n:number}|null>(null);
   const [version,setVersion]=useState(0);
@@ -133,10 +139,10 @@ export default function Main(){
     clearTimeout(toastTimer.current);setToast({text,undo});
     toastTimer.current=setTimeout(()=>setToast(null),undo?5000:3600);
   }
-  async function refresh(){setVersion(n=>n+1);try{setMeetings(await ipc.listMeetings());setBytes(await ipc.libraryBytes());setOpenCount(openItems(await ipc.openActionItems()).length);const gone=await ipc.deletedMeetings();setDeleted(gone);if(!gone.length)setTrashOpen(false);const next=await ipc.importing(),was=jobRef.current;jobRef.current=next;setJob(next);if(next?.import&&next.id&&next.id!==was?.id)void select(next.id);if(!next)stopped();}catch(e){setError(String(e));}}
+  async function refresh(){setVersion(n=>n+1);try{setMeetings(await ipc.listMeetings());setBytes(await ipc.libraryBytes());setOpenCount(openItems(await ipc.openActionItems()).length);const gone=await ipc.deletedMeetings();setDeleted(gone);if(!gone.length)setTrashOpen(false);setScriptsOpen(false);const next=await ipc.importing(),was=jobRef.current;jobRef.current=next;setJob(next);if(next?.import&&next.id&&next.id!==was?.id)void select(next.id);if(!next)stopped();}catch(e){setError(String(e));}}
   // The sidebar's Action items row: back to Home from a meeting or Recently deleted.
-  function goHome(){selection.current++;setRename(null);setSelected(null);setTrashOpen(false);}
-  async function select(id:string){setRename(null);setTrashOpen(false);openId.current=id;const request=++selection.current;try{const meeting=await ipc.getMeeting(id);if(request===selection.current){setSelected(meeting);}}catch(e){if(request===selection.current)setError(String(e));}}
+  function goHome(){selection.current++;setRename(null);setSelected(null);setTrashOpen(false);setScriptsOpen(false);}
+  async function select(id:string){setRename(null);setTrashOpen(false);setScriptsOpen(false);openId.current=id;const request=++selection.current;try{const meeting=await ipc.getMeeting(id);if(request===selection.current){setSelected(meeting);}}catch(e){if(request===selection.current)setError(String(e));}}
   async function selectForRename(id:string){await select(id);setRename(value=>({id,n:(value?.n??0)+1}));}
   // No confirmation: Undo and 30 days in Recently deleted are the safety net (SPEC 7.7).
   async function deleteMeeting(id:string){
@@ -176,7 +182,7 @@ export default function Main(){
   const liveId=live&&["Recording","Paused","Stopped"].includes(live.state.type)?live.meeting_id:null;
   // Re-read the open meeting; a short recording that was discarded simply closes.
   async function reread(id:string){const request=++selection.current;try{const meeting=await ipc.getMeeting(id);if(request===selection.current)setSelected(meeting);}catch{if(request===selection.current&&openId.current===id)setSelected(null);}}
-  async function tryOpen(id:string){try{const meeting=await ipc.getMeeting(id);pendingOpen.current=null;openId.current=id;setRename(null);setTrashOpen(false);selection.current++;setSelected(meeting);}catch{/* not created yet */}}
+  async function tryOpen(id:string){try{const meeting=await ipc.getMeeting(id);pendingOpen.current=null;openId.current=id;setRename(null);setTrashOpen(false);setScriptsOpen(false);selection.current++;setSelected(meeting);}catch{/* not created yet */}}
   useEffect(()=>{
     if(!liveId)return;
     pendingOpen.current=liveId;
@@ -184,7 +190,7 @@ export default function Main(){
   },[liveId]);
   // The live meeting's page follows the session: Stopped, then Writing the notes, then Ready.
   useEffect(()=>{if(openId.current&&openId.current===live?.meeting_id)void reread(openId.current);},[live?.state.type]);
-  async function recordNow(){setTrashOpen(false);await session.act(ipc.startRecording);}
+  async function recordNow(){setTrashOpen(false);setScriptsOpen(false);await session.act(ipc.startRecording);}
   // Recover = Write the notes again on the saved parts (it transcribes them first), one meeting at a
   // time on its own progress page; Discard = Recently deleted, with Undo.
   async function recover(ids:string[]){for(const id of ids){await select(id);notify(s.recovered);try{await ipc.meetingAction(id,"regenerate");}catch(e){setError(String(e));break;}finally{await refresh();}}}
@@ -208,7 +214,7 @@ export default function Main(){
       next.focus({preventScroll:true});next.scrollIntoView({block:"nearest"});next.click();
     }}>
       <label className="search"><span className="sr-only">{s.search}</span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input placeholder={s.search} value={query} onChange={e=>setQuery(e.target.value)}/><button className="search-key" aria-label="Command palette" onClick={event=>{event.preventDefault();setPalette(true);}}><kbd>⌘K</kbd></button></label>
-      {meetings.length>0&&<button className="homerow" aria-current={!trashOpen&&!selected?"page":undefined} onClick={goHome}><MenuIcon name="items"/><span>{s.actionItems}</span><span className="n" aria-label={openCount?s.openCount.replace("{n}",String(openCount)):undefined}>{openCount||""}</span></button>}
+      {meetings.length>0&&<button className="homerow" aria-current={!trashOpen&&!scriptsOpen&&!selected?"page":undefined} onClick={goHome}><MenuIcon name="items"/><span>{s.actionItems}</span><span className="n" aria-label={openCount?s.openCount.replace("{n}",String(openCount)):undefined}>{openCount||""}</span></button>}
       <nav className="meeting-list" aria-label={s.meetings}>
         {hits?hits.length>0&&<div><div className="list-heading">{s.results}<span>{hits.length}</span></div>{hits.map(({meeting,snippet})=>{const current=!trashOpen&&selected?.summary.id===meeting.id;return <button key={meeting.id} className={`meeting-row hit ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>{setFound(was=>snippet?{id:meeting.id,tab:snippet.source==="Transcript"?"Transcript":"Notes",query:query.trim(),n:(was?.n??0)+1}:null);void select(meeting.id);}}>
           <strong title={meetingTitle(meeting)}><Marked text={meetingTitle(meeting)} query={query}/></strong>
@@ -224,7 +230,8 @@ export default function Main(){
           }}><Dots/></button></div>;})}</div>:null;})}
         {query&&!shown.length&&<p className="list-empty">{s.none}</p>}
       </nav>
-      {deleted.length>0&&<button className="trash" aria-current={trashOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setTrashOpen(true);}}><MenuIcon name="trash"/><span>{s.deletedMeetings}</span><span className="n">{deleted.length}</span></button>}
+      <button className="scripts-entry" aria-current={scriptsOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);}}><MenuIcon name="script"/><span>{s.scripts}</span></button>
+      {deleted.length>0&&<button className="trash" aria-current={trashOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setScriptsOpen(false);setTrashOpen(true);}}><MenuIcon name="trash"/><span>{s.deletedMeetings}</span><span className="n">{deleted.length}</span></button>}
       <div className="privacy"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="8" width="10" height="9" rx="2"/><path d="M7 8V5a3 3 0 0 1 6 0v3"/></svg>{(()=>{const facts=`${meetings.length} ${meetings.length===1?s.meeting:s.meetings.toLowerCase()}${bytes>0?` · ${fileSize(bytes)}`:""}`;return <span className="where" title={`${s.privacy} · ${facts}`}><span>{s.privacy}</span><b>&nbsp;· {facts}</b></span>;})()}</div>
     </aside>
     <section className="workspace" aria-busy={loading}>
@@ -232,6 +239,7 @@ export default function Main(){
       {error&&<Alert variant="danger" role="alert" title={s.error} actions={<button className="quiet" onClick={()=>setError("")}>{s.dismiss}</button>}>{error}</Alert>}
       {quitPending&&<Alert title="Saving before quitting">{s.quitPending}</Alert>}
       {loading?<div className="empty" role="status"><p>{s.loading}</p></div>
+        :scriptsOpen?<ScriptsPage onError={setError} device={mac?"Mac":"PC"} pending={rehearsed} onTaken={()=>setRehearsed(null)}/>
         :trashOpen?<RecentlyDeleted deleted={deleted} refresh={refresh} notify={notify} onError={setError}/>
         :selected&&job?.import&&job.id===selected.summary.id?<article className="document"><header className="dochead"><h1>{meetingTitle(selected.summary)}</h1><div className="document-meta"><span>{meetingDate(selected.summary.created_ms)}</span></div></header><ImportingPage id={selected.summary.id} stage={jobStage} stopping={stopping} onCancel={cancelImport}/></article>
         :selected?<MeetingDocument key={selected.summary.id+(found?.id===selected.summary.id?`-${found.n}`:"")} find={found?.id===selected.summary.id?found:undefined} session={session} meeting={selected} rewriting={rewritingId===selected.summary.id?{stage:jobStage,transcribe:!!job?.transcribe}:undefined} onToast={(text,undo)=>notify(text,undo)} onChange={setSelected} onError={setError} renameRequest={rename?.id===selected.summary.id?rename.n:0} onRename={title=>renameMeeting(selected.summary.id,title)} onDelete={()=>void deleteMeeting(selected.summary.id)} onChanged={async removed=>{await refresh();if(removed){selection.current++;setSelected(null);}else await select(selected.summary.id);}}/>

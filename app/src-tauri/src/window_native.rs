@@ -20,6 +20,99 @@ pub fn configure(_window: &tauri::WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
+/// What every window was last set to: 0 hidden, 1 shown, 2 unsure (a window refused), so the
+/// next change applies again.
+static SHOWN: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Every window Motetto builds starts hidden from screen shares unless the user chose Shown
+/// (SPEC 14.1).
+pub fn protect<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    _app: &M,
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    builder.content_protected(SHOWN.load(std::sync::atomic::Ordering::SeqCst) != 1)
+}
+
+/// Sets every window, even after one refuses; any refusal is reported and the state is marked
+/// unsure so the same choice is applied again next time.
+fn apply_all<E: ToString>(
+    shown: bool,
+    windows: impl IntoIterator<Item = Result<(), E>>,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    SHOWN.store(u8::from(shown), Ordering::SeqCst);
+    let mut first = None;
+    for result in windows {
+        if let Err(error) = result {
+            first.get_or_insert(error.to_string());
+        }
+    }
+    match first {
+        Some(error) => {
+            SHOWN.store(2, Ordering::SeqCst);
+            Err(error)
+        }
+        None => Ok(()),
+    }
+}
+
+/// Applies the Hidden / Shown switch to every open window when it changes.
+pub fn follow_share_visible(app: &tauri::AppHandle, shown: bool) -> Result<(), String> {
+    use tauri::Manager;
+    if SHOWN.load(std::sync::atomic::Ordering::SeqCst) == u8::from(shown) {
+        return Ok(());
+    }
+    // Stored before the windows are set, so a window built meanwhile starts with the new choice.
+    SHOWN.store(u8::from(shown), std::sync::atomic::Ordering::SeqCst);
+    apply_all(
+        shown,
+        app.webview_windows()
+            .values()
+            .map(|window| window.set_content_protected(!shown))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The app that has the keyboard now (its process id), when it isn't Motetto.
+#[cfg(target_os = "macos")]
+pub fn frontmost_app() -> Option<i32> {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    // SAFETY: NSWorkspace's shared instance and its frontmost application are autoreleased
+    // objects owned by AppKit; we only read the pid and keep no pointer.
+    let pid: i32 = unsafe {
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let front: *mut AnyObject = msg_send![workspace, frontmostApplication];
+        if front.is_null() {
+            return None;
+        }
+        msg_send![front, processIdentifier]
+    };
+    (pid > 0 && pid as u32 != std::process::id()).then_some(pid)
+}
+#[cfg(not(target_os = "macos"))]
+pub fn frontmost_app() -> Option<i32> {
+    // Windows: GetForegroundWindow before editing, SetForegroundWindow after (plan task W2).
+    None
+}
+/// Gives the keyboard back to the app that had it before the prompter's editor.
+#[cfg(target_os = "macos")]
+pub fn activate_app(pid: i32) {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    // SAFETY: runningApplicationWithProcessIdentifier returns an autoreleased object or nil for
+    // a pid that has quit; nil is checked before the activate message.
+    unsafe {
+        let running: *mut AnyObject = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid
+        ];
+        if !running.is_null() {
+            let _: bool = msg_send![running, activateWithOptions: 0usize];
+        }
+    }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn activate_app(_pid: i32) {}
+
 /// Keep the logo a native template image while the recording dot and timer use recording red.
 #[cfg(target_os = "macos")]
 pub fn tray_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {
@@ -95,6 +188,57 @@ fn main_vertical(y: i32, height: u32, window: u32, minimum: u32, scale: f64) -> 
 #[cfg(test)]
 mod tests {
     use super::main_vertical;
+
+    #[test]
+    fn a_refusing_window_does_not_stop_the_others() {
+        let mut set = Vec::new();
+        let results = (0..3).map(|i| {
+            set.push(i);
+            if i == 1 { Err("refused") } else { Ok(()) }
+        });
+        assert_eq!(super::apply_all(true, results), Err("refused".into()));
+        assert_eq!(set, [0, 1, 2]);
+        // Unsure: the next change to the same value applies again.
+        assert_eq!(super::SHOWN.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(
+            super::apply_all(false, Vec::<Result<(), String>>::new()),
+            Ok(())
+        );
+        assert_eq!(super::SHOWN.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn every_window_starts_protected() {
+        // Hidden from shares from the first frame (SPEC 14.1): each window built in code goes
+        // through `protect`, and the one in tauri.conf.json is content protected.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut builders = 0;
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") || path.ends_with("window_native.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (at, _) in text.match_indices("WebviewWindowBuilder::new(") {
+                builders += 1;
+                let before = &text[at.saturating_sub(120)..at];
+                assert!(
+                    before.contains("window_native::protect("),
+                    "{} builds a window without window_native::protect",
+                    path.display()
+                );
+            }
+        }
+        assert!(
+            builders >= 3,
+            "companion, settings and onboarding windows: {builders}"
+        );
+        let config = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .unwrap();
+        assert!(config.contains("\"contentProtected\": true"));
+    }
 
     #[test]
     fn library_clears_the_pill_and_stays_inside_the_work_area() {

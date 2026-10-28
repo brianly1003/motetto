@@ -44,6 +44,8 @@ pub struct AppState {
     pub dnd_active: bool,
     pub onboarding_done: bool,
     pub sharing: Option<Sharing>,
+    /// Motetto's windows show in screen shares (SPEC 14.1); false hides every one of them.
+    pub share_visible: bool,
     pub screen: Option<ScreenState>,
     pub share_video_offer: bool,
     pub companion: CompanionState,
@@ -110,6 +112,7 @@ impl Default for AppState {
             dnd_active: false,
             onboarding_done: false,
             sharing: None,
+            share_visible: false,
             screen: None,
             share_video_offer: false,
             companion: CompanionState {
@@ -467,6 +470,10 @@ pub enum Command {
     /// Pointer over the Ask card holds it; leaving restarts the 20 s.
     HoldAsk(bool),
     SetAskOnCall(bool),
+    /// The Hidden / Shown switch: Motetto's windows in screen shares or not (SPEC 14.1).
+    SetShareVisible(bool),
+    /// Settings › Screen "Go back to hidden when a share ends".
+    SetShareReset(bool),
     SetCompanionSize(CompanionSize),
     SetCompanionPinned(bool),
     SetSharing(bool),

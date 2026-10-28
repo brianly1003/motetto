@@ -16,6 +16,8 @@ pub mod mics;
 pub mod ollama;
 pub mod progress;
 pub mod session;
+pub mod share_check;
+pub mod shorten;
 pub mod slice;
 pub mod summarize;
 pub mod transcribe;

@@ -53,6 +53,27 @@ pub fn run() {
             get_state,
             crate::my_notes::get_my_notes,
             crate::my_notes::save_my_notes,
+            crate::scripts::scripts_list,
+            crate::prompter::prompter_show,
+            crate::prompter::prompter_hide,
+            crate::prompter::prompter_layout,
+            crate::prompter::prompter_edit,
+            crate::prompter::prompter_controls,
+            crate::prompter::prompter_marker_drawn,
+            crate::prompter::prompter_move_display,
+            crate::prompter::prompter_state,
+            crate::follow::follow_hint,
+            crate::rehearse::rehearse_start,
+            crate::rehearse::rehearse_stop,
+            crate::rehearse::rehearsal_transcript,
+            crate::rehearse::rehearsal_audio,
+            crate::rehearse::rehearsal_discard,
+            crate::rehearse::rehearsal_keep,
+            crate::rehearse::rehearsal_shorten,
+            crate::scripts::script_read,
+            crate::scripts::script_save,
+            crate::scripts::script_rename,
+            crate::scripts::script_delete,
             crate::my_notes::add_jot,
             mark_moment,
             start_recording,
@@ -90,6 +111,7 @@ pub fn run() {
             undo_dont_ask,
             hold_ask,
             set_ask_on_call,
+            set_share_visible,
             crate::settings::open_settings,
             crate::setup::open_setup,
             crate::settings::get_settings,
@@ -209,6 +231,15 @@ pub fn run() {
                 edits: std::sync::Mutex::new(()),
             });
             crate::companion::create(app.handle())?;
+            app.manage(crate::prompter::State::default());
+            app.manage(crate::follow::State::default());
+            app.manage(crate::rehearse::State(
+                Default::default(),
+                Default::default(),
+            ));
+            if let Ok(data) = app.path().app_data_dir() {
+                crate::rehearse::sweep(&data.join("rehearsals"));
+            }
             if let Some(window) = app.get_webview_window("main") {
                 crate::window_native::place_main(&window)?;
             }
@@ -217,6 +248,18 @@ pub fn run() {
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
             crate::screen::watch(app.handle().clone())?;
+            let saved = app.state::<crate::settings::Store>().get()?;
+            dispatch(
+                app.handle().clone(),
+                Action::ShareReset(saved.share_reset_on_end),
+            );
+            dispatch(
+                app.handle().clone(),
+                // ALLOW_SCREENSHOTS (developer setting) still shows every window from launch.
+                Action::ShareVisible(
+                    saved.share_visible_default || motetto_core::config::allow_screenshots(),
+                ),
+            );
             dispatch(
                 app.handle().clone(),
                 Action::ShareVideoAsk(
@@ -550,6 +593,10 @@ async fn hold_ask(app: tauri::AppHandle, hold: bool) -> Result<(), String> {
 async fn set_ask_on_call(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     act(app, Action::AskOnCall(on)).await
 }
+#[tauri::command]
+async fn set_share_visible(app: tauri::AppHandle, on: bool) -> Result<(), String> {
+    act(app, Action::ShareVisible(on)).await
+}
 
 struct Desktop {
     app: tauri::AppHandle,
@@ -613,6 +660,9 @@ impl Host for Desktop {
         if let Event::StateChanged(state) = &event {
             crate::settings_system::sound(&self.app, state.state == SessionState::Recording);
             crate::companion::update(&self.app, state)?;
+            crate::window_native::follow_share_visible(&self.app, state.share_visible)?;
+            crate::prompter::on_state(&self.app, state);
+            crate::rehearse::on_state(&self.app, state);
             crate::tray::update(
                 &self.app,
                 state,

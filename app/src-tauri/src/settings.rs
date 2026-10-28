@@ -27,6 +27,61 @@ impl Default for Companion {
         }
     }
 }
+/// Global shortcut keys and their default accelerators: recording (SPEC 4.4) then the
+/// prompter (SPEC 14.7). An empty accelerator is unassigned.
+pub const SHORTCUT_KEYS: [(&str, &str); 17] = [
+    ("S", "Ctrl+Alt+S"),
+    ("M", "Ctrl+Alt+M"),
+    ("J", "Ctrl+Alt+J"),
+    ("N", "Ctrl+Alt+N"),
+    ("Space", "Ctrl+Alt+Space"),
+    ("H", "Ctrl+Alt+H"),
+    ("P", "Ctrl+Alt+P"),
+    ("T", "Ctrl+Alt+T"),
+    // Ctrl+Alt is AltGr on many Windows layouts, where Ctrl+Alt+E types the euro sign.
+    (
+        "V",
+        if cfg!(windows) {
+            "Ctrl+Alt+Shift+V"
+        } else {
+            "Ctrl+Alt+V"
+        },
+    ),
+    (
+        "E",
+        if cfg!(windows) {
+            "Ctrl+Alt+Shift+E"
+        } else {
+            "Ctrl+Alt+E"
+        },
+    ),
+    ("Down", "Ctrl+Alt+Down"),
+    ("Up", "Ctrl+Alt+Up"),
+    ("ShiftDown", "Ctrl+Alt+Shift+Down"),
+    ("Backslash", "Ctrl+Alt+Backslash"),
+    ("Equal", "Ctrl+Alt+Equal"),
+    ("Minus", "Ctrl+Alt+Minus"),
+    ("R", "Ctrl+Alt+R"),
+];
+
+/// The script prompter's saved look (SPEC 14.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Prompter {
+    pub layout: crate::prompter::Layout,
+    /// The current line's size in px; the other lines scale with it.
+    pub text_size: u8,
+    pub last_script: Option<String>,
+}
+impl Default for Prompter {
+    fn default() -> Self {
+        Self {
+            layout: crate::prompter::Layout::Strip,
+            text_size: 22,
+            last_script: None,
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Spelling {
     pub spelling: String,
@@ -73,10 +128,17 @@ pub struct Settings {
     pub screen_cursor: bool,
     pub keep_video: String,
     pub recording_reminder: bool,
+    /// Settings › Screen: Motetto's windows show in screen shares when a session starts (SPEC 14.1).
+    pub share_visible_default: bool,
+    /// Back to hidden when a share ends.
+    pub share_reset_on_end: bool,
+    /// Check each share with one captured frame (SPEC 14.2).
+    pub share_check: bool,
     /// The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
     pub mic_device: Option<String>,
     pub sounds: bool,
     pub companion: Companion,
+    pub prompter: Prompter,
     pub spellings: Vec<Spelling>,
     pub shortcuts: BTreeMap<String, String>,
 }
@@ -120,9 +182,13 @@ impl Default for Settings {
             screen_cursor: true,
             keep_video: "same_as_audio".into(),
             recording_reminder: true,
+            share_visible_default: false,
+            share_reset_on_end: true,
+            share_check: true,
             mic_device: None,
             sounds: true,
             companion: Companion::default(),
+            prompter: Prompter::default(),
             spellings: motetto_core::config::terms()
                 .map(|terms| {
                     terms
@@ -134,9 +200,9 @@ impl Default for Settings {
                         .collect()
                 })
                 .unwrap_or_default(),
-            shortcuts: ["S", "M", "J", "N", "Space", "H", "P"]
-                .into_iter()
-                .map(|key| (key.into(), format!("Ctrl+Alt+{key}")))
+            shortcuts: SHORTCUT_KEYS
+                .iter()
+                .map(|(key, accelerator)| (key.to_string(), accelerator.to_string()))
                 .collect(),
         }
     }
@@ -176,6 +242,20 @@ impl Settings {
                 // Existing users never opted into automatic audio deletion.
                 if value.get("keep_audio").is_none() {
                     settings.keep_audio = "forever".into();
+                }
+                // Keys added since the file was saved; a default the user already took stays unassigned.
+                for (key, accelerator) in SHORTCUT_KEYS {
+                    if !settings.shortcuts.contains_key(key) {
+                        // Compared as shortcuts: "Alt+Ctrl+T" takes "Ctrl+Alt+T" too.
+                        let parse =
+                            |a: &str| a.parse::<tauri_plugin_global_shortcut::Shortcut>().ok();
+                        let taken = settings
+                            .shortcuts
+                            .values()
+                            .any(|v| parse(v).is_some() && parse(v) == parse(accelerator));
+                        let value = if taken { "" } else { accelerator };
+                        settings.shortcuts.insert(key.into(), value.into());
+                    }
                 }
                 settings.validate()?;
                 Ok(settings)
@@ -298,21 +378,15 @@ impl Settings {
                     .into(),
             );
         }
-        if self.shortcuts.len() != 7
-            || ["S", "M", "J", "N", "Space", "H", "P"]
+        if self.shortcuts.len() != SHORTCUT_KEYS.len()
+            || SHORTCUT_KEYS
                 .iter()
-                .any(|k| !self.shortcuts.contains_key(*k))
-            || self
-                .shortcuts
-                .values()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                != 7
+                .any(|(k, _)| !self.shortcuts.contains_key(*k))
         {
             return Err("Each shortcut must be different.".into());
         }
         let mut shortcuts = Vec::new();
-        for accelerator in self.shortcuts.values() {
+        for accelerator in self.shortcuts.values().filter(|a| !a.is_empty()) {
             let shortcut = accelerator
                 .parse::<tauri_plugin_global_shortcut::Shortcut>()
                 .map_err(|_| "Use a valid shortcut such as Ctrl+Alt+S.")?;
@@ -486,6 +560,16 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
                 app.clone(),
                 crate::controller::Action::ShareVideoAsk(settings.screen_on_own_share == "ask"),
             );
+            crate::desktop::dispatch(
+                app.clone(),
+                crate::controller::Action::ShareReset(settings.share_reset_on_end),
+            );
+            if settings.share_visible_default != old.share_visible_default {
+                crate::desktop::dispatch(
+                    app.clone(),
+                    crate::controller::Action::ShareVisible(settings.share_visible_default),
+                );
+            }
             crate::tray::invalidate(&app);
             crate::desktop::refresh_tray(&app);
             let _ = app.emit("motetto://settings-changed", ());
@@ -580,10 +664,13 @@ pub fn open(app: &tauri::AppHandle, tab: &str) -> Result<(), String> {
             .emit("motetto://settings-tab", tab)
             .map_err(|e| e.to_string())?;
     } else {
-        tauri::WebviewWindowBuilder::new(
+        crate::window_native::protect(
             app,
-            "settings",
-            tauri::WebviewUrl::App(format!("settings/?tab={tab}").into()),
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "settings",
+                tauri::WebviewUrl::App(format!("settings/?tab={tab}").into()),
+            ),
         )
         .title("Settings")
         .inner_size(960., 760.)
@@ -662,6 +749,57 @@ mod tests {
             "{broken"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn old_settings_gain_new_keys() {
+        let root = std::env::temp_dir().join(format!("motet-settings-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        // A file from before the prompter: the 7 recording keys, M moved onto the new T default.
+        std::fs::write(
+            root.join("settings.json"),
+            r#"{"shortcuts":{"S":"Ctrl+Alt+Shift+S","M":"Alt+Ctrl+T","J":"Ctrl+Alt+J","N":"Ctrl+Alt+N","Space":"Ctrl+Alt+Space","H":"Ctrl+Alt+H","P":"Ctrl+Alt+P"}}"#,
+        )
+        .unwrap();
+        let settings = Settings::read_with(&root, catalog(), None, None).unwrap();
+        assert_eq!(settings.shortcuts.len(), SHORTCUT_KEYS.len());
+        assert_eq!(settings.shortcuts["S"], "Ctrl+Alt+Shift+S");
+        assert_eq!(settings.shortcuts["M"], "Alt+Ctrl+T");
+        // The new key whose default is taken starts unassigned instead of breaking the file.
+        assert_eq!(settings.shortcuts["T"], "");
+        assert_eq!(settings.shortcuts["Down"], "Ctrl+Alt+Down");
+        assert_eq!(settings.shortcuts["ShiftDown"], "Ctrl+Alt+Shift+Down");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn validation_requires_all_keys_unique() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.shortcuts.len(), SHORTCUT_KEYS.len());
+        defaults.validate().unwrap();
+        let mut missing = defaults.clone();
+        missing.shortcuts.remove("V");
+        assert!(missing.validate().is_err());
+        let mut twice = defaults.clone();
+        twice.shortcuts.insert("V".into(), "Ctrl+Alt+T".into());
+        assert_eq!(
+            twice.validate().unwrap_err(),
+            "Each shortcut must be different."
+        );
+        let mut unknown = defaults.clone();
+        unknown.shortcuts.insert("Q".into(), "Ctrl+Alt+Q".into());
+        assert!(unknown.validate().is_err());
+        // Several keys may be unassigned at once.
+        let mut off = defaults;
+        off.shortcuts.insert("V".into(), String::new());
+        off.shortcuts.insert("E".into(), String::new());
+        off.validate().unwrap();
+    }
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_defaults_avoid_altgr_keys() {
+        let keys = Settings::default().shortcuts;
+        assert_eq!(keys["E"], "Ctrl+Alt+Shift+E");
+        assert_eq!(keys["V"], "Ctrl+Alt+Shift+V");
     }
     #[test]
     fn migrates_m4_settings() {

@@ -2,28 +2,41 @@
 import type { AppRule } from "./AppRule";
 import type { Companion } from "./Companion";
 import type { Mode } from "./Mode";
+import type { Prompter } from "./Prompter";
 import type { SpeedResult } from "./SpeedResult";
 import type { Spelling } from "./Spelling";
 import type { TierId } from "./TierId";
 
-export type Settings = { version: number, notes_folder: string, open_at_login: boolean, appearance: string, notes_language: string, ask_on_call: boolean, app_modes: { [key in string]: Mode }, apps: Array<AppRule>, idle_stop_s: number, discard_short_s: number, 
+export type Settings = { version: number, notes_folder: string, open_at_login: boolean, appearance: string, notes_language: string, ask_on_call: boolean, app_modes: { [key in string]: Mode }, apps: Array<AppRule>, idle_stop_s: number, discard_short_s: number,
 /**
  * Catalog ids (empty until chosen); the `*_path` fields are what the engines read.
  */
-speech_model: string, notes_model: string, onboarding_done: boolean, onboarding_step: number, consent_confirmed_at: string | null, tier: TierId | null, speed_test: SpeedResult | null, live_transcription: boolean, 
+speech_model: string, notes_model: string, onboarding_done: boolean, onboarding_step: number, consent_confirmed_at: string | null, tier: TierId | null, speed_test: SpeedResult | null, live_transcription: boolean,
 /**
  * The tier a pending `speed_slow` notice would offer.
  */
-slow_question: TierId | null, screen_requested: boolean, 
+slow_question: TierId | null, screen_requested: boolean,
 /**
  * Catalog id -> path of a verified file the user already had.
  */
-adopted: { [key in string]: string }, 
+adopted: { [key in string]: string },
 /**
  * Resolved and written only by Rust after verification; empty means not ready.
  */
-speech_path: string, vad_path: string, notes_path: string, call_language: string, part_chars: number, keep_audio: string, screen_offer_on_ask: boolean, screen_source: string, screen_on_own_share: string, screen_preset: string, screen_cursor: boolean, keep_video: string, recording_reminder: boolean, 
+speech_path: string, vad_path: string, notes_path: string, call_language: string, part_chars: number, keep_audio: string, screen_offer_on_ask: boolean, screen_source: string, screen_on_own_share: string, screen_preset: string, screen_cursor: boolean, keep_video: string, recording_reminder: boolean,
+/**
+ * Settings › Screen: Motetto's windows show in screen shares when a session starts (SPEC 14.1).
+ */
+share_visible_default: boolean,
+/**
+ * Back to hidden when a share ends.
+ */
+share_reset_on_end: boolean,
+/**
+ * Check each share with one captured frame (SPEC 14.2).
+ */
+share_check: boolean,
 /**
  * The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
  */
-mic_device: string | null, sounds: boolean, companion: Companion, spellings: Array<Spelling>, shortcuts: { [key in string]: string }, };
+mic_device: string | null, sounds: boolean, companion: Companion, prompter: Prompter, spellings: Array<Spelling>, shortcuts: { [key in string]: string }, };

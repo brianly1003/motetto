@@ -667,10 +667,13 @@ pub fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
         window.unminimize().map_err(|e| e.to_string())?;
         return window.set_focus().map_err(|e| e.to_string());
     }
-    tauri::WebviewWindowBuilder::new(
+    crate::window_native::protect(
         app,
-        "onboarding",
-        tauri::WebviewUrl::App("onboarding/".into()),
+        tauri::WebviewWindowBuilder::new(
+            app,
+            "onboarding",
+            tauri::WebviewUrl::App("onboarding/".into()),
+        ),
     )
     .title("Set up Motetto")
     .inner_size(740., 660.)

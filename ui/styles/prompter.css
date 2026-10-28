@@ -1,0 +1,66 @@
+/* Script prompter strip from the approved mockup (Script screen); the window is Rust's (SPEC 14.3). */
+html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background: transparent; overflow: hidden; }
+/* Opaque: a web page can't blur the apps behind a transparent window, and see-through text over
+   a busy demo is unreadable (owner 2026-10-28). */
+.pt { box-sizing: border-box; position: fixed; inset: 0 0 auto 0; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--line); border-radius: 14px; padding: 9px 14px 11px; color: var(--ink-1); font-family: var(--font-ui); transition: opacity var(--duration-fade), border-color var(--duration-fade); max-height: 100vh; }
+.pt.through { opacity: .18; }
+.pt.shown { border-color: var(--attention); box-shadow: inset 0 0 0 1px var(--attention); }
+.pth { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 0; }
+.ptgrab { cursor: pointer; width: 24px; height: 24px; margin: -3px 0; border-radius: 6px; display: grid; place-items: center; font-size: 17px; line-height: 1; color: var(--ink-2); flex: none; border: 0; background: transparent; padding: 0; }
+.ptgrab:hover { background: var(--surface-3); }
+.ptchip { background: var(--surface-3); border-radius: var(--radius-pill); padding: 1px 9px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ptpace { margin-left: auto; display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.ptpace i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.ptpace.behind i { background: var(--attention); }
+.ptvis { flex: none; display: inline-flex; border: 0; border-radius: var(--radius-pill); background: var(--surface-3); padding: 2px; font: inherit; font-size: 11px; color: var(--ink-2); cursor: pointer; }
+.ptvis > span { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); }
+.ptvis svg { width: 12px; height: 12px; }
+.ptvis[aria-checked="false"] .h { background: var(--surface-1); color: var(--ok); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.ptvis[aria-checked="true"] .s { background: var(--attention); color: var(--surface-1); }
+.ptvis.checking[aria-checked="false"] .h { color: var(--attention); }
+.ptedit { flex: none; border: 0; background: transparent; color: var(--ink-2); border-radius: 5px; padding: 0 6px; height: 18px; font: inherit; cursor: pointer; }
+.ptedit:hover { background: var(--surface-3); color: var(--ink-1); }
+.ptlines { margin-top: 8px; font-family: var(--font-doc); display: grid; gap: 4px; }
+.ptln { line-height: 1.3; color: var(--ink-3); font-size: calc(var(--pt-size, 22px) * .68); }
+.ptln.prev { opacity: .45; }
+/* The lines around stay one line; the current one at most three, so nothing runs off the strip. */
+.ptln:not(.cur) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptln.cur { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.ptln.cur { color: var(--ink-1); font-size: var(--pt-size, 22px); }
+.ptln.cur .ptsaid { color: var(--voice-me); }
+.ptln.cur .ptnow { color: var(--voice-me); text-decoration: underline 2px; text-underline-offset: 4px; }
+.ptcue { font-family: var(--font-ui); font-size: .72em; border: 1px solid var(--line); border-radius: 5px; padding: 0 .4em; color: var(--voice-them); white-space: nowrap; }
+.ptfoot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.ptprog { flex: 1; height: 2px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+.ptprog i { display: block; height: 100%; background: var(--voice-me); transition: width .3s; }
+.ptfollow { font-size: 11px; color: var(--ink-3); }
+.ptfollow.wait { color: var(--attention); }
+.ptleak { margin-top: 8px; font-size: 13px; line-height: 1.4; }
+.ptleak b { color: var(--rec); }
+.ptleak .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.ptleak .acts button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--surface-1); color: var(--ink-1); border-radius: 7px; padding: 3px 10px; cursor: pointer; }
+.ptleak .acts button.primary { background: var(--ink-1); color: var(--surface-1); border-color: var(--ink-1); }
+.ptleak p { margin: 6px 0 0; color: var(--ink-2); font-size: 12px; }
+.pt.leaking { border-color: var(--rec); }
+.pt.leaking :is(.ptlines, .ptfoot, .ptchip, .ptpace, .ptedit) { display: none; }
+.pted { margin-top: 8px; flex: 1; min-height: 0; font-family: var(--font-doc); font-size: 14px; line-height: 1.45; background: transparent; border: 0; border-top: 1px solid var(--line); padding: 8px 0 0; resize: none; color: var(--ink-1); outline: none; }
+.pt.editing { border-color: var(--voice-me); box-shadow: inset 0 0 0 1px var(--voice-me); height: 100vh; }
+.pt.editing :is(.ptlines, .ptfoot, .ptchip) { display: none; }
+.ptedhint { color: var(--voice-me); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pt :focus-visible { outline: 2px solid var(--voice-me); outline-offset: 1px; }
+.ptmarker { position: fixed; left: 2px; top: 2px; width: 4px; height: 4px; display: grid; grid-template-columns: repeat(4, 1px); z-index: 10; }
+.ptmarker i { width: 1px; height: 1px; background: #f0f; }
+.ptmarker i.b { background: #0f0; }
+.pttuck { position: fixed; inset: 0; border-radius: 14px; background: var(--glass); border: 1px solid var(--line); display: grid; place-items: center; color: var(--ink-2); cursor: pointer; padding: 0; }
+.pttuck svg { width: 14px; height: 14px; }
+@media (prefers-reduced-motion: reduce) { .pt, .ptprog i { transition: none; } }
+.ptreh { display: inline-flex; align-items: center; gap: 6px; color: var(--rec); min-width: 0; }
+.ptreh i { width: 7px; height: 7px; border-radius: 50%; background: var(--rec); }
+.ptreh button { font: inherit; font-size: 11px; border: 1px solid var(--line); background: var(--surface-1); color: var(--ink-1); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+
+.ptclose { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 5px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.ptclose svg { width: 14px; height: 14px; }
+.ptclose:hover { background: var(--surface-3); color: var(--ink-1); }
+
+.ptreh > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptreh > i, .ptreh > button { flex: none; }

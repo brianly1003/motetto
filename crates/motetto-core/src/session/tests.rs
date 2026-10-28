@@ -1641,3 +1641,42 @@ fn stale_share_answer_and_window_signals_do_not_start_capture() {
     assert!(!s.app.screen.as_ref().unwrap().waiting);
     assert!(work(effects).is_empty());
 }
+
+#[test]
+fn share_visible_starts_false_and_toggles() {
+    let s = fresh();
+    assert!(!s.app.share_visible);
+    let (s, effects) = step(s, 1, Command::SetShareVisible(true));
+    assert!(s.app.share_visible);
+    assert!(work(effects).is_empty());
+    // Not tied to a recording: the switch works before, during and after a call.
+    let s = step(s, 2, Command::SetShareVisible(false)).0;
+    assert!(!s.app.share_visible);
+}
+
+#[test]
+fn share_end_resets_visibility_only_when_asked() {
+    let s = step(recording(), 2, Command::SetSharing(true)).0;
+    let s = step(s, 3, Command::SetShareVisible(true)).0;
+    let s = step(s, 4, Command::SetSharing(false)).0;
+    assert!(!s.app.share_visible, "back to hidden when the share ends");
+
+    let s = step(s, 5, Command::SetShareReset(false)).0;
+    let s = step(s, 6, Command::SetSharing(true)).0;
+    let s = step(s, 7, Command::SetShareVisible(true)).0;
+    let s = step(s, 8, Command::SetSharing(false)).0;
+    assert!(s.app.share_visible, "kept when the setting is off");
+
+    // A share that ends with the meeting (back to Idle) resets too.
+    let s = step(s, 9, Command::SetShareReset(true)).0;
+    let s = step(s, 10, Command::SetSharing(true)).0;
+    let s = step(s, 11, Command::StopRecording).0;
+    let s = step(s, 30_000, Command::Tick).0;
+    let s = step(s, 30_001, finished()).0;
+    assert_eq!(s.app.state, SessionState::Idle);
+    assert!(s.app.sharing.is_none() && !s.app.share_visible);
+    // No share running: turning it on stays on.
+    let s = step(fresh(), 1, Command::SetShareVisible(true)).0;
+    let s = step(s, 2, Command::SetSharing(false)).0;
+    assert!(s.app.share_visible);
+}

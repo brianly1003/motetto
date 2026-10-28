@@ -20,14 +20,19 @@ pub struct Server {
     model: String,
     vad: Option<String>,
 }
-static ACTIVE: Mutex<Option<Arc<Mutex<Child>>>> = Mutex::new(None);
+/// Every running speech process: captions and a rehearsal's following can each have one, and
+/// quitting must not leave either behind.
+static ACTIVE: Mutex<Vec<Arc<Mutex<Child>>>> = Mutex::new(Vec::new());
 pub fn shutdown() {
-    if let Ok(mut active) = ACTIVE.lock()
-        && let Some(child) = active.take()
-        && let Ok(mut child) = child.lock()
-    {
-        let _ = child.kill();
-        let _ = child.wait();
+    let children = ACTIVE
+        .lock()
+        .map(|mut a| std::mem::take(&mut *a))
+        .unwrap_or_default();
+    for child in children {
+        if let Ok(mut child) = child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 impl Server {
@@ -85,7 +90,10 @@ impl Server {
             }
         });
         let child = Arc::new(Mutex::new(child));
-        *ACTIVE.lock().map_err(|_| "Speech process lock failed")? = Some(child.clone());
+        ACTIVE
+            .lock()
+            .map_err(|_| "Speech process lock failed")?
+            .push(child.clone());
         let server = Self {
             child,
             client: whisper::Client::new(port)?,
@@ -164,6 +172,9 @@ impl Drop for Server {
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        if let Ok(mut active) = ACTIVE.lock() {
+            active.retain(|other| !Arc::ptr_eq(other, &self.child));
         }
         if let Some(reader) = self.diagnostics.take() {
             let _ = reader.join();

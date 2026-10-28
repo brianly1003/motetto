@@ -109,6 +109,43 @@ export async function onOpenNotes(callback: (mode: string) => void) {
   return listen<string>("motetto://open-notes", event => callback(event.payload));
 }
 
+import type { ScriptInfo } from "./bindings/ScriptInfo";
+export const scriptsList = () => invoke<ScriptInfo[]>("scripts_list");
+export const scriptRead = (name: string) => invoke<string>("script_read", { name });
+export const scriptSave = (name: string, text: string, baseModifiedMs: number | null) => invoke<number>("script_save", { name, text, baseModifiedMs });
+export const scriptRename = (from: string, to: string) => invoke<void>("script_rename", { from, to });
+export const scriptDelete = (name: string) => invoke<void>("script_delete", { name });
+export type PrompterLayout = "Strip" | "Column" | "Tucked";
+export const prompterShow = (name: string | null) => invoke<void>("prompter_show", { name });
+export const prompterHide = () => invoke<void>("prompter_hide");
+export const prompterLayout = (layout: PrompterLayout) => invoke<void>("prompter_layout", { layout });
+export const prompterEdit = (on: boolean, restore: boolean) => invoke<void>("prompter_edit", { on, restore });
+export const prompterControls = (rects: [number, number, number, number][]) => invoke<void>("prompter_controls", { rects });
+export const prompterMarkerDrawn = () => invoke<void>("prompter_marker_drawn");
+export const prompterMoveDisplay = () => invoke<boolean>("prompter_move_display");
+import type { PageState } from "./bindings/PageState";
+export const prompterState = () => invoke<PageState>("prompter_state");
+export const setShareVisible = (on: boolean) => invoke<void>("set_share_visible", { on });
+export const followHint = (words: string) => invoke<void>("follow_hint", { words });
+import type { Rehearsal } from "./bindings/Rehearsal";
+export const rehearseStart = (script: string) => invoke<Rehearsal>("rehearse_start", { script });
+export const rehearseStop = () => invoke<Rehearsal>("rehearse_stop");
+export const rehearsalTranscript = (id: string) => invoke<string>("rehearsal_transcript", { id });
+export const rehearsalDiscard = (id: string) => invoke<void>("rehearsal_discard", { id });
+/** Opens a rehearsal to listen back: null when it plays natively as `rehearsal:<id>` (macOS),
+ *  else the file's address for an audio element. */
+export async function rehearsalAudio(id: string): Promise<string | null> {
+  const path = await invoke<string | null>("rehearsal_audio", { id });
+  if (!path) return null;
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  return convertFileSrc(path);
+}
+export const rehearsalKeep = (id: string, script: string) => invoke<void>("rehearsal_keep", { id, script });
+export const rehearsalShorten = (line: string) => invoke<string | null>("rehearsal_shorten", { line });
+export async function listen<T>(name: string, callback: (payload: T) => void) {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(name, event => callback(event.payload));
+}
 export const pinCompanion = (pinned: boolean) => invoke<void>("pin_companion", { pinned });
 export const sharingMode = (active: boolean) => invoke<void>("sharing_mode", { active });
 
