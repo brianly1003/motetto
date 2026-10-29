@@ -6,6 +6,7 @@ import * as ipc from "@/lib/ipc";
 import { useSession } from "@/lib/useSession";
 import { strings as s } from "@/lib/strings";
 import { follow, keyLabel, pace, parseScript, tokens, type At } from "@/lib/script";
+import { scriptWriter } from "@/lib/scriptWriter";
 import { readingPages, readingRows, readingWindow, type ReadingPage } from "@/lib/prompter";
 import type { Heard } from "@/lib/bindings/Heard";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
@@ -18,7 +19,7 @@ export default function Prompter() {
   const { state } = useSession();
   const [name, setName] = useState<string | null>(null);
   const [text, setText] = useState("");
-  const base = useRef<number | null>(null);
+  const writer = useRef<ReturnType<typeof scriptWriter> | null>(null);
   const [at, setAt] = useState<At>({ line: 0, word: 0 });
   const [waiting, setWaiting] = useState(false);
   const [check, setCheck] = useState<Check>("checking");
@@ -80,7 +81,7 @@ export default function Prompter() {
     loading.current = true;
     const list = await ipc.scriptsList().catch(() => []);
     const text = await ipc.scriptRead(chosen).catch(() => "");
-    base.current = (Array.isArray(list) ? list : []).find(info => info.name === chosen)?.modified_ms ?? null;
+    writer.current = scriptWriter(chosen, text, (Array.isArray(list) ? list : []).find(info => info.name === chosen)?.modified_ms ?? null, ipc.scriptSave);
     setName(chosen); setText(text); setAt({ line: 0, word: 0 });
     loading.current = false;
   }
@@ -139,9 +140,10 @@ export default function Prompter() {
   }, [at.line, at.word, lines]);
   // Saved 300 ms after the last keystroke; a conflict is said in the bar, not lost.
   useEffect(() => {
-    if (!editing || !name || loading.current) return;
+    if (!name || loading.current) return;
+    const write = writer.current;
     const save = setTimeout(() => {
-      ipc.scriptSave(name, text, base.current).then(time => { base.current = time; setNote(""); }).catch(e => setNote(String(e)));
+      void write?.(text).then(() => { if (writer.current === write) setNote(""); }).catch(e => setNote(String(e)));
     }, 300);
     return () => clearTimeout(save);
   }, [text, editing, name]);
@@ -168,7 +170,7 @@ export default function Prompter() {
   async function close() {
     setClosing(true); setCloseError("");
     try {
-      if (editing && name) base.current = await ipc.scriptSave(name, text, base.current);
+      await writer.current?.(text);
       if (rehearsing) await ipc.rehearseStop();
       await ipc.prompterHide();
     } catch (error) { setCloseError(String(error)); }

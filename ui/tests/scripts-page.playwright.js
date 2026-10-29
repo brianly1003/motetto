@@ -8,7 +8,7 @@ async (page) => {
   await p.addInitScript(() => {
     const files = { 'Team X demo': { text: '# Opening (1m)\nHello.\n\n# Demo (5m)\nThis is it.', ms: 1000 }, 'Quarterly review': { text: 'Q', ms: 500 } };
     let next = 0; const callbacks = {}, listeners = {};
-    window.calls = [];
+    window.calls = []; window.files = files;
     window.emitEvent = (event, payload) => (listeners[event] || []).forEach(id => callbacks[id]?.({ event, id, payload }));
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } }, convertFileSrc: x => x, transformCallback: cb => { const id = ++next; callbacks[id] = cb; return id; }, unregisterCallback: id => { delete callbacks[id]; }, invoke: async (c, a) => {
@@ -18,7 +18,7 @@ async (page) => {
       if (c === 'scripts_list') return Object.entries(files).map(([name, f]) => ({ name, modified_ms: f.ms, bytes: f.text.length })).sort((x, y) => y.modified_ms - x.modified_ms);
       if (c === 'get_settings') return { notes_folder: '/Users/someone/Motetto', prompter: { layout: 'Strip', text_size: 22, last_script: 'Quarterly review' }, shortcuts: { T: 'Ctrl+Alt+T' } };
       if (c === 'script_read') return files[a.name].text;
-      if (c === 'script_save') { window.calls.push(`save:${a.name}:${a.baseModifiedMs}`); if (a.baseModifiedMs === null && files[a.name]) throw 'A script with this name already exists.'; files[a.name] = { text: a.text, ms: (files[a.name]?.ms ?? 0) + 1 }; return files[a.name].ms; }
+      if (c === 'script_save') { if(window.saveDelay) await new Promise(resolve => setTimeout(resolve, window.saveDelay)); window.calls.push(`save:${a.name}:${a.baseModifiedMs}`); if (a.baseModifiedMs === null && files[a.name]) throw 'A script with this name already exists.'; if (a.baseModifiedMs !== null && a.baseModifiedMs !== files[a.name]?.ms) throw 'This script changed in another window.'; files[a.name] = { text: a.text, ms: (files[a.name]?.ms ?? 0) + 1 }; return files[a.name].ms; }
       if (c === 'script_rename') { files[a.to] = files[a.from]; delete files[a.from]; window.calls.push(`rename:${a.from}:${a.to}`); return null; }
       window.calls.push(c + (a && Object.keys(a).length ? ':' + JSON.stringify(a) : ''));
       return false; } };
@@ -52,6 +52,22 @@ async (page) => {
   await box.press('End'); await box.type('\n\nMore.');
   await p.waitForTimeout(500);
   if (!(await p.evaluate(() => window.calls)).includes('save:Team X demo:1000')) fails.push('no save with the loaded time: ' + JSON.stringify(await p.evaluate(() => window.calls)));
+  // Reopening a script must use its current disk version, not the sidebar's initial time.
+  await list.getByRole('button', { name: /^Quarterly review/ }).click();
+  await p.getByRole('textbox', {name:'Quarterly review',exact:true}).waitFor();
+  await list.getByRole('button', { name: /^Team X demo/ }).click();
+  await box.waitFor();
+  await box.fill((await box.inputValue())+' Again.');
+  await p.waitForTimeout(500);
+  if (!(await p.evaluate(() => window.calls)).includes('save:Team X demo:1001')) fails.push('reopened script kept a stale version');
+  if (await p.getByText('This script changed in another window.',{exact:true}).count()) fails.push('false conflict after reopening');
+  // A slow save must not make newer typing look saved or reuse the old version.
+  await p.evaluate(() => window.saveDelay=600);
+  await box.fill('First delayed draft'); await p.waitForTimeout(350);
+  await box.fill('Latest delayed draft'); await p.waitForTimeout(650);
+  if (!/Saving/.test(await p.locator('.sp-meta').innerText())) fails.push('older completion marked new typing saved');
+  await p.waitForFunction(() => window.files['Team X demo'].text==='Latest delayed draft');
+  await p.evaluate(() => window.saveDelay=0);
   await p.getByRole('button', { name: 'Present' }).click();
   if (!(await p.evaluate(() => window.calls)).includes('prompter_show:{"name":"Team X demo"}')) fails.push('Present did not open the prompter');
   await p.evaluate(() => window.emitEvent('motetto://prompter-script', 'Team X demo'));
@@ -67,6 +83,14 @@ async (page) => {
   await p.waitForTimeout(300);
   if (!(await p.evaluate(() => window.calls)).includes('save:Untitled script:null')) fails.push('new script');
   if (await title.inputValue() !== 'Untitled script') fails.push('new script not opened: ' + await title.inputValue());
+  // Genuine changes elsewhere still block overwrites and leave the local draft in the editor.
+  await p.evaluate(() => { window.files['Untitled script']={text:'Other window text',ms:9000}; });
+  const fresh=p.getByRole('textbox',{name:'Untitled script',exact:true});
+  await fresh.fill('Keep my unsaved draft');
+  await p.getByText('This script changed in another window.',{exact:true}).waitFor();
+  if(await fresh.inputValue()!=='Keep my unsaved draft') fails.push('conflict lost the local draft');
+  if(await p.evaluate(()=>window.files['Untitled script'].text)!=='Other window text') fails.push('conflict overwrote the other window');
+  if(!/Saving/.test(await p.locator('.sp-meta').innerText())) fails.push('failed save falsely says Saved');
   await p.close();
   return fails.length ? fails : 'ok';
 }

@@ -112,6 +112,8 @@ async (page) => {
   // The long editing hint shrinks; every header control stays inside the strip.
   const over = await p.evaluate(() => [...document.querySelectorAll('.pth > *')].filter(e => e.getBoundingClientRect().right > document.querySelector('.pt').getBoundingClientRect().right).map(e => e.className));
   if (over.length) fails.push('header overflows while editing: ' + over);
+  await p.waitForTimeout(350);
+  if ((await p.evaluate(() => window.calls)).some(c => c.startsWith('save:'))) fails.push('entering edit saved unchanged text');
   await box.press('End'); await box.type(' Extra');
   await p.waitForTimeout(500);
   if (!(await p.evaluate(() => window.calls)).some(c => /^save:Demo:1000:/.test(c))) fails.push('no debounced save: ' + JSON.stringify(await p.evaluate(() => window.calls)));

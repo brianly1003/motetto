@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import * as ipc from "@/lib/ipc";
 import { strings as s } from "@/lib/strings";
 import { keyLabel, nameFrom, parseScript, withLine } from "@/lib/script";
+import { scriptWriter } from "@/lib/scriptWriter";
 import { meetingDate } from "@/lib/document";
 import type { ScriptInfo } from "@/lib/bindings/ScriptInfo";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
@@ -32,7 +33,8 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
-  const base = useRef<number | null>(null);
+  const writer = useRef<ReturnType<typeof scriptWriter> | null>(null);
+  const draft = useRef("");
   const dirty = useRef(false);
   // The script the strip shows and ⌃⌥T opens, the library folder and the shortcut, for the
   // sidebar key and the footer.
@@ -63,13 +65,13 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   useEffect(() => { if (rehearsing === null) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [rehearsing]);
   async function rehearse(name: string) {
     setDone(null);
-    try { await ipc.rehearseStart(name); } catch (e) { onError(String(e)); }
+    try { if (dirty.current) await persist(draft.current); await ipc.rehearseStart(name); } catch (e) { onError(String(e)); }
   }
   // "Use in script": that line replaced (its cues kept), saved at once against the loaded
   // time; Undo puts the text back the same way.
   async function save(next: string) {
     if (!open) return;
-    try { base.current = await ipc.scriptSave(open, next, base.current); setText(next); }
+    try { await persist(next); draft.current = next; setText(next); }
     catch (e) { onError(String(e)); throw e; }
   }
   const use = (k: number, to: string) => { const before = text; return save(withLine(text, k, to)).then(() => async () => save(before)); };
@@ -78,21 +80,31 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     // A failed list must not take the library window down with it.
     const scripts = Array.isArray(answer) ? answer : [];
     setList(scripts); onCount?.(scripts.length);
-    const pick = select ?? open ?? scripts[0]?.name ?? null;
-    if (pick && pick !== open) await choose(pick, scripts);
+    const pick = select ?? scripts.find(info => info.name === open)?.name ?? scripts[0]?.name ?? null;
+    if (pick) await choose(pick);
   }
-  async function choose(name: string, scripts = list) {
+  async function choose(name: string) {
+    if (dirty.current) await persist(draft.current);
+    const scripts = await ipc.scriptsList();
+    const loaded = await ipc.scriptRead(name);
     if (done && done.script !== name) setDone(null);
     dirty.current = false; setSaving(false); setMenu(false);
-    base.current = scripts.find(info => info.name === name)?.modified_ms ?? null;
-    setText(await ipc.scriptRead(name));
+    writer.current = scriptWriter(name, loaded, scripts.find(info => info.name === name)?.modified_ms ?? null, ipc.scriptSave);
+    draft.current = loaded; setText(loaded);
     setOpen(name); setTitle(name);
   }
   useEffect(() => { refresh().catch(e => onError(String(e))); }, []);
+  async function persist(next: string) {
+    const write = writer.current;
+    if (!write) return;
+    await write(next);
+    // A completed older save must not mark newer typing as saved.
+    if (writer.current === write && draft.current === next) { dirty.current = false; setSaving(false); }
+  }
   // Saved 300 ms after you stop typing, like My notes.
   useEffect(() => {
     if (!open || !dirty.current) return;
-    const save = setTimeout(() => ipc.scriptSave(open, text, base.current).then(time => { base.current = time; dirty.current = false; setSaving(false); }).catch(e => onError(String(e))), 300);
+    const save = setTimeout(() => void persist(text).catch(e => onError(String(e))), 300);
     return () => clearTimeout(save);
   }, [text, open]);
   function unique(name: string) {
@@ -111,7 +123,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     creating.current = true;
     try {
       // The open script by what is typed now; the others by a fresh list (sizes go stale as you type).
-      const empty = open && !text.trim() ? open : (await ipc.scriptsList()).find(info => info.bytes === 0 && info.name !== open)?.name;
+      const empty = open && !draft.current.trim() ? open : (await ipc.scriptsList()).find(info => info.bytes === 0 && info.name !== open)?.name;
       if (empty) { await blank(empty); return; }
       const name = unique(s.untitledScript);
       await ipc.scriptSave(name, "", null); caret.current = 0; await refresh(name);
@@ -124,7 +136,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   async function duplicate() {
     if (!open) return;
     // A copy of nothing is another empty script.
-    if (!text.trim()) { await blank(open); return; }
+    if (!draft.current.trim()) { await blank(open); return; }
     const name = unique(s.spCopy.replace("{name}", open));
     try { await ipc.scriptSave(name, text, null); await refresh(name); } catch (e) { onError(String(e)); }
   }
@@ -144,11 +156,18 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   async function rename() {
     const next = title.trim();
     if (!open || !next || next === open) { setTitle(open ?? ""); return; }
-    try { await ipc.scriptRename(open, next); setOpen(next); await refresh(next); } catch (e) { onError(String(e)); setTitle(open); }
+    try { if (dirty.current) await persist(draft.current); await ipc.scriptRename(open, next); setOpen(next); await refresh(next); } catch (e) { onError(String(e)); setTitle(open); }
   }
   async function remove() {
     if (!open) return;
-    try { await ipc.scriptDelete(open); setOpen(null); setText(""); await refresh(); } catch (e) { onError(String(e)); }
+    try {
+      // Finish pending writes before moving the file, then retire its editor before refreshing.
+      await persist(draft.current);
+      await ipc.scriptDelete(open);
+      writer.current = null; dirty.current = false; draft.current = "";
+      setOpen(null); setText(""); setTitle(""); setSaving(false); setMenu(false); setDone(null);
+      await refresh();
+    } catch (e) { onError(String(e)); }
   }
   // The ••• menu: Rename, Duplicate, Show in Finder, Delete script.
   const [menu, setMenu] = useState(false);
@@ -216,7 +235,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
             </div>}
           </div>
           <button type="button" className="btn" onClick={() => void rehearse(open)}>{MIC_ICON}{s.rehearse}</button>
-          <button type="button" className="btn primary" onClick={() => void ipc.prompterShow(open).catch(e => onError(String(e)))}>{STRIP_ICON}{s.present}</button>
+          <button type="button" className="btn primary" onClick={() => void (async () => { if (dirty.current) await persist(draft.current); await ipc.prompterShow(open); })().catch(e => onError(String(e)))}>{STRIP_ICON}{s.present}</button>
         </>}
       </div>
     </header>
@@ -224,7 +243,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     <div className="sp-body">
       <div className="sp-editor">
         {nudge > 0 && !text.trim() && <p key={nudge} className="sp-emptyhint" role="status">{s.spStillEmpty}</p>}
-        <textarea ref={editor} aria-label={open} spellCheck value={text} placeholder={s.scriptsFirstPlaceholder} data-nudge={nudge > 0 && !text.trim() ? nudge % 2 : undefined} onChange={e => { dirty.current = true; setSaving(true); setText(e.target.value); }} />
+        <textarea ref={editor} aria-label={open} spellCheck value={text} placeholder={s.scriptsFirstPlaceholder} data-nudge={nudge > 0 && !text.trim() ? nudge % 2 : undefined} onChange={e => { dirty.current = true; draft.current = e.target.value; setSaving(true); setText(e.target.value); }} />
         <div className="sp-legend"><span><code># Opening (2m)</code>{s.spLegendSection}</span><span><code>[click New]</code>{s.spLegendCue}</span><span><code>{s.spLegendBlankCode}</code>{s.spLegendBlank}</span></div>
       </div>
       <aside className="sp-outline" aria-label={s.spOutline}>

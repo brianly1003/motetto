@@ -32,7 +32,8 @@ async (page) => {
   await p.getByRole('button', { name: 'Scripts' }).first().click();
   await p.getByRole('button', { name: 'Rehearse' }).click();
   // Wherever the library is, a finished rehearsal opens its report.
-  await p.getByRole('button', { name: 'Action items' }).first().click().catch(() => {});
+  const home = p.getByRole('button', { name: 'Action items' }).first();
+  if (await home.count()) await home.click();
   if (!(await p.evaluate(() => window.calls)).includes('start:Team X demo')) fails.push('Rehearse did not start');
   await p.evaluate(() => window.emit('motetto://rehearsal', { id: '42', script: 'Team X demo', duration_ms: 70000 }));
   const big = p.locator('.ptrep .big'); await big.waitFor();
