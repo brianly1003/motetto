@@ -195,7 +195,53 @@ pub fn stop(app: &tauri::AppHandle) -> Result<Rehearsal, String> {
             "The rehearsal couldn't record the microphone: {error}"
         ));
     }
+    // Quieter than you hear yourself is still a fine rehearsal: keep it as recorded.
+    if let Err(error) = louder(&base) {
+        eprintln!("Rehearsal kept at its recorded level: {error}");
+    }
     Ok(rehearsal)
+}
+
+/// The loudest moment is raised to this (-3 dBFS) ...
+const PEAK: f32 = 0.708;
+/// ... by at most this much (+18 dB), so a near-silent take doesn't come back as hiss.
+const MAX_GAIN: f32 = 8.0;
+
+/// A laptop mic records a rehearsal far softer than speech is played back (2026-10-30: peaks at
+/// -17 dB, average -36 dB), so listening back was hard. The float WAV is raised in place so its
+/// peak is at `PEAK`, in two streamed passes (a long take never sits in memory) and an atomic
+/// replace. Peak-based: one loud click limits the gain, but nothing ever clips.
+fn louder(path: &Path) -> Result<(), String> {
+    let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
+    let spec = reader.spec();
+    if spec.sample_format != hound::SampleFormat::Float || spec.bits_per_sample != 32 {
+        return Ok(());
+    }
+    let mut peak = 0f32;
+    for sample in reader.samples::<f32>() {
+        peak = peak.max(sample.map_err(|e| e.to_string())?.abs());
+    }
+    let gain = (PEAK / peak).min(MAX_GAIN);
+    // Silence, or already about as loud as it should be (within 1 dB).
+    if peak == 0.0 || gain < 1.12 {
+        return Ok(());
+    }
+    let temporary = path.with_extension("louder.tmp");
+    let result = (|| {
+        let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
+        let mut writer = hound::WavWriter::create(&temporary, spec).map_err(|e| e.to_string())?;
+        for sample in reader.samples::<f32>() {
+            writer
+                .write_sample(sample.map_err(|e| e.to_string())? * gain)
+                .map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
+        fs::rename(&temporary, path).map_err(|e| e.to_string())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// Listen back: on macOS the native player opens it as `rehearsal:<id>` and this answers None
@@ -324,6 +370,72 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_quiet_rehearsal_is_raised_to_its_peak() {
+        let dir = temp("louder");
+        let float = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let write = |name: &str, spec: hound::WavSpec, peak: f32| {
+            let path = dir.join(name);
+            let mut w = hound::WavWriter::create(&path, spec).unwrap();
+            for i in 0..48_000 {
+                let s = peak * (i as f32 * 0.05).sin();
+                if spec.sample_format == hound::SampleFormat::Float {
+                    w.write_sample(s).unwrap();
+                } else {
+                    w.write_sample((s * 32767.0) as i16).unwrap();
+                }
+            }
+            w.finalize().unwrap();
+            path
+        };
+        let peak = |path: &Path| {
+            let mut r = hound::WavReader::open(path).unwrap();
+            let n = r.duration();
+            let p = r
+                .samples::<f32>()
+                .map(|s| s.unwrap().abs())
+                .fold(0f32, f32::max);
+            (p, n)
+        };
+        // -17 dB, as recorded on 2026-10-30: raised to -3 dB, same length, no temp left.
+        let quiet = write("quiet.wav", float, 0.14);
+        louder(&quiet).unwrap();
+        let (p, n) = peak(&quiet);
+        assert!((p - PEAK).abs() < 0.01, "{p}");
+        assert_eq!(n, 48_000);
+        assert!(!quiet.with_extension("louder.tmp").exists());
+        // Nearly silent: at most +18 dB.
+        let faint = write("faint.wav", float, 0.01);
+        louder(&faint).unwrap();
+        assert!((peak(&faint).0 - 0.08).abs() < 0.002);
+        // Already loud, and silence, stay as they are.
+        let loud = write("loud.wav", float, 0.68);
+        louder(&loud).unwrap();
+        assert!((peak(&loud).0 - 0.68).abs() < 0.002);
+        let silent = write("silent.wav", float, 0.0);
+        louder(&silent).unwrap();
+        assert_eq!(peak(&silent).0, 0.0);
+        // Not the float WAV the capture writes: left alone.
+        let int = write(
+            "int.wav",
+            hound::WavSpec {
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+                ..float
+            },
+            0.14,
+        );
+        let before = fs::read(&int).unwrap();
+        louder(&int).unwrap();
+        assert_eq!(fs::read(&int).unwrap(), before);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
