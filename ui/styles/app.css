@@ -945,6 +945,15 @@ input.sp-name:hover { background: var(--surface-2); }
 .sp-editor textarea, .sp-paste textarea { flex: 1; min-height: 0; resize: none; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: 15px/1.6 var(--font-doc); padding: 14px 16px; outline: none; }
 .sp-editor textarea:focus, .sp-paste textarea:focus { border-color: var(--line-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--me) 14%, transparent); }
 .sp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--ink-3); }
+/* New script while this one is still empty (owner 2026-10-30): the editor glows once in your
+   colour and a quiet line says why nothing new appeared. Two names so each press replays it. */
+.sp-emptyhint { margin: 0; font-size: 12.5px; color: var(--me); animation: sp-hint-in .22s ease-out both; }
+.sp-editor textarea[data-nudge="0"] { animation: sp-nudge-a .9s ease-out; }
+.sp-editor textarea[data-nudge="1"] { animation: sp-nudge-b .9s ease-out; }
+@keyframes sp-nudge-a { 0%, 30% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--me) 28%, transparent); border-color: var(--me); } }
+@keyframes sp-nudge-b { 0%, 30% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--me) 28%, transparent); border-color: var(--me); } }
+@keyframes sp-hint-in { from { opacity: 0; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .sp-emptyhint, .sp-editor textarea[data-nudge] { animation: none; } }
 .sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sp-legend code, .sp-steps code { font: 11px ui-monospace, "SF Mono", Menlo, monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink-2); }
 .sp-outline { border-left: 1px solid var(--line); background: var(--surface-2); padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }

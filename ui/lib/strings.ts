@@ -132,6 +132,6 @@ export const strings = {
   scriptsStep1: "Paste", scriptsStep1Body: "One line per thing you say. # Section (2m) gives a time budget; [brackets] are cues for you.",
   scriptsStep2: "Rehearse", scriptsStep2Body: "Mic only. See where you ran long, skipped or went off-script.",
   scriptsStep3: "Present", scriptsStep3Body: "The strip sits under the camera, hidden from your screen share.",
-  scriptEdited: "Edited {when} · {n} sections", scriptEditedOne: "Edited {when} · 1 section", scriptEditedOn: "Edited {when}", deleteScript: "Delete script", untitledScript: "Untitled script",
+  scriptEdited: "Edited {when} · {n} sections", scriptEditedOne: "Edited {when} · 1 section", scriptEditedOn: "Edited {when}", deleteScript: "Delete script", untitledScript: "Untitled script", newScriptEmpty: "“{name}” is still empty. Write in it before starting another.", spStillEmpty: "This script is still empty. Start writing here, then you can make another.",
   notesModelPending: "The notes model is still downloading; notes start working when it's done.",
 };

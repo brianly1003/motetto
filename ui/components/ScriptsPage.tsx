@@ -101,12 +101,30 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     for (let n = 2; taken.has(next); n++) next = `${name} ${n}`;
     return next;
   }
+  // One blank script at a time (owner 2026-10-30): New script while a script is still empty opens
+  // that one with a hint instead of making another, so repeated clicks can't pile up empty files.
+  // Clicks during a create are dropped; the backend refuses a second empty script as well.
+  const creating = useRef(false);
+  const [nudge, setNudge] = useState(0);
   async function create() {
-    const name = unique(s.untitledScript);
-    try { await ipc.scriptSave(name, "", null); await refresh(name); } catch (e) { onError(String(e)); }
+    if (creating.current) return;
+    creating.current = true;
+    try {
+      // The open script by what is typed now; the others by a fresh list (sizes go stale as you type).
+      const empty = open && !text.trim() ? open : (await ipc.scriptsList()).find(info => info.bytes === 0 && info.name !== open)?.name;
+      if (empty) { await blank(empty); return; }
+      const name = unique(s.untitledScript);
+      await ipc.scriptSave(name, "", null); caret.current = 0; await refresh(name);
+    } catch (e) { onError(String(e)); } finally { creating.current = false; }
+  }
+  async function blank(name: string) {
+    if (name !== open) { caret.current = 0; await choose(name); } else editor.current?.focus();
+    setNudge(Date.now());
   }
   async function duplicate() {
     if (!open) return;
+    // A copy of nothing is another empty script.
+    if (!text.trim()) { await blank(open); return; }
     const name = unique(s.spCopy.replace("{name}", open));
     try { await ipc.scriptSave(name, text, null); await refresh(name); } catch (e) { onError(String(e)); }
   }
@@ -151,7 +169,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   useEffect(() => { side?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" }); }, [side, open]);
   const sidebar = side && list.length ? createPortal(<>
     <div className="sp-subscroll">{list.map(info => <button key={info.name} type="button" className="sp-subitem" aria-current={info.name === open ? "true" : undefined} data-shown={info.name === shown ? "" : undefined} title={info.name === shown && showKey ? s.spShownKey.replace("{key}", showKey) : s.scriptEditedOn.replace("{when}", edited(info.modified_ms))} onClick={() => void choose(info.name).catch(e => onError(String(e)))}><span>{info.name}</span>{showKey && <kbd>{showKey}</kbd>}</button>)}</div>
-    <button type="button" className="sp-subitem sp-new" onClick={() => void create()}>+ {s.newScript}</button>
+    <button type="button" className="sp-subitem sp-new" title={open && !text.trim() ? s.newScriptEmpty.replace("{name}", open) : undefined} onClick={() => void create()}>+ {s.newScript}</button>
   </>, side) : null;
   if (!list.length && !open) return <article className="document scripts">
     <div className="scripts-first">
@@ -205,7 +223,8 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     {rehearsing !== null && <div className="sp-note">{MIC_ICON}<span>{s.spRehearsingNote.replace("{device}", device)}</span></div>}
     <div className="sp-body">
       <div className="sp-editor">
-        <textarea ref={editor} aria-label={open} spellCheck value={text} onChange={e => { dirty.current = true; setSaving(true); setText(e.target.value); }} />
+        {nudge > 0 && !text.trim() && <p key={nudge} className="sp-emptyhint" role="status">{s.spStillEmpty}</p>}
+        <textarea ref={editor} aria-label={open} spellCheck value={text} placeholder={s.scriptsFirstPlaceholder} data-nudge={nudge > 0 && !text.trim() ? nudge % 2 : undefined} onChange={e => { dirty.current = true; setSaving(true); setText(e.target.value); }} />
         <div className="sp-legend"><span><code># Opening (2m)</code>{s.spLegendSection}</span><span><code>[click New]</code>{s.spLegendCue}</span><span><code>{s.spLegendBlankCode}</code>{s.spLegendBlank}</span></div>
       </div>
       <aside className="sp-outline" aria-label={s.spOutline}>

@@ -114,6 +114,14 @@ fn save(root: &Path, raw: &str, text: &str, base_modified_ms: Option<u64>) -> Re
         (false, Some(_)) => return Err("This script was renamed or deleted.".into()),
         _ => {}
     }
+    // One blank script at a time (owner 2026-10-30): another new empty script would only pile up
+    // empty files, so it is refused; the app opens the empty one instead of asking for this.
+    if base_modified_ms.is_none()
+        && text.trim().is_empty()
+        && list(root)?.iter().any(|s| s.bytes == 0)
+    {
+        return Err("Your new script is still empty. Write in it before starting another.".into());
+    }
     fs::create_dir_all(dir(root)).map_err(|e| format!("Couldn't save the script: {e}"))?;
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let temporary = dir(root).join(format!(
@@ -278,6 +286,27 @@ mod tests {
                 .unwrap_err()
                 .contains("renamed or deleted")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn one_empty_new_script_at_a_time() {
+        let root = temp_root();
+        save(&root, "Untitled script", "", None).unwrap();
+        assert!(
+            save(&root, "Untitled script 2", "", None)
+                .unwrap_err()
+                .contains("still empty")
+        );
+        assert!(save(&root, "Spaces", " \n", None).is_err());
+        assert!(!dir(&root).join("Untitled script 2.md").exists());
+        // A script with words is always welcome, and once the empty one has words a new
+        // empty one may start.
+        save(&root, "Pitch", "# Opening\nHello.", None).unwrap();
+        let typed = list(&root).unwrap();
+        let base = typed.iter().find(|s| s.name == "Untitled script").unwrap();
+        save(&root, "Untitled script", "Hi.", Some(base.modified_ms)).unwrap();
+        save(&root, "Untitled script 2", "", None).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
