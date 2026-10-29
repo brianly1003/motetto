@@ -170,9 +170,9 @@ pub fn spawn(
                             let _ = results.send(Message::CaptureFailed { id, reason });
                         }
                     }
-                    Job::Finish { id } => {
+                    Job::Finish { id, apps } => {
                         let mut result = match recording.as_ref().filter(|r| r.id == id) {
-                            Some(record) => finish(&root, record, |stage| {
+                            Some(record) => finish(&root, record, apps, |stage| {
                                 let _ =
                                     app.emit("motetto://event", Event::stage(id.clone(), stage));
                             }),
@@ -344,6 +344,7 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 title_source: Default::default(),
                 language: None,
                 notes_language: None,
+                apps: vec![],
             },
         )?;
     }
@@ -355,7 +356,12 @@ fn status(root: &Path, id: &str, value: &str) -> Result<library::MeetingSummary,
     library::save(root, &summary)?;
     Ok(summary)
 }
-fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage) + Sync) -> Result<String, String> {
+fn finish(
+    root: &Path,
+    record: &Recording,
+    apps: Vec<String>,
+    stage: impl Fn(Stage) + Sync,
+) -> Result<String, String> {
     if let Some(reason) = &record.failure {
         return Err(format!(
             "Capture failed: {reason}. Partial audio is retained."
@@ -364,7 +370,10 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage) + Sync) -> Resu
     if record.parts.is_empty() {
         return Err("No audio was captured. Check microphone and system audio permissions.".into());
     }
-    status(root, &record.id, "Finishing")?;
+    let mut summary = library::summary(root, &record.id)?;
+    summary.status = "Finishing".into();
+    summary.apps = apps;
+    library::save(root, &summary)?;
     // Cancel is for imports only; a late one must not stop these notes.
     motetto_core::tools::reset();
     let dir = library::folder(root, &record.id)?;
@@ -561,7 +570,7 @@ mod tests {
             Err("disk failed".into())
         );
         assert!(
-            finish(&root, &record, |_| panic!("must not process"))
+            finish(&root, &record, vec![], |_| panic!("must not process"))
                 .unwrap_err()
                 .contains("Partial audio is retained")
         );
@@ -585,8 +594,9 @@ mod tests {
                 .parts
                 .push((vec![file.to_string_lossy().into_owned()], offset));
         }
-        finish(&root, &record, |_| {}).unwrap();
+        finish(&root, &record, vec!["Zoom".into()], |_| {}).unwrap();
         let meeting = library::read(&root, "123").unwrap();
+        assert_eq!(meeting.summary.apps, ["Zoom"]);
         assert_eq!(meeting.summary.status, "Ready");
         assert!(meeting.transcript.contains("[00:"));
         assert!(meeting.transcript.contains("[01:"));

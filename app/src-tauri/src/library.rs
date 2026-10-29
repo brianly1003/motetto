@@ -41,6 +41,10 @@ pub struct MeetingSummary {
     /// again); None for the call's own language or meetings saved before it was kept.
     #[serde(default)]
     pub notes_language: Option<String>,
+    /// Call apps the meeting was recorded from (Zoom, Microsoft Teams...); empty when none was
+    /// detected, for imports and meetings saved before it was kept.
+    #[serde(default)]
+    pub apps: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -306,6 +310,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         title_source: Default::default(),
         language: None,
         notes_language: None,
+        apps: vec![],
     }
 }
 
@@ -429,6 +434,7 @@ pub fn import(
         title_source: Default::default(),
         language: None,
         notes_language: None,
+        apps: vec![],
     };
     let dir = root.join(&summary.id);
     fs::create_dir(&dir).map_err(|e| e.to_string())?;
@@ -667,6 +673,7 @@ mod tests {
                     title_source: Default::default(),
                     language: None,
                     notes_language: None,
+                    apps: vec![],
                 },
             )
             .unwrap();
@@ -712,6 +719,7 @@ mod tests {
                 title_source: Default::default(),
                 language: None,
                 notes_language: None,
+                apps: vec![],
             };
             save(&root, &summary).unwrap();
         }

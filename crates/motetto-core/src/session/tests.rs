@@ -1680,3 +1680,48 @@ fn share_end_resets_visibility_only_when_asked() {
     let s = step(s, 2, Command::SetSharing(false)).0;
     assert!(s.app.share_visible);
 }
+
+#[test]
+fn meeting_names_its_call_apps_including_a_call_already_running_at_record_now() {
+    assert_eq!(recording().app_names(), vec!["Zoom".to_string()]);
+    // Not now on the Ask card, then Record now while Zoom's call goes on.
+    let (s, _) = detect(fresh(), Mode::Off);
+    let s = start(s, false);
+    assert_eq!(s.app_names(), vec!["Zoom".to_string()]);
+    let teams = Call {
+        call_id: "c2".into(),
+        app_id: "teams".into(),
+        app: "Microsoft Teams".into(),
+        mode: Mode::Ask,
+    };
+    let (s, _) = step(
+        s,
+        2,
+        Command::CallDetected {
+            call: teams,
+            meeting_id: "m2".into(),
+        },
+    );
+    assert_eq!(
+        s.app_names(),
+        vec!["Zoom".to_string(), "Microsoft Teams".to_string()]
+    );
+    // An ended call is not carried into the next manual recording.
+    let (s, _) = step(
+        s,
+        3,
+        Command::CallEnded {
+            call_id: "c1".into(),
+        },
+    );
+    let (s, _) = step(
+        s,
+        4,
+        Command::CallEnded {
+            call_id: "c2".into(),
+        },
+    );
+    let mut s = s;
+    s.idle();
+    assert!(start(s, false).app_names().is_empty());
+}

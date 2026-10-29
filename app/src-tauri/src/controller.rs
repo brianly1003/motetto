@@ -94,6 +94,8 @@ pub enum Job {
     },
     Finish {
         id: String,
+        /// Call apps heard in the meeting (Zoom, Microsoft Teams...), saved in meeting.json.
+        apps: Vec<String>,
     },
     Discard {
         id: String,
@@ -673,7 +675,10 @@ impl<H: Host> Engine<H> {
                     self.stop();
                     Ok(())
                 }
-                Effect::Finish { meeting_id, .. } => self.host.job(Job::Finish { id: meeting_id }),
+                Effect::Finish { meeting_id, .. } => self.host.job(Job::Finish {
+                    id: meeting_id,
+                    apps: self.session.app_names(),
+                }),
                 Effect::Discard { meeting_id } => self.host.job(Job::Discard { id: meeting_id }),
                 Effect::Trash { meeting_id } => self.host.job(Job::Trash { id: meeting_id }),
                 Effect::NotifyShort { seconds } => {
@@ -719,7 +724,7 @@ impl<H: Host> Engine<H> {
                     }
                     Ok(())
                 }
-                // meeting.json `apps` is written when the full metadata lands.
+                // meeting.json `apps` is written at Finish (Job::Finish).
                 Effect::AddApp { .. } => Ok(()),
                 _ => Err(
                     "This session effect is not available in the manual recording controller"

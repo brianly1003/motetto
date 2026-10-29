@@ -97,7 +97,10 @@ pub struct Session {
     /// A call detected while the last meeting's notes were written; asked once they are done.
     queued: Option<(Call, String)>,
     call: Option<Call>,
-    apps: Vec<String>,
+    /// Call apps heard in this meeting, in order; saved to meeting.json at Finish.
+    apps: Vec<Call>,
+    /// Detected calls not yet ended, so Record now during a call still names its app.
+    live: Vec<Call>,
     problems: Vec<ProblemInfo>,
     next_problem_id: u64,
     last_ms: u64,
@@ -123,6 +126,7 @@ impl Session {
             queued: None,
             call: None,
             apps: Vec::new(),
+            live: Vec::new(),
             problems: Vec::new(),
             next_problem_id: 1,
             last_ms: 0,
@@ -297,7 +301,23 @@ impl Session {
         }
     }
 
+    /// Display names of the call apps in this meeting (Zoom, Microsoft Teams...), first one first.
+    pub fn app_names(&self) -> Vec<String> {
+        self.apps.iter().map(|c| c.app.clone()).collect()
+    }
+
+    fn join(&mut self, call: &Call) -> bool {
+        let new = !self.apps.iter().any(|c| c.app_id == call.app_id);
+        if new {
+            self.apps.push(call.clone());
+        }
+        new
+    }
+
     fn start(&mut self, meeting_id: String, reason: StartReason, effects: &mut Vec<Effect>) {
+        for call in self.live.clone() {
+            self.join(&call);
+        }
         self.app.state = SessionState::Recording;
         self.app.meeting_id = Some(meeting_id.clone());
         self.app.elapsed_ms = 0;
@@ -463,19 +483,21 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             }
         }
         Command::CallDetected { call, meeting_id } => {
+            if !session.live.iter().any(|c| c.call_id == call.call_id) {
+                session.live.push(call.clone());
+            }
             if matches!(
                 session.app.state,
                 SessionState::Recording | SessionState::Paused | SessionState::Stopped { .. }
             ) {
                 // A second call app joins the running meeting; nothing is asked.
-                if !session.apps.contains(&call.app_id) {
-                    session.apps.push(call.app_id.clone());
-                    if let Some(id) = session.app.meeting_id.clone() {
-                        effects.push(Effect::AddApp {
-                            meeting_id: id,
-                            app_id: call.app_id,
-                        });
-                    }
+                if session.join(&call)
+                    && let Some(id) = session.app.meeting_id.clone()
+                {
+                    effects.push(Effect::AddApp {
+                        meeting_id: id,
+                        app_id: call.app_id,
+                    });
                 }
             } else if matches!(session.app.state, SessionState::Finishing { .. }) {
                 // The watcher reports a call once; keep it until the notes are done.
@@ -505,7 +527,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             {
                 if record && session.can_start(false, &input.since, &mut effects) {
                     if let Some(ask) = session.ask.take() {
-                        session.apps.push(ask.call.app_id.clone());
+                        session.join(&ask.call);
                         session.call = Some(ask.call.clone());
                         session.start(
                             ask.meeting_id,
@@ -524,6 +546,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             }
         }
         Command::CallEnded { call_id } => {
+            session.live.retain(|c| c.call_id != call_id);
             if session
                 .ask
                 .as_ref()

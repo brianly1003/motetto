@@ -19,4 +19,9 @@ language: string | null,
  * ISO code the notes were written in when one was chosen (Settings or Write the notes
  * again); None for the call's own language or meetings saved before it was kept.
  */
-notes_language: string | null, };
+notes_language: string | null, 
+/**
+ * Call apps the meeting was recorded from (Zoom, Microsoft Teams...); empty when none was
+ * detected, for imports and meetings saved before it was kept.
+ */
+apps: Array<string>, };
