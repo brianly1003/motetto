@@ -101,24 +101,19 @@ async (page) => {
     await p.evaluate(() => window.emit('tauri://drag-leave', null));
     await p.getByPlaceholder('Search notes and transcripts').fill('');
     await p.getByRole('button', {name: 'Action items'}).first().click();
-    await p.locator('.drop').waitFor();
-    const idle = await style(p.locator('.drop'), ['borderTopStyle', 'borderTopColor', 'backgroundColor']);
+    // Home has no drop zone (owner 2026-10-30): Import is in its header and a file dragged over it
+    // gets the same frame as over a meeting, as in the mockup.
+    await p.locator('.homehead').waitFor();
+    if (await p.locator('.home .drop').count()) throw Error('Drop zone still on Home');
     await p.evaluate(() => window.emit('tauri://drag-enter', {paths: ['/Users/x/call.m4a'], position: {x: 400, y: 300}}));
-    await p.waitForFunction(() => document.querySelector('.drop span')?.textContent === 'Release to make notes from this file');
-    const over = await style(p.locator('.drop'), ['borderTopStyle', 'borderTopColor', 'backgroundColor', 'color']);
-    if (over.borderTopStyle !== 'solid' || over.backgroundColor === idle.backgroundColor) throw Error('Drop zone not highlighted');
-    if ((await p.locator('.shell').evaluate(el => getComputedStyle(el, '::after').content)) !== 'none') throw Error('Frame shown over Home');
+    await p.waitForFunction(() => /Release to make notes/.test(getComputedStyle(document.querySelector('.shell'), '::after').content));
     await p.locator('.home').screenshot({path: `/tmp/motetto-ux-drop-app-${theme}.png`}).catch(() => {});
     await ref.getByRole('button', {name: 'Library', exact: true}).click().catch(() => {});
-    await ref.locator('.drop').waitFor();
+    await ref.locator('.homehead').waitFor();
     await ref.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'call.m4a')); document.querySelector('.mainwin').dispatchEvent(new DragEvent('dragenter', {dataTransfer: dt, bubbles: true, cancelable: true})); });
-    // The mockup's demo has an import running, so it shows the blocked reason, dashed.
-    if (!(await ref.locator('.drop span').innerText()).startsWith('One import at a time') || (await style(ref.locator('.drop'), ['borderTopStyle'])).borderTopStyle !== 'dashed') throw Error('Mockup blocked drop state');
-    await ref.evaluate(() => document.querySelector('.mainwin').removeAttribute('data-blocked'));
-    same(over, await style(ref.locator('.drop'), ['borderTopStyle', 'borderTopColor', 'backgroundColor', 'color']), 'drop over');
+    if (!/One import at a time|Release to make notes/.test(await ref.locator('.mainwin .doc').evaluate(el => getComputedStyle(el, '::after').content))) throw Error('Mockup frame over Home');
     await p.evaluate(() => window.emit('tauri://drag-drop', {paths: ['/Users/x/call.m4a'], position: {x: 400, y: 300}}));
-    await p.waitForFunction(() => document.querySelector('.drop span')?.textContent.startsWith('Drop an audio'));
-    if ((await style(p.locator('.drop'), ['borderTopStyle'])).borderTopStyle !== 'dashed') throw Error('Highlight stayed after drop');
+    await p.waitForFunction(() => getComputedStyle(document.querySelector('.shell'), '::after').content === 'none');
     if (errors.length) throw Error(errors.join('; '));
     out.push(`${theme}: library ok`);
     await p.close(); await ref.close();

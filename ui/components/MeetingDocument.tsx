@@ -22,7 +22,7 @@ const TITLE_MAX=80;
 
 export type LiveSession = {state:AppState|null; stage:Stage|null; gaps:Gap[]; pending:boolean; act:(command:()=>Promise<void>)=>Promise<void>};
 
-export default function MeetingDocument({meeting, find, onChange, onChanged, onError, onRename, onDelete, renameRequest=0, session, rewriting, onToast}: {find?:{tab:string;query:string}; session?:LiveSession; rewriting?:{stage:Stage|null; transcribe:boolean}; onToast?:(text:string,undo?:()=>Promise<void>)=>void; meeting:Meeting; onChange:(meeting:Meeting)=>void; onChanged:(removed:boolean)=>Promise<void>; onError:(error:string)=>void; onRename:(title:string)=>Promise<void>; onDelete:()=>void; renameRequest?:number}) {
+export default function MeetingDocument({meeting, find, at, onChange, onChanged, onError, onRename, onDelete, renameRequest=0, session, rewriting, onToast}: {find?:{tab:string;query:string}; /** Play from here once the audio is ready (a play chip on Home). */ at?:number; session?:LiveSession; rewriting?:{stage:Stage|null; transcribe:boolean}; onToast?:(text:string,undo?:()=>Promise<void>)=>void; meeting:Meeting; onChange:(meeting:Meeting)=>void; onChanged:(removed:boolean)=>Promise<void>; onError:(error:string)=>void; onRename:(title:string)=>Promise<void>; onDelete:()=>void; renameRequest?:number}) {
   const [tab,setTab]=useState(find?.tab??'Notes');
   const readIn=useReadIn(meeting,onChange,onError,onToast);
   // Write in from the Read in line opens Write the notes again in that language.
@@ -187,6 +187,9 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   function replay(start:number,end:number){seek(start);stopAt.current=end;}
   // The player's slider: moves the position (click or drag) and keeps playing or paused.
   function scrub(time:number){stopAt.current=null;cursor.current=Math.max(0,Math.min(time,duration));seekRequested.current=true;setPosition(cursor.current);}
+  // Home's play chip: once the media is known, play from its moment on the Transcript tab.
+  const jumped=useRef(false);
+  useEffect(()=>{if(at===undefined||jumped.current||!media?.duration_ms)return;jumped.current=true;seek(at);setTab('Transcript');});
   function seek(time:number){
     stopAt.current=null;
     if(!media?.duration_ms)return;

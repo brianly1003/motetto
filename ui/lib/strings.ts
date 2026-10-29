@@ -52,6 +52,8 @@ export const strings = {
   processing: "Writing your meeting notes", processingBody: "Your local models are working. You can keep this window in the background.",
   loading: "Opening your meetings…", none: "No matching meetings", results: "Results", matchedIn: { Notes: "In the notes", Transcript: "In the transcript", MyNotes: "In my notes" }, jumpToNow: "Jump to now", copyTranscript: "Transcript", dropRelease: "Release to make notes from this file", transcript: "Transcript", notes: "Notes", meetingViews: "Meeting views",
   openItemsTitle: "Open action items", openItemsCount: "{n} across {m} meetings", itemDone: "Marked done.", markDone: "Mark done",
+  showItems: "Show", filterAll: "All", filterYours: "Yours", filterOthers: "Others", waitingOnOthers: "Waiting on others", noOwner: "No owner", noneYours: "Nothing you promised is open.",
+  showMore: "Show {n} more", showFewer: "Show fewer", openMeeting: "Open the meeting", copyMeetingItems: "Copy these action items", itemsCopied: "Action items copied.", playFrom: "Play from {t}",
   noOpenItems: "No open action items.", dropHint: "Drop an audio or video file here to make notes from it",
   libraryTitle: "Your meetings, on this computer.", libraryBody: "Choose a meeting in the sidebar, or import a recording.",
   browser: "Open the desktop app to view your meetings or import a recording.",

@@ -42,7 +42,7 @@ async (page) => {
     await p.locator('.openitems .oi').first().waitFor();
     const differences = [];
     const props = ['padding', 'gap', 'fontSize', 'fontWeight', 'lineHeight', 'borderRadius', 'backgroundColor', 'color', 'borderColor', 'borderStyle', 'borderWidth', 'display', 'textAlign', 'fontFamily'];
-    const pairs = [['.home', '.home'], ['.home h1', '.home h2'], ['.home .titlerow .tip', '.home .titlerow .tip'], ['.openitems', '.openitems'], ['.openitems .oi', '.openitems .oi'], ['.openitems .owner:not(.me)', '.openitems .owner'], ['.openitems .from', '.openitems .from'], ['.drop', '.drop'], ['.drop button', '.drop button'], ['.meeting-row > span', '.mitem .mm'], ['.meeting-row', '.mitem']];
+    const pairs = [['.home', '.home'], ['.home h1', '.home h2'], ['.homehead .tip', '.homehead .tip'], ['.hseg', '.hseg'], ['.hseg button[aria-checked="true"]', '.hseg button[aria-checked="true"]'], ['.hseg button[aria-checked="false"]', '.hseg button[aria-checked="false"]'], ['.homeacts .btn', '.homeacts #import'], ['.olist', '.olist'], ['.mhead', '.mhead'], ['.mname', '.mname'], ['.mhead .mday', '.mhead .mday'], ['.mact .n', '.mact .n'], ['.mact .iconbtn', '.mact .iconbtn'], ['.mlabel', '.mlabel'], ['.mgroup .openitems .oi', '.mgroup .openitems .oi'], ['.openitems .owner:not(.me)', '.openitems .owner'], ['.srcchip', '.srcchip'], ['.meeting-row > span', '.mitem .mm'], ['.meeting-row', '.mitem']];
     for (const [a, b] of pairs) {
       const x = await p.locator(a).first().evaluate((e, ps) => Object.fromEntries(ps.map(k => [k, getComputedStyle(e)[k]])), props);
       const y = await ref.locator('.mainwin ' + b).first().evaluate((e, ps) => Object.fromEntries(ps.map(k => [k, getComputedStyle(e)[k]])), props);
@@ -57,7 +57,18 @@ async (page) => {
     await p.waitForFunction(() => document.querySelectorAll('.openitems .oi').length === 3);
     await p.getByRole('button', {name: 'Undo'}).click();
     await p.waitForFunction(() => document.querySelectorAll('.openitems .oi').length === 4);
-    await p.locator('.openitems .from').first().click();
+    // No drop zone on Home: Import stays in the header (owner 2026-10-30).
+    if (await p.locator('.home .drop').count()) differences.push('drop zone still on Home');
+    // One header per meeting, newest first; "Waiting on others" only where yours come first.
+    const heads = await p.locator('.mhead .mname').allInnerTexts();
+    if (heads.join('|') !== 'FCM vs Pusher Beams|Payment proxy page|Daily standup') differences.push(`groups: ${heads}`);
+    if ((await p.locator('.mlabel').count()) !== 1) differences.push('Waiting on others label count');
+    await p.getByRole('radio', {name: /Yours/}).click();
+    if ((await p.locator('.mgroup').count()) !== 2) differences.push('Yours filter groups');
+    await p.getByRole('radio', {name: 'All'}).click();
+    await p.locator('.mact .iconbtn').first().click();
+    await p.getByText('Action items copied.').waitFor();
+    await p.locator('.srcchip').first().click();
     await p.waitForFunction(() => window.calls.some(c => c.c === 'get_meeting' && c.a.id === '1'));
     if (differences.length || errors.length) throw Error(JSON.stringify({theme, differences, errors}));
     out.push({theme, differences, errors});
