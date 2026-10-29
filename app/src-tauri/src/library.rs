@@ -69,6 +69,8 @@ pub struct Meeting {
     pub transcript: String,
     /// transcript.txt as heard, only when the user edited lines (else empty), for Revert (SPEC 7.11).
     pub transcript_heard: String,
+    /// Saved video availability, before the waveform previews are read.
+    pub has_video: bool,
 }
 
 /// A search result: the meeting, and the line the words were found in when it isn't only the title.
@@ -356,6 +358,7 @@ pub fn read(root: &Path, id: &str) -> Result<Meeting, String> {
         notes_md,
         transcript,
         transcript_heard,
+        has_video: crate::meeting_media::has_video(&dir),
     })
 }
 

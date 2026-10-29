@@ -2,3 +2,7 @@ try {
   const appearance = localStorage.getItem('motetto-appearance');
   if (appearance === 'light' || appearance === 'dark') document.documentElement.dataset.theme = appearance;
 } catch {}
+
+try {
+  document.documentElement.dataset.sidebar = localStorage.getItem('motetto-sidebar') === 'hidden' ? 'hidden' : 'shown';
+} catch {}

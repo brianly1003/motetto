@@ -100,6 +100,36 @@ pub fn duration(root: &Path, id: &str) -> Result<Option<u64>, String> {
     Ok(duration)
 }
 
+fn video_parts(dir: &Path) -> Vec<(crate::screen::ScreenPart, PathBuf)> {
+    let parts: Vec<crate::screen::ScreenPart> = crate::screen_files::read(dir, "screen.json");
+    parts
+        .into_iter()
+        .filter_map(|part| {
+            if !crate::screen_files::video_name(&part.file) {
+                return None;
+            }
+            let path = crate::screen_files::safe_file(dir, &part.file)?;
+            Some((part, path))
+        })
+        .collect()
+}
+
+/// Initial document tabs need availability, without reading audio samples for waveforms.
+pub fn has_video(dir: &Path) -> bool {
+    let Ok(tracks) = audio(dir) else {
+        return false;
+    };
+    video_parts(dir).into_iter().any(|(part, path)| {
+        fs::metadata(path).is_ok_and(|m| m.len() > 0)
+            && tracks.iter().any(|(path, offset)| {
+                *offset == part.offset_ms
+                    && path.file_name().is_some_and(|name| {
+                        name.to_string_lossy().split('.').next() == part.file.split('.').next()
+                    })
+            })
+    })
+}
+
 pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
     let dir = library::folder(root, id)?;
     let mut tracks = Vec::new();
@@ -167,15 +197,8 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
         .map(|t| t.offset_ms.saturating_add(t.duration_ms))
         .max()
         .unwrap_or(0);
-    let parts: Vec<crate::screen::ScreenPart> = crate::screen_files::read(&dir, "screen.json");
     let mut videos = vec![];
-    for part in parts {
-        if !crate::screen_files::video_name(&part.file) {
-            continue;
-        }
-        let Some(path) = crate::screen_files::safe_file(&dir, &part.file) else {
-            continue;
-        };
+    for (part, path) in video_parts(&dir) {
         let Some(duration_ms) = tracks
             .iter()
             .filter(|t| {
@@ -274,6 +297,8 @@ mod tests {
         assert_eq!(media.tracks[0].waveform.len(), 200);
         assert!(media.tracks[0].waveform.iter().all(|v| *v == 0.5));
         assert!(media.videos.is_empty());
+        let dir = library::folder(&root, "1").unwrap();
+        assert!(!has_video(&dir));
         let video = "part-0000.screen.mp4";
         fs::write(root.join("1").join(video), b"video fixture").unwrap();
         crate::screen_files::write(
@@ -292,12 +317,36 @@ mod tests {
             }],
         )
         .unwrap();
+        assert!(has_video(&dir));
+        fs::write(
+            root.join("1/meeting.json"),
+            r#"{"id":"1","title":"Example","created_ms":0,"status":"Ready"}"#,
+        )
+        .unwrap();
+        assert!(library::read(&root, "1").unwrap().has_video);
+        fs::write(root.join("1").join(video), b"").unwrap();
+        assert!(!has_video(&dir));
+        fs::write(root.join("1").join(video), b"video fixture").unwrap();
+        let mut parts: Vec<crate::screen::ScreenPart> =
+            crate::screen_files::read(&root.join("1"), "screen.json");
+        parts[0].offset_ms = 999;
+        crate::screen_files::write(&root.join("1"), "screen.json", &parts).unwrap();
+        assert!(!has_video(&dir));
+        parts[0].offset_ms = 500;
+        crate::screen_files::write(&root.join("1"), "screen.json", &parts).unwrap();
         let with_video = read(&root, "1").unwrap();
         assert_eq!(with_video.videos.len(), 1);
         assert_eq!(with_video.videos[0].offset_ms, 500);
         assert_eq!(with_video.videos[0].duration_ms, 1000);
         fs::remove_file(root.join("1").join(video)).unwrap();
         assert!(read(&root, "1").unwrap().videos.is_empty());
+        assert!(!library::read(&root, "1").unwrap().has_video);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&path, root.join("1").join(video)).unwrap();
+            assert!(!has_video(&dir));
+            fs::remove_file(root.join("1").join(video)).unwrap();
+        }
         // The echo-cancelled mic plays in its place, still as You.
         fs::copy(&path, root.join("1/part-0000.mic.aec.wav")).unwrap();
         let media = read(&root, "1").unwrap();

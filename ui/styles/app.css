@@ -213,7 +213,7 @@ svg.duet path.them { stroke: var(--voice-them); } svg.duet circle.them { fill: v
 @media (prefers-reduced-transparency: reduce) { .palette, .dropdown { background: var(--surface); } }
 .search-key kbd { font-size: 10.5px; padding: 0 4px; }
 
-.window-titlebar { height: 34px; display: flex; align-items: center; justify-content: center; padding: 0 80px; border-bottom: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; user-select: none; }
+.window-titlebar { position: relative; height: 34px; display: flex; align-items: center; justify-content: center; padding: 0 80px; border-bottom: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; user-select: none; }
 .window-titlebar .title-brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; letter-spacing: -.005em; pointer-events: none; }
 .window-titlebar .mark { width: 16px; height: 16px; flex: none; opacity: .92; }
 .window-titlebar + .shell { height: calc(100dvh - 34px); }
@@ -884,6 +884,7 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .sp-subitem:hover { background: var(--surface-3); color: var(--ink); }
 .sp-subitem[aria-current="true"] { background: var(--surface-3); color: var(--ink); font-weight: 500; }
 .sp-subitem.sp-new { color: var(--ink-3); }
+.sp-subitem.sp-new:hover { color: var(--ink-1); }
 /* The script ⌃⌥T opens (the one last presented or rehearsed) carries the key. */
 .sp-subitem { display: flex; align-items: center; gap: 6px; }
 .sp-subitem > span { overflow: hidden; text-overflow: ellipsis; }
@@ -980,3 +981,23 @@ input.sp-name:hover { background: var(--surface-2); }
 .ptrep .player .bar:is(:hover, :active, :focus-visible)::-webkit-slider-thumb { opacity: 1; }
 .ptrep .player .bar:focus-visible { outline: none; box-shadow: none; }
 .ptrep .player .bar:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--attention); }
+
+/* Library sidebar toggle and its tooltip follow the approved library chrome. */
+.shell { transition: grid-template-columns 180ms cubic-bezier(.2, 0, 0, 1); }
+.sidebar { min-width: 0; overflow: hidden; transition: opacity 140ms ease; }
+:root[data-sidebar="hidden"] .shell, .shell[data-sidebar="hidden"] { grid-template-columns: 0 minmax(0, 1fr); }
+:root[data-sidebar="hidden"] .shell > .sidebar, .shell[data-sidebar="hidden"] > .sidebar { visibility: hidden; opacity: 0; }
+.window-titlebar .sidebar-control { position: absolute; left: 80px; top: 4px; display: flex; flex: none; align-items: center; }
+.window-titlebar[data-platform="win"] { justify-content: flex-start; gap: 8px; padding: 0 12px; }
+.window-titlebar[data-platform="win"] .sidebar-control { position: relative; left: auto; top: auto; }
+.sidebar-toggle { display: grid; place-items: center; width: 28px; height: 26px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.sidebar-toggle:hover { background: var(--surface-3); color: var(--ink-1); }
+:root .sidebar-toggle:focus-visible { box-shadow: none; outline: 2px solid var(--voice-me); outline-offset: 1px; background: var(--surface-3); }
+.sidebar-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar-toggle .sidebar-pane { fill: currentColor; stroke: none; opacity: .18; }
+.sidebar-toggle[aria-expanded="false"] .sidebar-pane { opacity: 0; }
+.sidebar-tip { position: absolute; z-index: 70; top: calc(100% + 8px); left: 0; display: flex; align-items: center; gap: 12px; white-space: nowrap; padding: 6px 8px; border-radius: 6px; background: var(--ink-1); color: var(--surface-1); box-shadow: var(--shadow); font: 11.5px var(--font-ui); visibility: hidden; opacity: 0; transform: translateY(-2px); pointer-events: none; transition: opacity 120ms ease, transform 120ms ease; }
+.sidebar-tip kbd { border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; font: 10px var(--font-data); opacity: .75; }
+.sidebar-control:hover .sidebar-tip, .sidebar-control:has(.sidebar-toggle:focus-visible) .sidebar-tip { visibility: visible; opacity: 1; transform: none; transition-delay: 300ms; }
+.window-titlebar .sidebar-control[data-tip-off] .sidebar-tip { visibility: hidden; opacity: 0; transition: none; }
+@media (prefers-reduced-motion: reduce) { .shell, .sidebar, .sidebar-tip { transition: none; } }

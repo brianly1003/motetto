@@ -1,4 +1,5 @@
 export const strings = {
+  sidebarHide: "Hide sidebar", sidebarShow: "Show sidebar",
   scr_audio: "Audio", scr_audio_screen: "Audio + screen", scr_none: "The screen isn't recorded.",
   scr_record_from: "Record from", scr_menu_title: "Record the screen", scr_audio_only: "Audio only",
   scr_foot: "About {size} an hour. Motetto's own windows are never in the video, and it stays on this Mac.",
@@ -7,6 +8,7 @@ export const strings = {
   scr_share_tip: "The video goes back to the {App} window when the share ends. Motetto itself is never in it.",
   scr_share_no: "Keep the window", scr_share_ended: "Share ended. Everything is back, and the video follows the {App} window again.",
   video_waiting: "Waiting for the {App} window. The audio goes on.", video_gap: "Screen not recorded here. The audio plays.",
+  video_loading: "Loading video…", video_load_failed: "Video could not be loaded.",
   video_changes: "Where the picture changed. Click one to watch from there.",
   video_delete_confirm: "Delete the {size} video? The audio, notes and transcript stay.",
   video_deleted: "Video moved to Recently deleted. The audio, notes and transcript stay.",

@@ -1,6 +1,7 @@
 "use client";
 import { Alert } from "@/components/Alert";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import LibraryTitlebar from "@/components/LibraryTitlebar";
 import Duet from "@/components/MotettoMark";
 import RecentlyDeleted from "@/components/RecentlyDeleted";
 import MeetingDocument from "@/components/MeetingDocument";
@@ -82,6 +83,29 @@ export default function Main(){
   // "Open Scripts in Motetto" from the strip's script menu.
   useEffect(()=>{const off=ipc.listen<null>("motetto://open-scripts",()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);});return()=>{void off.then(fn=>fn());};},[]);
   useEffect(()=>{const off=ipc.listen<Rehearsal>("motetto://rehearsal",r=>{if(r.duration_ms===null)return;selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);setRehearsed(r);});return()=>{void off.then(fn=>fn());};},[]);
+  const [sidebarHidden,setSidebarHidden]=useState(false);
+  const sidebar=useRef<HTMLElement>(null),sidebarButton=useRef<HTMLButtonElement>(null);
+  useLayoutEffect(()=>{
+    let hidden=false;try{hidden=localStorage.getItem("motetto-sidebar")==="hidden";}catch{}
+    setSidebarHidden(hidden);document.documentElement.dataset.sidebar=hidden?"hidden":"shown";
+  },[]);
+  function toggleSidebar(){
+    const hidden=!sidebarHidden;
+    if(hidden&&sidebar.current?.contains(document.activeElement))sidebarButton.current?.focus();
+    if(hidden)setRowMenu(null);
+    setSidebarHidden(hidden);
+    document.documentElement.dataset.sidebar=hidden?"hidden":"shown";
+    try{localStorage.setItem("motetto-sidebar",hidden?"hidden":"shown");}catch{}
+  }
+  useEffect(()=>{
+    const key=(event:KeyboardEvent)=>{
+      const modified=mac?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey;
+      if(!modified||event.altKey||event.shiftKey||event.repeat||!(event.code==="Backslash"||event.key==="\\"))return;
+      event.preventDefault();toggleSidebar();
+    };
+    document.addEventListener("keydown",key);
+    return()=>document.removeEventListener("keydown",key);
+  },[mac,sidebarHidden]);
   const [rowMenu,setRowMenu]=useState<{id:string;left:number;top:number}|null>(null);
   const [rename,setRename]=useState<{id:string;n:number}|null>(null);
   const [version,setVersion]=useState(0);
@@ -205,8 +229,8 @@ export default function Main(){
   // Record and Import share one worker: a second job waits, with the reason on the button.
   const importBlocked=job?s.importBusy:live&&live.state.type!=="Idle"?s.importRecording:"";
   const menuMeeting=rowMenu?shown.find(meeting=>meeting.id===rowMenu.id):undefined;
-  return <>{mac&&<header className="window-titlebar" data-tauri-drag-region><span className="title-brand"><Duet className="mark"/><span>Motetto</span></span></header>}<main className="shell" data-drag={dragging?importBlocked||s.dropRelease:undefined} data-blocked={dragging&&importBlocked?"":undefined}>
-    <aside className="sidebar" aria-label={s.meetings} onClickCapture={event=>{
+  return <><LibraryTitlebar mac={mac} hidden={sidebarHidden} onToggle={toggleSidebar} buttonRef={sidebarButton}/><main className="shell" data-sidebar={sidebarHidden?"hidden":"shown"} data-drag={dragging?importBlocked||s.dropRelease:undefined} data-blocked={dragging&&importBlocked?"":undefined}>
+    <aside className="sidebar" ref={sidebar} id="library-sidebar" inert={sidebarHidden} aria-hidden={sidebarHidden} aria-label={s.meetings} onClickCapture={event=>{
       (event.target as Element).closest<HTMLButtonElement>(".homerow, .meeting-row, .trash")?.focus({preventScroll:true});
     }} onKeyDown={event=>{
       if(event.key!=="ArrowUp"&&event.key!=="ArrowDown"||event.metaKey||event.ctrlKey||event.altKey||event.shiftKey)return;
