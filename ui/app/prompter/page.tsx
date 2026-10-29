@@ -190,10 +190,13 @@ export default function Prompter() {
       const fixed = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2
         + strip.querySelector(".pth")!.getBoundingClientRect().height
         + strip.querySelector(".ptfoot")!.getBoundingClientRect().height + 20;
-      // Below the rows you read, a lighter, smaller line with what comes next (always); above
-      // them, the end of the paragraph before, when there is room.
-      const nextLine = size * .82 * 1.3 + 4, prevLine = size * .68 * 1.3 + 4;
-      const tight = innerHeight - fixed - nextLine - prevLine < line;
+      // Keep the reading controls visible first, then fit the quieter context previews.
+      let nextLine = size * .82 * 1.3 + 4;
+      const noAhead = innerHeight - fixed - nextLine < line;
+      strip.classList.toggle("noahead", noAhead);
+      if (noAhead) nextLine = 0;
+      const prevLine = rehearsing ? 0 : size * .68 * 1.3 + 4;
+      const tight = rehearsing || innerHeight - fixed - nextLine - prevLine < line;
       strip.classList.toggle("tight", tight);
       const rows = Math.max(1, Math.min(3, Math.floor((innerHeight - fixed - nextLine - (tight ? 0 : prevLine)) / line)));
       pages.current = readingPages(text, rows);
@@ -243,7 +246,7 @@ export default function Prompter() {
     window.addEventListener("resize", measure);
     void document.fonts.ready.then(measure);
     return () => { active = false; watch.disconnect(); window.removeEventListener("resize", measure); };
-  }, [at.line, at.word, text, size, layout, editable, leaking, checking]);
+  }, [at.line, at.word, text, size, layout, editable, leaking, checking, rehearsing, shown, through, marker]);
   const c = lines[at.line];
   const p = pace(script.sections, at.line, Math.round((now - started) / 1000));
   const followText = !recording ? s.ptFollowOff.replace("{down}", keyLabel(keys.Down)).replace("{up}", keyLabel(keys.Up)) : paused ? s.ptPaused.replace("{key}", keyLabel(keys.Backslash)) : slow ? s.ptFollowSlow : s.ptFollowing;
@@ -260,7 +263,7 @@ export default function Prompter() {
       return <span key={`w${key++}`} data-word={k} className={live ? i <= at.word ? "ptsaid" : k <= at.word && at.word < i ? "ptnow" : "" : ""}>{w}</span>;
     }));
   };
-  return <div ref={root}>{markerEl}<div className={`pt${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
+  return <div ref={root}>{markerEl}<div className={`pt${rehearsing ? " rehearsing" : ""}${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
     <div className="pth">
       <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}>⠿</button>
       {c && !checking && name && (() => {
@@ -277,10 +280,10 @@ export default function Prompter() {
       {editable && <span className="ptedhint">{note || s.ptEditing}</span>}
       {rehearsing && <span className="ptreh" role="status"><i /><span title={s.rehearsing}>{s.rehearsing}</span><button type="button" data-control onClick={() => void ipc.rehearseStop().catch(() => {})}>{s.rehearsalStop}</button></span>}
       <span className={`ptpace${p.behind ? " behind" : ""}`} title={p.behind ? s.ptBehind : s.ptOnPlan}>{p.totalS > 0 && <i />}{fmt(Math.round((now - started) / 1000))}{p.totalS ? ` / ${fmt(p.totalS)}` : ""}</span>
-      {!rehearsing && <button type="button" className={`ptvis${checking ? " checking" : ""}`} role="switch" aria-checked={shown} data-control title={s.ptShowInShare} onClick={() => void ipc.setShareVisible(!shown)}>
+      <button type="button" className={`ptvis${checking ? " checking" : ""}`} role="switch" aria-checked={shown} data-control title={s.ptShowInShare} onClick={() => { setCloseError(""); void ipc.setShareVisible(!shown).catch(error => setCloseError(String(error))); }}>
         <span className="h"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><path d="M2 10 10 2" /></svg>{checking ? s.ptChecking : s.ptHidden}</span>
         <span className="s"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><circle cx="6" cy="6" r="1.5" /></svg>{s.ptShown}</span>
-      </button>}
+      </button>
       <button type="button" className="ptedit" data-control title={s.ptEdit} aria-label={s.ptEdit} onClick={() => void ipc.prompterEdit(!editing, false)}>✎</button>
       <button type="button" className="ptclose" data-control title={s.ptClose} aria-label={s.ptClose} disabled={closing} onClick={() => void close()}><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6" /></svg></button>
     </div>

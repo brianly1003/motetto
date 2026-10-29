@@ -125,11 +125,13 @@ async (page) => {
   if (await p.locator('.ptmarker i').count() !== 16) fails.push('marker cells');
   const colours = await p.locator('.ptmarker i').evaluateAll(cells => cells.slice(0, 2).map(c => getComputedStyle(c).backgroundColor));
   if (colours[0] !== 'rgb(255, 0, 255)' || colours[1] !== 'rgb(0, 255, 0)') fails.push('marker colours ' + colours);
-  // Rehearsing: the bar replaces the share switch, and Stop ends the rehearsal.
+  // Rehearsing keeps the share switch, the microphone announcement and Stop.
   await p.evaluate(() => window.emit('motetto://rehearsal', { id: '1', script: 'Demo', duration_ms: null }));
   await p.locator('.ptreh').waitFor({ timeout: 2000 }).catch(() => fails.push('no rehearsing bar'));
   if (!/Rehearsing · mic only/.test(await p.locator('.ptreh').innerText().catch(() => ''))) fails.push('rehearsing wording');
-  if (await p.getByRole('switch').count()) fails.push('share switch shown while rehearsing');
+  if (await p.getByRole('switch').count() !== 1) fails.push('share switch missing while rehearsing');
+  await p.getByRole('switch').click();
+  if (!(await p.evaluate(() => window.calls)).includes('set_share_visible:{"on":true}')) fails.push('rehearsal share switch did nothing');
   await p.locator('.ptreh button').click();
   if (!(await p.evaluate(() => window.calls)).includes('rehearse_stop')) fails.push('Stop did not end the rehearsal');
   if (!(await p.evaluate(() => window.rects?.length)) || (await p.evaluate(() => window.rects.length)) < 3) fails.push('Stop is not a control rectangle');
