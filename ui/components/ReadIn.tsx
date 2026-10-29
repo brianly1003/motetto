@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Meeting } from "@/lib/bindings/Meeting";
 import * as ipc from "@/lib/ipc";
-import { englishName, matches, nativeName, NOTE_LANGUAGES, originalNotesLanguage, systemLanguages, withTicks } from "@/lib/languages";
+import { englishName, matches, nativeName, NOTE_LANGUAGES, offerLanguage, originalNotesLanguage, systemLanguages, withTicks } from "@/lib/languages";
 import { strings as s } from "@/lib/strings";
 import { Alert } from "./Alert";
 import { MenuIcon } from "./MenuIcon";
@@ -100,7 +100,7 @@ export function useReadIn(meeting: Meeting, onChange: (meeting: Meeting) => void
     catch (error) { onError(String(error)); }
   }
   return {
-    desktop, saved, view: viewing, written, original, preferred, running, busyHere, failed, dismissed,
+    desktop, saved, view: viewing, written, original, preferred, offer: offerLanguage(preferred, original, meeting.summary.language), running, busyHere, failed, dismissed,
     /** What the Notes tab shows instead of notes.md, with the notes' own ticks while it matches them. */
     markdown: translation ? (translation.stale ? translation.markdown : withTicks(translation.markdown, meeting.notes_md)) : null,
     stale: !!translation?.stale,
@@ -223,8 +223,8 @@ export function ReadInBar({ readIn, onWriteIn }: { readIn: ReadIn; onWriteIn?: (
       <button type="button" className="doc-action ghost" title={s.translateAgain} aria-label={s.translateAgain} onClick={() => readIn.translate(readIn.view!)}><MenuIcon name="again"/></button>
     </div>;
   }
-  const p = readIn.preferred;
-  if (!p || p === readIn.original) return null;
+  const p = readIn.offer;
+  if (!p) return null;
   // You were reading in your language and looked at the original: one click back.
   if (readIn.saved.some(t => t.code === p)) return <div className="readin-bar quiet" role="status">
     <TranslateIcon/><div className="readin-text"><span>{s.showingOriginal}</span></div>

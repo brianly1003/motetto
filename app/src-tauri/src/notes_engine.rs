@@ -336,12 +336,67 @@ fn request(server: &Server, prompt: &str) -> Result<String, Failure> {
         .header("Authorization", &format!("Bearer {}", server.key))
         .header("Content-Type", "application/json")
         .send(request_body(prompt).to_string())
-        .and_then(|mut r| r.body_mut().read_to_string());
+        .map_err(|e| format!("The notes engine did not answer: {e}"))
+        .and_then(|response| {
+            if response.status() == 200 {
+                stream(io::BufReader::new(response.into_body().into_reader()))
+            } else {
+                let body = response.into_body().read_to_string().unwrap_or_default();
+                answer(&body)
+            }
+        });
     done.store(true, Ordering::SeqCst);
     let _ = watcher.join();
-    Ok(answer(&reply.map_err(|e| {
-        format!("The notes engine did not answer: {e}")
-    })?)?)
+    Ok(reply?)
+}
+
+/// The streamed answer (server-sent events), reporting the engine's own counts as they come
+/// (SPEC 6.6): prompt tokens read, then words written. A Stop kills the server, which ends the
+/// stream with an error here.
+fn stream(reader: impl BufRead) -> Result<String, String> {
+    let (mut text, mut words, mut chars, mut in_word) = (String::new(), 0u64, 0u64, false);
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("The notes engine did not answer: {e}"))?;
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data == "[DONE]" {
+            return Ok(text);
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(data).map_err(|_| "The notes engine sent an unreadable answer")?;
+        if let Some(error) = value.get("error") {
+            let message = error.get("message").and_then(|m| m.as_str());
+            return Err(format!(
+                "The notes engine failed: {}",
+                message.unwrap_or("unknown error")
+            ));
+        }
+        if let Some(read) = value.get("prompt_progress") {
+            let number = |key: &str| read.get(key).and_then(|n| n.as_u64()).unwrap_or(0);
+            // Tokens already cached from an earlier prompt aren't read again.
+            let cache = number("cache");
+            motetto_core::progress::reading(
+                number("processed").saturating_sub(cache),
+                number("total").saturating_sub(cache),
+            );
+        }
+        if let Some(piece) = value["choices"][0]["delta"]["content"].as_str() {
+            // Counted per piece: recounting the whole answer each time is quadratic in its length.
+            for c in piece.chars() {
+                let space = c.is_whitespace();
+                if !space && !in_word {
+                    words += 1;
+                }
+                in_word = !space;
+                chars += 1;
+            }
+            text.push_str(piece);
+            motetto_core::progress::writing(words, chars);
+        }
+    }
+    // The server always ends with [DONE]; a stream cut short is a failure, not an answer.
+    Err("The notes engine stopped before the end of its answer".into())
 }
 
 fn request_body(prompt: &str) -> serde_json::Value {
@@ -351,6 +406,8 @@ fn request_body(prompt: &str) -> serde_json::Value {
         "top_p": 0.8,
         "top_k": 20,
         "chat_template_kwargs": { "enable_thinking": false },
+        "stream": true,
+        "return_progress": true,
     })
 }
 
@@ -373,6 +430,31 @@ fn answer(body: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_joins_the_answer_and_counts_what_the_engine_reports() {
+        // The summarizer's plan claims the counts for its thread, as when notes are written.
+        let plan = motetto_core::progress::NotesPlan::new(&[1000], 0.0);
+        let events = "data: {\"prompt_progress\":{\"total\":15513,\"cache\":13,\"processed\":2061}}\n\n\
+            data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n\
+            data: {\"choices\":[{\"delta\":{\"content\":\"### Cập\"}}]}\n\n\
+            data: {\"choices\":[{\"delta\":{\"content\":\" nhật luồng\"}}]}\n\n\
+            data: [DONE]\n\n";
+        assert_eq!(stream(events.as_bytes()).unwrap(), "### Cập nhật luồng");
+        let counts = motetto_core::progress::notes_counts();
+        assert_eq!((counts.read, counts.read_of), (2048, 15500));
+        assert_eq!((counts.words, counts.written), (4, 18));
+        plan.end();
+        // Cut short (a killed server): an error, never half the notes.
+        assert!(
+            stream("data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n".as_bytes()).is_err()
+        );
+        assert!(
+            stream("data: {\"error\":{\"message\":\"busy\"}}\n".as_bytes())
+                .unwrap_err()
+                .contains("busy")
+        );
+    }
 
     #[test]
     fn request_disables_thinking() {
@@ -434,6 +516,53 @@ mod tests {
     /// Needs the bundled llama-server and a GGUF: `MOTETTO_TEST_GGUF=<file>`. Run alone, since
     /// Stop is one global flag.
     #[cfg(unix)]
+    /// Measures notes progress (SPEC 6.6) on a real transcript: every report, timed, then the end.
+    /// Score with the skill's scripts/progress/score-notes.py.
+    #[test]
+    #[ignore = "needs MOTETTO_TEST_GGUF, MOTETTO_TEST_TRANSCRIPT and MOTETTO_TEST_LOG"]
+    fn notes_progress_on_a_real_call() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("motetto-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let built = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/binaries"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("llama-server-"))
+            .unwrap();
+        std::os::unix::fs::symlink(built.path(), dir.join("llama-server")).unwrap();
+        tools::configure_bundled(dir.clone());
+        fn ask(prompt: &str) -> Result<String, Failure> {
+            ask_with(&std::env::var("MOTETTO_TEST_GGUF").unwrap(), prompt)
+        }
+        motetto_core::summarize::configure_engine(motetto_core::summarize::Engine {
+            ask,
+            context_tokens: CONTEXT_TOKENS,
+        });
+        let transcript =
+            std::fs::read_to_string(std::env::var("MOTETTO_TEST_TRANSCRIPT").unwrap()).unwrap();
+        let log =
+            Mutex::new(std::fs::File::create(std::env::var("MOTETTO_TEST_LOG").unwrap()).unwrap());
+        let started = Instant::now();
+        let base = dir.join("notes").to_string_lossy().into_owned();
+        motetto_core::summarize::notes(&base, &transcript, "", None, None, &|stage| {
+            let line = serde_json::to_string(&stage).unwrap();
+            writeln!(
+                log.lock().unwrap(),
+                "{:.1}\t{line}",
+                started.elapsed().as_secs_f64()
+            )
+            .unwrap();
+        })
+        .unwrap();
+        writeln!(
+            log.lock().unwrap(),
+            "{:.1}\tend",
+            started.elapsed().as_secs_f64()
+        )
+        .unwrap();
+        stop_server(false);
+    }
+
     #[test]
     #[ignore = "needs the bundled llama-server and MOTETTO_TEST_GGUF"]
     fn server_killed_on_drop() {

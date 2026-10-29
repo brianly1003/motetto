@@ -160,7 +160,7 @@ fn prompter(app: &tauri::AppHandle, key: &str) -> Option<Result<(), String>> {
                 .lock()
                 .is_ok_and(|r| r.is_some());
             if running {
-                crate::rehearse::stop(app).map(|_| ())
+                crate::rehearse::stop_asked(app).map(|_| ())
             } else {
                 match app
                     .state::<crate::settings::Store>()

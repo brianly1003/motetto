@@ -175,7 +175,7 @@ pub fn notes(
     my_notes: &str,
     heard: Option<&str>,
     write_in: Option<&str>,
-    stage: &dyn Fn(Stage),
+    stage: &(dyn Fn(Stage) + Sync),
 ) -> Result<Option<String>, Box<dyn Error>> {
     // An empty transcript makes the model invent a whole meeting: write no summary instead,
     // keeping the user's own "[] " tasks.
@@ -240,31 +240,78 @@ pub fn notes(
     if let ([_], Some(at)) = (parts.as_slice(), recap_at(transcript)) {
         parts = vec![&transcript[..at], transcript];
     }
-    let summary = if parts.len() <= 1 {
-        println!("Summarizing with {llm}...");
-        ask(&llm, &prompt(transcript))?
+    // Each prompt's progress (SPEC 6.6): the engine's counts, priced once a part is written.
+    let prompts: Vec<String> = if parts.len() <= 1 {
+        vec![prompt(transcript)]
     } else {
+        parts.iter().map(|part| prompt(part)).collect()
+    };
+    let of = prompts.len() as u32;
+    let clock = std::time::Instant::now();
+    let plan = std::sync::Mutex::new(crate::progress::NotesPlan::new(
+        &prompts
+            .iter()
+            .map(|p| p.chars().count())
+            .collect::<Vec<_>>(),
+        0.0,
+    ));
+    // The prompt running now: a part (from 1), or the merge (`of` + 1).
+    let running = std::sync::atomic::AtomicU32::new(1);
+    let report = || {
+        let now = clock.elapsed().as_secs_f64();
+        let progress = plan
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .report(now, crate::progress::notes_counts());
+        let part = running.load(std::sync::atomic::Ordering::Relaxed);
+        stage(if part > of {
+            Stage::Merging {
+                of,
+                progress: Some(progress),
+            }
+        } else {
+            Stage::Summarizing {
+                part,
+                of,
+                progress: Some(progress),
+            }
+        });
+    };
+    let begin = |index: usize, chars: usize| {
+        let now = clock.elapsed().as_secs_f64();
+        plan.lock().unwrap_or_else(|e| e.into_inner()).begin(
+            index,
+            chars,
+            crate::progress::notes_counts(),
+            now,
+        );
+        running.store(index as u32 + 1, std::sync::atomic::Ordering::Relaxed);
+        report();
+    };
+    let summary = crate::progress::ticking(report, || -> Result<String, Box<dyn Error>> {
+        if prompts.len() <= 1 {
+            println!("Summarizing with {llm}...");
+            begin(0, prompts[0].chars().count());
+            return ask(&llm, &prompts[0]);
+        }
         // one merge pass; merge in a tree if the joined part notes outgrow the context.
         let mut partials = Vec::new();
-        for (i, part) in parts.iter().enumerate() {
-            println!("Summarizing part {}/{} with {llm}...", i + 1, parts.len());
-            stage(Stage::Summarizing {
-                part: i as u32 + 1,
-                of: parts.len() as u32,
-            });
+        for (i, part) in prompts.iter().enumerate() {
+            println!("Summarizing part {}/{} with {llm}...", i + 1, prompts.len());
+            begin(i, part.chars().count());
             // Each part titles itself; only the merge's title counts.
-            partials.push(split_title(&ask(&llm, &prompt(part))?).1);
+            partials.push(split_title(&ask(&llm, part)?).1);
         }
-        println!("Merging {} part summaries...", parts.len());
-        stage(Stage::Merging);
-        ask(
-            &llm,
-            &format!(
-                "{MERGE}{language}{}\n\n{language}",
-                partials.join("\n\n---\n\n")
-            ),
-        )?
-    };
+        println!("Merging {} part summaries...", prompts.len());
+        let merge = format!(
+            "{MERGE}{language}{}\n\n{language}",
+            partials.join("\n\n---\n\n")
+        );
+        begin(prompts.len(), merge.chars().count());
+        ask(&llm, &merge)
+    });
+    plan.lock().unwrap_or_else(|e| e.into_inner()).end();
+    let summary = summary?;
     let (title, summary) = split_title(&tidy_headings(&summary));
     let summary = bracket_times(&summary);
     let mut summary = tidy_tasks(&one_time(&grounded(&summary, transcript)));

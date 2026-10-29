@@ -70,6 +70,14 @@ pub fn spawn(
                                     stop.clone(),
                                 )?;
                             }
+                            // The script strip follows the voice with or without live captions
+                            // (Apple on a Mac; Whisper only on the captions' server).
+                            crate::follow::start(
+                                app.clone(),
+                                format!("{base}.mic.wav").into(),
+                                stop.clone(),
+                                false,
+                            );
                             #[cfg(target_os = "macos")]
                             let result = {
                                 let mic = crate::microphone::for_capture(&app);
@@ -377,7 +385,11 @@ fn finish(root: &Path, record: &Recording, stage: impl Fn(Stage) + Sync) -> Resu
             }
             None => transcript,
         };
-        stage(Stage::Summarizing { part: 1, of: 1 });
+        stage(Stage::Summarizing {
+            part: 1,
+            of: 1,
+            progress: None,
+        });
         let started = std::time::Instant::now();
         let spellings = library::used_spellings();
         let my_notes = dir.join("my-notes.md");

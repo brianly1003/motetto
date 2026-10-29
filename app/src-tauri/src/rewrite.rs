@@ -101,11 +101,25 @@ pub(crate) fn retranscribe(
         None => None,
     };
     stage(Stage::Saving);
-    let previous = crate::transcript_edits::current(&folder)?;
-    let prev = folder.join("transcript.prev.txt");
-    fs::write(&prev, previous).map_err(on(&prev))?;
+    save_transcript(&folder, &transcript, fixed)?;
+    let mut summary = library::summary(root, id)?;
+    summary.language = heard.language;
+    library::save(root, &summary)
+}
+
+/// Replaces the transcript, keeping what was shown in `transcript.prev.txt`. A meeting cut off
+/// before its first transcript (Interrupted, notes stopped) has none to keep: reading it failed
+/// after the whole transcription, every time (2026-10-28).
+fn save_transcript(folder: &Path, transcript: &str, fixed: Option<String>) -> Result<(), String> {
+    if folder.join("transcript.txt").exists()
+        || folder.join(crate::transcript_edits::EDITED).exists()
+    {
+        let previous = crate::transcript_edits::current(folder)?;
+        let prev = folder.join("transcript.prev.txt");
+        fs::write(&prev, previous).map_err(on(&prev))?;
+    }
     let next = folder.join("transcript.txt.new");
-    fs::write(&next, &transcript).map_err(on(&next))?;
+    fs::write(&next, transcript).map_err(on(&next))?;
     fs::rename(&next, folder.join("transcript.txt")).map_err(on(&next))?;
     for stale in [crate::transcript_edits::EDITED, "transcript.fixed.txt"] {
         if folder.join(stale).exists() {
@@ -116,9 +130,7 @@ pub(crate) fn retranscribe(
         let path = folder.join("transcript.fixed.txt");
         fs::write(&path, fixed).map_err(on(&path))?;
     }
-    let mut summary = library::summary(root, id)?;
-    summary.language = heard.language;
-    library::save(root, &summary)
+    Ok(())
 }
 
 /// `write_in` is the language picked in its question (a code or "same_as_call"); None follows
@@ -173,7 +185,11 @@ pub(crate) fn regenerate(
         } else {
             String::new()
         };
-        stage(Stage::Summarizing { part: 1, of: 1 });
+        stage(Stage::Summarizing {
+            part: 1,
+            of: 1,
+            progress: None,
+        });
         let title = motetto_core::summarize::notes(
             &staging.join("notes").to_string_lossy(),
             &transcript,
@@ -306,6 +322,25 @@ mod tests {
         );
         assert!(!root.join("789/transcript.prev.txt").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn transcribe_again_saves_a_first_transcript_and_keeps_an_earlier_one() {
+        let dir = std::env::temp_dir().join(format!("motetto-save-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // Never transcribed (the owner's 100-minute call): saved, nothing to keep.
+        save_transcript(&dir, "[00:01] Me: first", None).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("transcript.txt")).unwrap(),
+            "[00:01] Me: first"
+        );
+        assert!(!dir.join("transcript.prev.txt").exists());
+        // Again: the first one is kept.
+        save_transcript(&dir, "[00:01] Me: second", None).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("transcript.prev.txt")).unwrap(),
+            "[00:01] Me: first"
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn a_file_error_names_the_file() {

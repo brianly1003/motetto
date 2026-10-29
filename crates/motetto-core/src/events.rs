@@ -235,11 +235,17 @@ pub enum Stage {
     Transcribing {
         progress: Option<TranscribeProgress>,
     },
+    /// `progress` from the notes engine (SPEC 6.6); None from Ollama and before the first report.
     Summarizing {
         part: u32,
         of: u32,
+        progress: Option<NotesProgress>,
     },
-    Merging,
+    /// The parts' notes combined into one: `of` parts.
+    Merging {
+        of: u32,
+        progress: Option<NotesProgress>,
+    },
     Saving,
 }
 /// How far a transcription is: `percent` of the expected time, and the seconds left once this
@@ -268,6 +274,22 @@ pub enum TranscribeStep {
         of: u32,
     },
 }
+/// How far the notes are. `percent` of the expected time and `eta_s` only once a part has been
+/// written, so the writing time is measured; `step` is always the engine's own count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct NotesProgress {
+    pub percent: Option<u8>,
+    pub eta_s: Option<u32>,
+    pub step: NotesStep,
+}
+/// What the notes model does now: reading the prompt (its share of the prompt's tokens, when the
+/// engine reports it), then writing (the words so far; how many it will write isn't known).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type")]
+pub enum NotesStep {
+    Reading { percent: Option<u8> },
+    Writing { words: u32 },
+}
 /// The track a step works on: the microphone (You) or the call (Them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub enum Who {
@@ -281,6 +303,14 @@ impl Event {
             Stage::Transcribing {
                 progress: Some(progress),
             } => (progress.percent, progress.eta_s),
+            Stage::Summarizing {
+                progress: Some(progress),
+                ..
+            }
+            | Stage::Merging {
+                progress: Some(progress),
+                ..
+            } => (progress.percent.unwrap_or(0), progress.eta_s),
             _ => (0, None),
         };
         Event::Stage {
@@ -578,7 +608,11 @@ mod tests {
     fn stage_and_problem_payloads_keep_their_fields() {
         let event = Event::Stage {
             meeting_id: "m1".into(),
-            stage: Stage::Summarizing { part: 2, of: 3 },
+            stage: Stage::Summarizing {
+                part: 2,
+                of: 3,
+                progress: None,
+            },
             percent: 40,
             eta_s: Some(10),
         };

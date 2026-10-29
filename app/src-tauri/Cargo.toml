@@ -23,5 +23,7 @@ sha2 = "0.10"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSURL", "NSError"] }
-objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioFile", "AVAudioFormat", "AVAudioMixerNode", "AVAudioNode", "AVAudioPlayerNode", "AVAudioTime", "AVAudioTypes", "AVAudioUnit", "AVAudioUnitEffect", "AVAudioUnitTimeEffect", "AVAudioUnitTimePitch", "AVAudioIONode", "AVAudioMixing"] }
+objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSURL", "NSError", "NSArray", "NSLocale", "NSSet", "NSEnumerator", "NSOperation"] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioFile", "AVAudioFormat", "AVAudioMixerNode", "AVAudioNode", "AVAudioPlayerNode", "AVAudioTime", "AVAudioTypes", "AVAudioUnit", "AVAudioUnitEffect", "AVAudioUnitTimeEffect", "AVAudioUnitTimePitch", "AVAudioIONode", "AVAudioMixing", "AVAudioBuffer"] }
+# Script following (SPEC 14.5): Apple's on-device recogniser; the platform API is the only way in.
+objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionTask", "SFSpeechRecognitionResult", "SFTranscription", "SFTranscriptionSegment", "SFSpeechRecognitionTaskHint"] }

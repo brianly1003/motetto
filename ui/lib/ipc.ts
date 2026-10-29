@@ -117,6 +117,12 @@ export const scriptRename = (from: string, to: string) => invoke<void>("script_r
 export const scriptDelete = (name: string) => invoke<void>("script_delete", { name });
 export type PrompterLayout = "Strip" | "Column" | "Tucked";
 export const prompterShow = (name: string | null) => invoke<void>("prompter_show", { name });
+/** Another script on the strip, from its start; it becomes the one ⌃⌥T opens. */
+export const prompterScript = (name: string) => invoke<void>("prompter_script", { name });
+/** Brings the library forward on its Scripts page. */
+export const openScripts = () => invoke<void>("open_scripts");
+/** Opens the Scripts folder in Finder or Explorer. */
+export const scriptReveal = () => invoke<void>("script_reveal");
 export const prompterHide = () => invoke<void>("prompter_hide");
 export const prompterLayout = (layout: PrompterLayout) => invoke<void>("prompter_layout", { layout });
 export const prompterEdit = (on: boolean, restore: boolean) => invoke<void>("prompter_edit", { on, restore });
@@ -218,6 +224,9 @@ import type {SpeedResult} from "./bindings/SpeedResult";
 import type {SetupState} from "./bindings/SetupState";
 import type {TierId} from "./bindings/TierId";
 export const permissions=()=>invoke<Permissions>('permissions');
+/** Speech Recognition, for script following only (macOS; Windows answers NotAsked). */
+export const speechPermission=()=>invoke<Grant>('speech_permission');
+export const openSpeechSettings=()=>invoke<void>('open_speech_settings');
 export const requestPermission=(kind:PermissionKind)=>invoke<Grant>('request_permission',{kind});
 export const relaunch=()=>invoke<void>('relaunch');
 export const hardwareInfo=()=>invoke<Hardware>('hardware_info');

@@ -262,12 +262,45 @@ fn pane(kind: PermissionKind) -> &'static str {
 
 #[tauri::command]
 pub fn open_permission_settings(kind: PermissionKind) -> Result<(), String> {
+    open_pane(pane(kind))
+}
+
+fn open_pane(pane: &str) -> Result<(), String> {
     let opener = if cfg!(windows) { "explorer" } else { "open" };
     std::process::Command::new(opener)
-        .arg(pane(kind))
+        .arg(pane)
         .status()
         .map(|_| ())
         .map_err(|e| format!("Couldn't open settings: {e}"))
+}
+
+/// Speech Recognition, for script following only (SPEC 14.5): never needed to record, so it is
+/// not a recording permission. Its own OS pane.
+fn speech_pane() -> &'static str {
+    if cfg!(windows) {
+        "ms-settings:privacy-speech"
+    } else {
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+    }
+}
+
+/// Settings › Privacy: whether the strip may follow with Apple's on-device recogniser, as macOS
+/// says now. Windows has no such permission (it follows with Whisper).
+#[tauri::command]
+pub fn speech_permission() -> Grant {
+    #[cfg(target_os = "macos")]
+    return match crate::follow_macos::access() {
+        crate::follow_macos::Access::Allowed => Grant::Allowed,
+        crate::follow_macos::Access::Denied => Grant::Denied,
+        crate::follow_macos::Access::Unknown => Grant::NotAsked,
+    };
+    #[cfg(not(target_os = "macos"))]
+    Grant::NotAsked
+}
+
+#[tauri::command]
+pub fn open_speech_settings() -> Result<(), String> {
+    open_pane(speech_pane())
 }
 
 #[tauri::command]
@@ -340,6 +373,8 @@ mod tests {
         ]
         .map(super::pane);
         assert!(panes[0] != panes[1] && panes[1] != panes[2] && panes[0] != panes[2]);
+        // Speech Recognition (script following) has its own pane too, never a recording one.
+        assert!(!panes.contains(&super::speech_pane()));
         assert!(panes.iter().all(|p| p.starts_with(if cfg!(windows) {
             "ms-settings:"
         } else {

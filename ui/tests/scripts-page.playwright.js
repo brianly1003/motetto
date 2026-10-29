@@ -9,12 +9,14 @@ async (page) => {
     const files = { 'Team X demo': { text: '# Opening (1m)\nHello.\n\n# Demo (5m)\nThis is it.', ms: 1000 }, 'Quarterly review': { text: 'Q', ms: 500 } };
     let next = 0; const callbacks = {}, listeners = {};
     window.calls = [];
+    window.emitEvent = (event, payload) => (listeners[event] || []).forEach(id => callbacks[id]?.({ event, id, payload }));
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } }, convertFileSrc: x => x, transformCallback: cb => { const id = ++next; callbacks[id] = cb; return id; }, unregisterCallback: id => { delete callbacks[id]; }, invoke: async (c, a) => {
       if (c === 'plugin:event|listen') { (listeners[a.event] ||= []).push(a.handler); return a.handler; }
       if (c === 'get_state') return { state: { type: 'Idle' }, meeting_id: null, companion: { visible: false, size: 'Pill' }, elapsed_ms: 0, quit_pending: false, share_visible: false };
       if (c === 'list_meetings' || c === 'deleted_meetings' || c === 'open_action_items') return [];
       if (c === 'scripts_list') return Object.entries(files).map(([name, f]) => ({ name, modified_ms: f.ms, bytes: f.text.length })).sort((x, y) => y.modified_ms - x.modified_ms);
+      if (c === 'get_settings') return { notes_folder: '/Users/someone/Motetto', prompter: { layout: 'Strip', text_size: 22, last_script: 'Quarterly review' }, shortcuts: { T: 'Ctrl+Alt+T' } };
       if (c === 'script_read') return files[a.name].text;
       if (c === 'script_save') { window.calls.push(`save:${a.name}:${a.baseModifiedMs}`); if (a.baseModifiedMs === null && files[a.name]) throw 'A script with this name already exists.'; files[a.name] = { text: a.text, ms: (files[a.name]?.ms ?? 0) + 1 }; return files[a.name].ms; }
       if (c === 'script_rename') { files[a.to] = files[a.from]; delete files[a.from]; window.calls.push(`rename:${a.from}:${a.to}`); return null; }
@@ -27,7 +29,24 @@ async (page) => {
   await list.waitFor();
   const rows = await list.getByRole('button').allInnerTexts();
   if (!/^Team X demo/.test(rows[0]) || !/Quarterly review/.test(rows[1]) || !/New script/.test(rows[2])) fails.push('rows: ' + JSON.stringify(rows));
-  if (!/2 sections/.test(rows[0])) fails.push('open script shows no section count: ' + rows[0]);
+  // Many scripts scroll in their own short list, so the meetings below stay in reach.
+  if (await list.locator('.sp-subscroll').evaluate(e => getComputedStyle(e).maxHeight + ' ' + getComputedStyle(e).overflowY + ' ' + getComputedStyle(e).gridAutoRows) !== '189px auto max-content') fails.push('script list does not scroll on its own');
+  // As the mockup: the meta line, the outline of time to say, the syntax legend and the path.
+  const meta = await p.locator('.sp-meta').innerText();
+  if (!/^2 sections · about 0:0\d to say · 6:00 planned · Saved$/.test(meta)) fails.push('meta: ' + meta);
+  const outline = await p.locator('.sp-outline .sp-sec').allInnerTexts();
+  if (outline.length !== 2 || !/Opening/.test(outline[0]) || !/\/ 1:00/.test(outline[0]) || !/\/ 5:00/.test(outline[1])) fails.push('outline: ' + JSON.stringify(outline));
+  if ((await p.locator('.sp-legend code').count()) !== 3) fails.push('legend');
+  if (!/~\/Motetto\/Scripts\/Team X demo\.md · on this (Mac|PC) only/.test(await p.locator('.sp-foot').innerText())) fails.push('foot: ' + await p.locator('.sp-foot').innerText());
+  // The script ⌃⌥T opens carries the key in the list; Present moves it.
+  const shownRow = () => p.evaluate(() => document.querySelector('#scripts-sub [data-shown]')?.textContent);
+  if (!/^Quarterly review/.test(await shownRow() || '')) fails.push('shown key: ' + await shownRow());
+  // ••• : Rename, Duplicate, Show in Finder or Explorer, Delete script.
+  await p.getByRole('button', { name: 'More for this script' }).click();
+  const items = await p.getByRole('menuitem').allInnerTexts();
+  if (items.join('|') !== 'Rename|Duplicate|Show in Finder|Delete script' && items.join('|') !== 'Rename|Duplicate|Show in Explorer|Delete script') fails.push('menu: ' + items.join('|'));
+  await p.getByRole('menuitem', { name: /Show in/ }).click();
+  if (!(await p.evaluate(() => window.calls)).includes('script_reveal')) fails.push('Show in Finder did nothing');
   const box = p.getByRole('textbox', { name: 'Team X demo' });
   if (!/# Opening/.test(await box.inputValue())) fails.push('script text not loaded');
   await box.press('End'); await box.type('\n\nMore.');
@@ -35,6 +54,11 @@ async (page) => {
   if (!(await p.evaluate(() => window.calls)).includes('save:Team X demo:1000')) fails.push('no save with the loaded time: ' + JSON.stringify(await p.evaluate(() => window.calls)));
   await p.getByRole('button', { name: 'Present' }).click();
   if (!(await p.evaluate(() => window.calls)).includes('prompter_show:{"name":"Team X demo"}')) fails.push('Present did not open the prompter');
+  await p.evaluate(() => window.emitEvent('motetto://prompter-script', 'Team X demo'));
+  await p.waitForTimeout(100);
+  if (!/^Team X demo/.test(await shownRow() || '')) fails.push('shown key did not follow Present: ' + await shownRow());
+  for (const theme of ['light', 'dark']) { await p.emulateMedia({ colorScheme: theme }); await p.screenshot({ path: `.playwright-out/scripts-page-${theme}.png` }); }
+  await p.emulateMedia({ colorScheme: 'light' });
   const title = p.getByRole('textbox', { name: 'Script name' });
   await title.fill('Team X launch'); await title.press('Enter');
   await p.waitForTimeout(200);

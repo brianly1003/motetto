@@ -75,8 +75,12 @@ export default function Main(){
   // Recently deleted is a page you open, never part of the list (SPEC 7.7).
   const [trashOpen,setTrashOpen]=useState(false);
   const [scriptsOpen,setScriptsOpen]=useState(false);
+  const [scriptCount,setScriptCount]=useState(0);
+  useEffect(()=>{void ipc.scriptsList().then(list=>setScriptCount(Array.isArray(list)?list.length:0)).catch(()=>{});},[]);
   // A rehearsal ended: its report opens on the Scripts page (SPEC 14.6), wherever the library was.
   const [rehearsed,setRehearsed]=useState<Rehearsal|null>(null);
+  // "Open Scripts in Motetto" from the strip's script menu.
+  useEffect(()=>{const off=ipc.listen<null>("motetto://open-scripts",()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);});return()=>{void off.then(fn=>fn());};},[]);
   useEffect(()=>{const off=ipc.listen<Rehearsal>("motetto://rehearsal",r=>{if(r.duration_ms===null)return;selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);setRehearsed(r);});return()=>{void off.then(fn=>fn());};},[]);
   const [rowMenu,setRowMenu]=useState<{id:string;left:number;top:number}|null>(null);
   const [rename,setRename]=useState<{id:string;n:number}|null>(null);
@@ -215,6 +219,9 @@ export default function Main(){
     }}>
       <label className="search"><span className="sr-only">{s.search}</span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input placeholder={s.search} value={query} onChange={e=>setQuery(e.target.value)}/><button className="search-key" aria-label="Command palette" onClick={event=>{event.preventDefault();setPalette(true);}}><kbd>⌘K</kbd></button></label>
       {meetings.length>0&&<button className="homerow" aria-current={!trashOpen&&!scriptsOpen&&!selected?"page":undefined} onClick={goHome}><MenuIcon name="items"/><span>{s.actionItems}</span><span className="n" aria-label={openCount?s.openCount.replace("{n}",String(openCount)):undefined}>{openCount||""}</span></button>}
+      {/* Scripts, as in the mockup: under Action items, with their names listed below it while open. */}
+      <button className="homerow scripts-entry" aria-current={scriptsOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);}}><MenuIcon name="script"/><span>{s.scripts}</span><span className="n">{scriptCount||""}</span></button>
+      {scriptsOpen&&scriptCount>0&&<nav className="sp-sub" id="scripts-sub" aria-label={s.scripts}/>}
       <nav className="meeting-list" aria-label={s.meetings}>
         {hits?hits.length>0&&<div><div className="list-heading">{s.results}<span>{hits.length}</span></div>{hits.map(({meeting,snippet})=>{const current=!trashOpen&&selected?.summary.id===meeting.id;return <button key={meeting.id} className={`meeting-row hit ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>{setFound(was=>snippet?{id:meeting.id,tab:snippet.source==="Transcript"?"Transcript":"Notes",query:query.trim(),n:(was?.n??0)+1}:null);void select(meeting.id);}}>
           <strong title={meetingTitle(meeting)}><Marked text={meetingTitle(meeting)} query={query}/></strong>
@@ -230,7 +237,6 @@ export default function Main(){
           }}><Dots/></button></div>;})}</div>:null;})}
         {query&&!shown.length&&<p className="list-empty">{s.none}</p>}
       </nav>
-      <button className="scripts-entry" aria-current={scriptsOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);}}><MenuIcon name="script"/><span>{s.scripts}</span></button>
       {deleted.length>0&&<button className="trash" aria-current={trashOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setScriptsOpen(false);setTrashOpen(true);}}><MenuIcon name="trash"/><span>{s.deletedMeetings}</span><span className="n">{deleted.length}</span></button>}
       <div className="privacy"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="8" width="10" height="9" rx="2"/><path d="M7 8V5a3 3 0 0 1 6 0v3"/></svg>{(()=>{const facts=`${meetings.length} ${meetings.length===1?s.meeting:s.meetings.toLowerCase()}${bytes>0?` · ${fileSize(bytes)}`:""}`;return <span className="where" title={`${s.privacy} · ${facts}`}><span>{s.privacy}</span><b>&nbsp;· {facts}</b></span>;})()}</div>
     </aside>
@@ -239,7 +245,7 @@ export default function Main(){
       {error&&<Alert variant="danger" role="alert" title={s.error} actions={<button className="quiet" onClick={()=>setError("")}>{s.dismiss}</button>}>{error}</Alert>}
       {quitPending&&<Alert title="Saving before quitting">{s.quitPending}</Alert>}
       {loading?<div className="empty" role="status"><p>{s.loading}</p></div>
-        :scriptsOpen?<ScriptsPage onError={setError} device={mac?"Mac":"PC"} pending={rehearsed} onTaken={()=>setRehearsed(null)}/>
+        :scriptsOpen?<ScriptsPage onError={setError} device={mac?"Mac":"PC"} pending={rehearsed} onTaken={()=>setRehearsed(null)} onCount={setScriptCount}/>
         :trashOpen?<RecentlyDeleted deleted={deleted} refresh={refresh} notify={notify} onError={setError}/>
         :selected&&job?.import&&job.id===selected.summary.id?<article className="document"><header className="dochead"><h1>{meetingTitle(selected.summary)}</h1><div className="document-meta"><span>{meetingDate(selected.summary.created_ms)}</span></div></header><ImportingPage id={selected.summary.id} stage={jobStage} stopping={stopping} onCancel={cancelImport}/></article>
         :selected?<MeetingDocument key={selected.summary.id+(found?.id===selected.summary.id?`-${found.n}`:"")} find={found?.id===selected.summary.id?found:undefined} session={session} meeting={selected} rewriting={rewritingId===selected.summary.id?{stage:jobStage,transcribe:!!job?.transcribe}:undefined} onToast={(text,undo)=>notify(text,undo)} onChange={setSelected} onError={setError} renameRequest={rename?.id===selected.summary.id?rename.n:0} onRename={title=>renameMeeting(selected.summary.id,title)} onDelete={()=>void deleteMeeting(selected.summary.id)} onChanged={async removed=>{await refresh();if(removed){selection.current++;setSelected(null);}else await select(selected.summary.id);}}/>

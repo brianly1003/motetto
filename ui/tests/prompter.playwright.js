@@ -18,7 +18,7 @@ async (page) => {
       if (c === 'get_state') return window.state;
       if (c === 'prompter_state') return { script: 'Demo', check: window.firstCheck || 'checking', editing: false, layout: 'Strip' };
       if (c === 'get_settings') return { prompter: { layout: 'Strip', text_size: 22, last_script: 'Demo' }, shortcuts };
-      if (c === 'scripts_list') return [{ name: 'Demo', modified_ms: 1000, bytes: script.length }];
+      if (c === 'scripts_list') return [{ name: 'Demo', modified_ms: 1000, bytes: script.length }, { name: 'Quarterly review', modified_ms: 500, bytes: 1 }];
       if (c === 'script_read') return script;
       if (c === 'live_transcript') return ['m1', window.live, ''];
       if (c === 'script_save') { window.calls.push(`save:${a.name}:${a.baseModifiedMs}:${a.text.length}`); return 2000; }
@@ -48,7 +48,15 @@ async (page) => {
   await p.evaluate(() => { window.emit('motetto://prompter-marker', false); window.emit('motetto://prompter-through', false); });
   await p.evaluate(() => window.emit('motetto://prompter-check', 'hidden'));
   if (await p.locator('.ptlines').evaluate(e => getComputedStyle(e).visibility) !== 'visible') fails.push('text hidden after the check passed');
-  if (await p.locator('.ptchip').innerText() !== '1/2 · Opening') fails.push('chip: ' + await p.locator('.ptchip').innerText());
+  if (await p.locator('.ptchip').innerText() !== 'Demo · 1/2 Opening ▾') fails.push('chip: ' + await p.locator('.ptchip').innerText());
+  // The chip switches script: the list with ✓ on this one, then Open Scripts in Motetto.
+  await p.locator('.ptchip').click();
+  const picks = (await p.locator('.ptmenu button').allInnerTexts()).map(t => t.replace(/\n/g, ''));
+  if (picks.join('|') !== '✓Demo|Quarterly review|Open Scripts in Motetto') fails.push('script menu: ' + picks.join('|'));
+  if (await p.locator('.ptmenu').getAttribute('data-control') === null) fails.push('menu lets clicks through');
+  await p.getByRole('menuitemradio', { name: 'Quarterly review' }).click();
+  if (!(await p.evaluate(() => window.calls)).includes('prompter_script:{"name":"Quarterly review"}')) fails.push('picking a script did not switch');
+  if (await p.locator('.ptmenu').count()) fails.push('menu stayed open');
 
   // Following: words you said turn the Me colour; the next line comes up at the end of a line.
   await p.evaluate(() => window.emit('motetto://follow-heard', { text: 'thanks for having', end_ms: 4000, inference_ms: 800 }));
@@ -68,8 +76,8 @@ async (page) => {
   await p.evaluate(() => window.emit('motetto://prompter-key', 'Backslash'));
   if (!/Paused · ⌃⌥\\ to follow|Paused · Ctrl\+Alt\+Backslash to follow/.test(await p.locator('.ptfollow').innerText())) fails.push('pause: ' + await p.locator('.ptfollow').innerText());
 
-  // The mouse is taken only by the handle, the switch, edit and close.
-  await p.waitForFunction(() => window.rects?.length === 4, null, { timeout: 2000 }).catch(() => fails.push('control rects: ' + JSON.stringify(p.evaluate(() => window.rects))));
+  // The mouse is taken only by the handle, the script chip, the switch, edit and close.
+  await p.waitForFunction(() => window.rects?.length === 7, null, { timeout: 2000 }).catch(() => fails.push('control rects: ' + JSON.stringify(p.evaluate(() => window.rects))));
   // Fading while the pointer is over the strip (Rust tells the page).
   await p.evaluate(() => window.emit('motetto://prompter-through', true));
   await p.waitForTimeout(200);
@@ -120,7 +128,7 @@ async (page) => {
   // Rehearsing: the bar replaces the share switch, and Stop ends the rehearsal.
   await p.evaluate(() => window.emit('motetto://rehearsal', { id: '1', script: 'Demo', duration_ms: null }));
   await p.locator('.ptreh').waitFor({ timeout: 2000 }).catch(() => fails.push('no rehearsing bar'));
-  if (!/Rehearsing · mic only · stays on this Mac/.test(await p.locator('.ptreh').innerText().catch(() => ''))) fails.push('rehearsing wording');
+  if (!/Rehearsing · mic only/.test(await p.locator('.ptreh').innerText().catch(() => ''))) fails.push('rehearsing wording');
   if (await p.getByRole('switch').count()) fails.push('share switch shown while rehearsing');
   await p.locator('.ptreh button').click();
   if (!(await p.evaluate(() => window.calls)).includes('rehearse_stop')) fails.push('Stop did not end the rehearsal');
@@ -140,7 +148,9 @@ async (page) => {
   for (const theme of ['light', 'dark']) {
     await p.emulateMedia({ colorScheme: theme });
     for (const width of [300, 560]) {
-      await p.setViewportSize({ width, height: 204 });
+      await p.setViewportSize({ width, height: width === 300 ? 600 : 204 });
+      await p.evaluate(width => window.emit('motetto://prompter-layout', width === 300 ? 'Column' : 'Strip'), width);
+      await p.waitForFunction(width => document.querySelector('.pt').classList.contains('col') === (width === 300), width);
       await p.evaluate(() => window.emit('motetto://rehearsal', { duration_ms: null }));
       const r = await p.locator('.ptclose').boundingBox();
       if (!r || r.x < 0 || r.x + r.width > width) fails.push('close clipped: ' + theme + width);

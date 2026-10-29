@@ -24,6 +24,8 @@ pub(super) struct Track {
     pub(super) input: Input,
     /// Mic only: clipped samples since the desktop last looked (`mics::too_loud`).
     pub(super) clips: Option<Arc<AtomicU32>>,
+    /// Mic only: the live listener (`mics::Listener`).
+    pub(super) listen: Option<crate::mics::Listener>,
 }
 
 impl SCStreamOutputTrait for Track {
@@ -72,6 +74,13 @@ impl Track {
                 Ordering::Relaxed,
             );
         }
+        if let Some(listener) = &self.listen {
+            let rate = format
+                .as_ref()
+                .and_then(|f| f.audio_sample_rate())
+                .unwrap_or(48_000.0) as u32;
+            send_listen(listener, &channel0(&samples, stride), rate);
+        }
         if let Some(clips) = &self.clips {
             let n = samples
                 .iter()
@@ -110,6 +119,20 @@ impl Track {
             }
         }
         Ok(())
+    }
+}
+
+/// The channel the WAV records: every `stride`-th sample of an interleaved buffer.
+fn channel0(samples: &[f32], stride: usize) -> Vec<f32> {
+    samples.iter().step_by(stride.max(1)).copied().collect()
+}
+
+/// Hands `mono` to the live listener without waiting: capture never slows for it.
+pub(super) fn send_listen(listener: &crate::mics::Listener, mono: &[f32], rate: u32) {
+    if let Ok(slot) = listener.lock()
+        && let Some((_, tx)) = slot.as_ref()
+    {
+        let _ = tx.try_send((mono.to_vec(), rate));
     }
 }
 
@@ -165,6 +188,46 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, SeekFrom};
     use std::sync::atomic::AtomicBool;
+    #[test]
+    fn listener_gets_what_the_wav_gets() {
+        // Interleaved stereo: channel 0, as the WAV keeps.
+        assert_eq!(channel0(&[0.2, 0.4, -0.2, 0.0], 2), vec![0.2, -0.2]);
+        assert_eq!(channel0(&[0.5, 0.25], 1), vec![0.5, 0.25]);
+    }
+
+    #[test]
+    fn an_old_listener_never_clears_a_new_one() {
+        let listener: crate::mics::Listener = Arc::default();
+        let (old_tx, _old_rx) = mpsc::sync_channel(1);
+        let old = crate::mics::listen(&listener, old_tx);
+        let (new_tx, new_rx) = mpsc::sync_channel(1);
+        let new = crate::mics::listen(&listener, new_tx);
+        crate::mics::unlisten(&listener, old); // the old follower ending
+        send_listen(&listener, &[0.1; 4], 48_000);
+        assert!(
+            new_rx.try_recv().is_ok(),
+            "the new follower still hears the mic"
+        );
+        crate::mics::unlisten(&listener, new);
+        assert!(listener.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn full_listener_never_blocks() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let listener: crate::mics::Listener = Arc::default();
+        crate::mics::listen(&listener, tx);
+        for _ in 0..3 {
+            send_listen(&listener, &[0.1; 480], 48_000);
+        }
+        assert_eq!(rx.try_recv().unwrap(), (vec![0.1; 480], 48_000));
+        assert!(rx.try_recv().is_err());
+        drop(rx);
+        send_listen(&listener, &[0.1; 480], 48_000); // a gone listener is fine too
+        let none: crate::mics::Listener = Arc::default();
+        send_listen(&none, &[0.1; 480], 48_000);
+    }
+
     #[test]
     fn meter_uses_real_signal_and_rejects_non_finite_samples() {
         assert_eq!(rms([0.0, 0.0].into_iter()), 0.0);

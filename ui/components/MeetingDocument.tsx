@@ -1,5 +1,5 @@
 import VideoTab from "./VideoTab";
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState, type CSSProperties} from 'react';
 import type {Meeting} from '@/lib/bindings/Meeting';
 import type {MeetingMedia} from '@/lib/bindings/MeetingMedia';
 import MeetingActions, { deletable } from './MeetingActions';
@@ -32,6 +32,8 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   // A translation's headings look like the original's: its lines are the notes' lines.
   const headings=new Map(noteSections(meeting.notes_md).map(section=>[section.line,section.title]));
   const body=useRef<HTMLDivElement>(null);
+  // The tabs reuse this panel; a new view must not inherit the previous view's scroll.
+  useLayoutEffect(()=>{if(body.current)body.current.scrollTop=0;},[tab]);
   // While this meeting records it is a working page; after Stop, the notes are being written.
   const liveType=session?.state?.meeting_id===meeting.summary.id?session.state.state.type:null;
   const live=liveType==='Recording'||liveType==='Paused'||liveType==='Stopped';
@@ -70,6 +72,10 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   useEffect(()=>{if(renameRequest)startRename();},[renameRequest]);
   const [media,setMedia]=useState<MeetingMedia|null>(null);
   const [playing,setPlaying]=useState(false);
+  // A job on this meeting (its notes after the call, Transcribe again, Write the notes again)
+  // replaces the player with its steps: playback stops with it (owner 2026-10-28).
+  const busy=live||writing||!!rewriting;
+  useEffect(()=>{if(busy)setPlaying(false);},[busy]);
   const [rate,setRate]=useState(1);
   useEffect(()=>{audio.current.forEach(element=>{if(element&&element.playbackRate!==rate)element.playbackRate=rate;});},[rate]);
   // Space plays or pauses on the Notes and Audio tabs too (owner 2026-10-25) when nothing has
@@ -176,6 +182,8 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
   },[playing,media,rate,nativeAudio]);
   const stopAt=useRef<number|null>(null);
   function replay(start:number,end:number){seek(start);stopAt.current=end;}
+  // The player's slider: moves the position (click or drag) and keeps playing or paused.
+  function scrub(time:number){stopAt.current=null;cursor.current=Math.max(0,Math.min(time,duration));seekRequested.current=true;setPosition(cursor.current);}
   function seek(time:number){
     stopAt.current=null;
     if(!media?.duration_ms)return;
@@ -247,7 +255,7 @@ export default function MeetingDocument({meeting, find, onChange, onChanged, onE
         <div className="panel"><h5>Stays on this computer</h5><p className="tip">No account, no upload. Folder: <span>{media?.folder??'Loading…'}</span></p></div>
       </aside>}
     </div>
-    {tab!=='Video'&&(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><div className="bar"><i style={{width:`${position/duration*100}%`}}/></div><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
+    {tab!=='Video'&&(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><input type="range" className="bar" aria-label="Position" min={0} max={duration} step={100} value={position} style={{'--p':`${position/duration*100}%`} as CSSProperties} onChange={e=>scrub(+e.currentTarget.value)}/><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
     {nativeAudio===false&&tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
     </>}
   </article>;

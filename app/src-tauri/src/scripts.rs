@@ -188,6 +188,11 @@ pub fn script_rename(app: tauri::AppHandle, from: String, to: String) -> Result<
 pub fn script_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
     delete(&root(&app), &name)
 }
+/// Show in Finder (a script's ••• menu): the Scripts folder, where its `.md` file is.
+#[tauri::command]
+pub fn script_reveal(app: tauri::AppHandle) -> Result<(), String> {
+    crate::settings_system::reveal(&dir(&root(&app)))
+}
 
 #[cfg(test)]
 mod tests {

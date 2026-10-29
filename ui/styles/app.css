@@ -202,7 +202,7 @@ svg.duet path.them { stroke: var(--voice-them); } svg.duet circle.them { fill: v
 .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.18); z-index: 79; }
 
 
-:root { --surface: var(--surface-1); --ink: var(--ink-1); }
+:root { --surface: var(--surface-1); --ink: var(--ink-1); --me: var(--voice-me); }
 .palette { max-width: calc(100vw - 32px); }
 .search-key { border: 0; padding: 0; background: transparent; color: var(--ink-3); }
 .search-key kbd { font: 11px var(--font-data); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; white-space: nowrap; }
@@ -288,8 +288,13 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .kv dt { color: var(--ink-3); }
 .kv dd { margin: 0; text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .player { position: absolute; left: 28px; right: 28px; bottom: 14px; display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 12.5px; }
-.player .bar { flex: 1; height: 4px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
-.player .bar i { display: block; height: 100%; background: var(--accent); width: 0; }
+/* The bar is a range input: click or drag to move, arrow keys too; --p is the played part. */
+.player .bar { flex: 1; height: 16px; margin: 0; padding: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.player .bar::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(var(--accent), var(--accent)) 0 / var(--p, 0%) 100% no-repeat, var(--surface-3); }
+.player .bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity var(--duration-fade); }
+.player .bar:is(:hover, :active, :focus-visible)::-webkit-slider-thumb { opacity: 1; }
+.player .bar:focus-visible { outline: none; box-shadow: none; }
+.player .bar:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--attention); }
 .tl { margin-top: 8px; display: grid; gap: 2px; cursor: pointer; }
 .tl svg { width: 100%; height: 40px; display: block; }
 /* Owner direction 2026-10-19: stronger than the mockup's .55 so the wave reads at a glance. */
@@ -368,6 +373,7 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .spelling-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { display: inline-flex; padding: 1px 8px; border-radius: 99px; font: 500 11px/1.6 var(--font-data); white-space: nowrap; }
 .chip.plain { background: var(--surface-3); color: var(--ink-2); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
 :root { --accent: var(--attention); --them-soft: #dcf0f5; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --them-soft: #12323b; } }
 :root[data-theme="dark"] { --them-soft: #12323b; }
@@ -864,19 +870,70 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 
 /* Scripts (SPEC 14.4; mockup Script screen › Scripts page) */
 .scripts { padding: 0; }
-.scripts-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100%; }
-.scripts-list { border-right: 1px solid var(--line); padding: 12px; display: grid; align-content: start; gap: 4px; background: var(--surface-2); }
-.scripts-list button { text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; font-size: 13px; color: var(--ink-1); }
-.scripts-list button:hover { background: var(--surface-3); }
-.scripts-list button[aria-current="true"] { background: var(--surface-3); font-weight: 500; }
-.scripts-list small { display: block; color: var(--ink-3); font-weight: 400; }
-.scripts-pane { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.scripts-bar { display: flex; gap: 8px; align-items: center; }
-.scripts-title { margin-right: auto; font: 600 17px var(--font-ui); border: 0; background: transparent; color: var(--ink-1); min-width: 0; flex: 1; border-radius: 6px; padding: 2px 4px; }
-.scripts-title:focus-visible { box-shadow: inset 0 0 0 1px var(--line); outline: none; }
-.scripts-text { flex: 1; min-height: 260px; font-family: var(--font-doc); font-size: 14px; line-height: 1.55; background: var(--surface-1); color: var(--ink-1); border: 1px solid var(--line); border-radius: 10px; padding: 12px; resize: none; }
+/* Scripts page, from the mockup (DESIGN 4.18): scripts in the sidebar under Scripts; the page is a
+   header, the editor with its syntax legend, the outline of time to say, and the file's path. */
+.scripts.sp-main { height: 100%; }
+.sidebar .sp-sub { margin: -2px 6px 6px 28px; }
+.sp-morewrap { position: relative; }
+.ptbar { display: flex; gap: 8px; align-items: center; }
+.pthint { font-size: 12px; color: var(--ink-3); }
+@keyframes pulse { 50% { opacity: .35; } }
+.sp-sub { display: grid; gap: 1px; margin: 0 6px 6px 28px; }
+.sp-sub[hidden] { display: none; }
+.sp-subitem { text-align: left; border: 0; background: transparent; border-radius: 7px; padding: 5px 9px; font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-subitem:hover { background: var(--surface-3); color: var(--ink); }
+.sp-subitem[aria-current="true"] { background: var(--surface-3); color: var(--ink); font-weight: 500; }
+.sp-subitem.sp-new { color: var(--ink-3); }
+/* The script ⌃⌥T opens (the one last presented or rehearsed) carries the key. */
+.sp-subitem { display: flex; align-items: center; gap: 6px; }
+.sp-subitem > span { overflow: hidden; text-overflow: ellipsis; }
+.sp-subitem kbd { display: none; margin-left: auto; flex: none; font: 10.5px var(--font-data); color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.sp-subitem[data-shown] kbd { display: inline; }
+/* Many scripts: the list scrolls in about seven rows, so the meetings below stay in reach;
+   + New script stays under it. */
+.sp-subscroll { display: grid; grid-auto-rows: max-content; gap: 1px; max-height: 189px; overflow-y: auto; overscroll-behavior: contain; }
+.sp-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.sp-head { display: flex; align-items: flex-start; gap: 16px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); }
+.sp-titles { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.sp-name { font: 600 18px var(--font-ui); color: var(--ink); border: 0; background: transparent; padding: 1px 4px; margin: 0 0 0 -4px; border-radius: 6px; min-width: 0; width: 100%; }
+input.sp-name:hover { background: var(--surface-2); }
+.sp-meta { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sp-saved { color: var(--ok); }
+.sp-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.sp-actions .btn svg { width: 14px; height: 14px; }
+.sp-more { width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); letter-spacing: 1px; font-size: 11px; }
+.sp-more:hover { background: var(--surface-2); color: var(--ink); }
+.sp-live { display: inline-flex; align-items: center; gap: 7px; color: var(--rec); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; padding: 0 4px; }
+.sp-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); animation: pulse 1.6s ease-in-out infinite; }
+.sp-note { display: flex; gap: 10px; align-items: flex-start; margin: 12px 22px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.sp-note svg { width: 15px; height: 15px; flex: none; color: var(--rec); margin-top: 1px; }
+.sp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 248px; }
+.sp-editor { display: flex; flex-direction: column; min-height: 0; padding: 16px 22px 12px; gap: 10px; }
+.sp-editor textarea, .sp-paste textarea { flex: 1; min-height: 0; resize: none; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: 15px/1.6 var(--font-doc); padding: 14px 16px; outline: none; }
+.sp-editor textarea:focus, .sp-paste textarea:focus { border-color: var(--line-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--me) 14%, transparent); }
+.sp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--ink-3); }
+.sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sp-legend code, .sp-steps code { font: 11px ui-monospace, "SF Mono", Menlo, monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink-2); }
+.sp-outline { border-left: 1px solid var(--line); background: var(--surface-2); padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+.sp-lab { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); display: flex; justify-content: space-between; }
+.sp-lab span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.sp-sec { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px 6px; align-items: baseline; font-size: 12.5px; }
+.sp-n { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sp-t { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-d { color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.sp-d.over { color: var(--accent-ink); }
+.sp-bar { grid-column: 2 / 4; position: relative; height: 8px; background: var(--surface-3); border-radius: 3px; }
+.sp-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-right: 2px solid var(--ink-2); }
+.sp-bar em { position: absolute; left: 0; top: 2px; height: 4px; border-radius: 2px; background: var(--me); }
+.sp-bar em.over { background: var(--accent); }
+.sp-est { margin: 0; font-size: 11.5px; color: var(--ink-3); line-height: 1.45; }
+.sp-card { margin-top: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; display: grid; gap: 6px; justify-items: start; }
+.sp-cardrow { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.sp-cardrow b { font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sp-foot { display: flex; align-items: center; gap: 6px; padding: 8px 22px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+.sp-foot svg { width: 12px; height: 12px; }
+.sp-scroll { flex: 1; overflow: auto; padding: 16px 22px; }
 .scripts-hint { margin: 0; font-size: 12px; color: var(--ink-3); }
-.scripts-heading { margin: 0 auto 0 0; font: 600 17px var(--font-ui); }
 /* Rehearsal report (mockup Script screen › report) */
 .ptrep { display: grid; gap: 12px; font-size: 13px; }
 .ptrep .player { position: static; box-shadow: none; }

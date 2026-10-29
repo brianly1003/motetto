@@ -8,6 +8,8 @@ mod controller;
 mod desktop;
 mod download;
 mod follow;
+#[cfg(target_os = "macos")]
+mod follow_macos;
 mod hardware;
 mod library;
 mod library_commands;

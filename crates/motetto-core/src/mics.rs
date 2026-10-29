@@ -4,15 +4,38 @@
 //! measured, so it is the one problem Motetto names.
 
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, atomic::AtomicU32};
+use std::sync::{Arc, Mutex, atomic::AtomicU32, mpsc::SyncSender};
 use ts_rs::TS;
 
+/// Where the mic's samples also go as they are captured (the script strip's recogniser): the
+/// recorded channel as f32 with its sample rate. Never waited on; a full or gone listener drops.
+/// Each listener has its own number, so one that ends never clears the next one's.
+pub type Listener = Arc<Mutex<Option<(u64, SyncSender<(Vec<f32>, u32)>)>>>;
+
+/// Starts listening with `tx`, replacing any listener; returns its number for `unlisten`.
+pub fn listen(listener: &Listener, tx: SyncSender<(Vec<f32>, u32)>) -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    *listener.lock().unwrap_or_else(|e| e.into_inner()) = Some((id, tx));
+    id
+}
+
+/// Stops listener `id`, only if it is still the one listening.
+pub fn unlisten(listener: &Listener, id: u64) {
+    let mut slot = listener.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|(current, _)| *current == id) {
+        *slot = None;
+    }
+}
+
 /// What the desktop watches while recording: each track's level (mic, system audio) as f32 bits,
-/// and how many mic samples clipped since it last looked. The CLI watches nothing.
+/// how many mic samples clipped since it last looked, and who listens to the mic live. The CLI
+/// watches nothing.
 #[derive(Clone, Default)]
 pub struct Meters {
     pub levels: [Arc<AtomicU32>; 2],
     pub mic_clips: Arc<AtomicU32>,
+    pub mic_listener: Listener,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

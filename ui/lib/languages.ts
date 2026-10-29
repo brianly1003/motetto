@@ -25,11 +25,24 @@ export function systemLanguages(list: readonly string[] = typeof navigator === '
   return [...new Set(list.map(tag => tag.split('-')[0].toLowerCase()).map(code => code === 'fil' ? 'tl' : code === 'nb' || code === 'nn' ? 'no' : code))].filter(code => known.has(code));
 }
 
-/** Null notes language means the call's own language; mixed calls have no single original. */
+/** The call's languages, most spoken first ("vi,en"). */
+function callLanguages(call?: string | null) {
+  return [...new Set((call ?? '').split(',').map(code => code.trim()).filter(Boolean))];
+}
+
+/** The language the notes are in. Null notes language means the call's own: the one spoken most,
+ *  which the notes model is told to write in (summarize::notes) - on a mixed call too (2026-10-28:
+ *  "vi,en" notes were Vietnamese, and Read in offered Vietnamese). */
 export function originalNotesLanguage(written?: string | null, call?: string | null) {
-  if (written) return written;
-  const languages = [...new Set((call ?? '').split(',').map(code => code.trim()).filter(Boolean))];
-  return languages.length === 1 ? languages[0] : null;
+  return written || callLanguages(call)[0] || null;
+}
+
+/** The language Read in offers: yours, unless the notes are already in it; then the call's other
+ *  language, so a "vi,en" call's Vietnamese notes offer English and English ones Vietnamese. */
+export function offerLanguage(preferred: string | null, original: string | null, call?: string | null) {
+  if (preferred && preferred !== original) return preferred;
+  const known = new Set<string>(NOTE_LANGUAGES);
+  return callLanguages(call).find(code => code !== original && known.has(code)) ?? null;
 }
 
 /** A translation has the notes' exact lines (motetto_core::translate), so it shows their ticks. */

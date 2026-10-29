@@ -5,14 +5,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as ipc from "@/lib/ipc";
 import { useSession } from "@/lib/useSession";
 import { strings as s } from "@/lib/strings";
-import { follow, pace, parseScript, type At } from "@/lib/script";
+import { follow, keyLabel, pace, parseScript, tokens, type At } from "@/lib/script";
+import { readingPages, readingRows, readingWindow, type ReadingPage } from "@/lib/prompter";
 import type { Heard } from "@/lib/bindings/Heard";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
 import "../../styles/prompter.css";
 
 type Check = "checking" | "hidden" | "visible" | "unknown" | "shown" | "off" | "moved";
 const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
-const keyLabel = (accel: string | undefined) => !accel ? "" : /Mac/.test(navigator.platform) ? accel.replace("Ctrl+", "⌃").replace("Alt+", "⌥").replace("Shift+", "⇧").replace("Down", "↓").replace("Up", "↑").replace("Backslash", "\\") : accel;
 
 export default function Prompter() {
   const { state } = useSession();
@@ -35,11 +35,33 @@ export default function Prompter() {
   const [note, setNote] = useState("");
   const [closeError, setCloseError] = useState("");
   const [closing, setClosing] = useState(false);
+  // The chip's script menu: the names while it is open.
+  const [menu, setMenu] = useState<string[] | null>(null);
+  // The pointer moving onto the lines (not a control) closes it, as a click there goes to your app.
+  useEffect(() => { if (through) setMenu(null); }, [through]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [started] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const root = useRef<HTMLDivElement>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const current = useRef<HTMLDivElement>(null);
+  const pages = useRef<ReadingPage[]>([]);
+  // The first word of the rows shown, per paragraph: the text only moves when it has to.
+  const shownFrom = useRef<{ line: number; word: number } | null>(null);
+  const [page, setPage] = useState({ index: 0, total: 1, last: true });
+  const slideFrom = useRef<{ line: number; offset: number } | null>(null);
+  const shownWords = useRef<{ line: number; words: Set<number> } | null>(null);
+  const nextRef = useRef<HTMLDivElement>(null);
+  function move(direction: number) {
+    setAt(a => {
+      const index = Math.max(0, pages.current.findLastIndex(p => p.word <= a.word));
+      const next = pages.current[index + direction];
+      // Stepping by hand shows that passage exactly, from its first row.
+      if (next) { shownFrom.current = { line: a.line, word: next.word }; return { ...a, word: next.word }; }
+      const line = Math.max(0, Math.min(script.lines.length - 1, a.line + direction));
+      return line === a.line ? a : { line, word: direction > 0 ? 0 : script.lines[line].words.length };
+    });
+  }
   const script = useMemo(() => parseScript(text), [text]);
   const shown = !!state?.share_visible;
   const [rehearsing, setRehearsing] = useState(false);
@@ -88,7 +110,7 @@ export default function Prompter() {
   const lines = script.lines;
   const setKey = useRef<(key: string) => void>(() => {});
   setKey.current = key => {
-    if (key === "Down" || key === "Up") setAt(a => ({ line: Math.max(0, Math.min(lines.length - 1, a.line + (key === "Down" ? 1 : -1))), word: 0 }));
+    if (key === "Down" || key === "Up") move(key === "Down" ? 1 : -1);
     if (key === "ShiftDown") setAt(a => { const next = script.sections.find(x => x.first > a.line); return next ? { line: next.first, word: 0 } : a; });
     if (key === "Backslash") setPaused(p => !p);
     if (key === "Equal" || key === "Minus") setSize(v => {
@@ -139,7 +161,7 @@ export default function Prompter() {
     const el = root.current; if (!el) return;
     const send = () => void ipc.prompterControls([...el.querySelectorAll<HTMLElement>("[data-control]")].map(c => { const r = c.getBoundingClientRect(); return [r.left, r.top, r.width, r.height] as [number, number, number, number]; })).catch(() => {});
     send();
-    const watch = new ResizeObserver(send); watch.observe(el);
+    const watch = new ResizeObserver(send); watch.observe(el.querySelector(".pt") ?? el);
     return () => watch.disconnect();
   });
 
@@ -157,6 +179,71 @@ export default function Prompter() {
   const checking = !shown && check === "checking";
   // The editor shows the whole script: only when the share can't see it.
   const editable = editing && !leaking && !checking;
+  useLayoutEffect(() => {
+    const viewport = current.current, text = viewport?.firstElementChild as HTMLElement | null;
+    const strip = root.current?.querySelector<HTMLElement>(".pt");
+    if (!viewport || !text || !strip) return;
+    let active = true;
+    const measure = () => {
+      if (!active) return;
+      const style = getComputedStyle(strip), line = parseFloat(getComputedStyle(text).lineHeight);
+      const fixed = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2
+        + strip.querySelector(".pth")!.getBoundingClientRect().height
+        + strip.querySelector(".ptfoot")!.getBoundingClientRect().height + 20;
+      // Below the rows you read, a lighter, smaller line with what comes next (always); above
+      // them, the end of the paragraph before, when there is room.
+      const nextLine = size * .82 * 1.3 + 4, prevLine = size * .68 * 1.3 + 4;
+      const tight = innerHeight - fixed - nextLine - prevLine < line;
+      strip.classList.toggle("tight", tight);
+      const rows = Math.max(1, Math.min(3, Math.floor((innerHeight - fixed - nextLine - (tight ? 0 : prevLine)) / line)));
+      pages.current = readingPages(text, rows);
+      const kept = shownFrom.current?.line === at.line ? shownFrom.current.word : undefined;
+      const view = readingWindow(readingRows(text), rows, at.word, line, kept);
+      shownFrom.current = { line: at.line, word: view.start };
+      const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // Words coming into the rows you read rise in one after another; a paragraph's first
+      // showing does not (it slides in whole, below).
+      const was = shownWords.current, showing = new Set<number>(), fresh: HTMLElement[] = [], later: string[] = [];
+      text.querySelectorAll<HTMLElement>("[data-word]").forEach(span => {
+        const word = Number(span.dataset.word), shown = word >= view.from && word < view.to;
+        span.style.visibility = shown ? "" : "hidden";
+        if (shown) { showing.add(word); if (was?.line === at.line && !was.words.has(word)) fresh.push(span); }
+        if (word >= view.to) later.push(span.textContent ?? "");
+      });
+      shownWords.current = { line: at.line, words: showing };
+      if (!calm) fresh.forEach((span, i) => span.animate(
+        [{ opacity: 0, transform: "translateY(.3em)", filter: "blur(3px)" }, { opacity: 1, transform: "none", filter: "none" }],
+        { duration: 420, delay: i * 18, easing: "cubic-bezier(.2, .7, .2, 1)", fill: "backwards" }));
+      // The next line: the rest of this paragraph, or at its end the next paragraph's opening.
+      const next = nextRef.current;
+      if (next) {
+        const words = later.length ? later.join(" ") : next.dataset.next ?? "";
+        if (next.textContent !== words) {
+          const had = !!next.textContent;
+          next.textContent = words;
+          if (had && !calm) next.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "ease-out" });
+        }
+      }
+      // A steady height: the next line never moves.
+      viewport.style.height = `${rows * line + 4}px`;
+      // A one-row roll slides so your eyes can follow it; anything else moves at once.
+      const step = view.top - viewport.scrollTop;
+      if (step > 0 && step < line * 1.5) viewport.scrollTo({ top: view.top, behavior: "smooth" });
+      else viewport.scrollTop = view.top;
+      // A new paragraph rises from the next line, where its opening showed, instead of jumping.
+      const from = slideFrom.current;
+      slideFrom.current = next && view.last ? { line: at.line, offset: next.getBoundingClientRect().top - viewport.getBoundingClientRect().top } : null;
+      if (from?.line === at.line - 1 && view.top === 0 && from.offset > 0 && !calm)
+        text.animate([{ transform: `translateY(${from.offset}px)`, opacity: .35 }, { transform: "none", opacity: 1 }], { duration: 460, easing: "cubic-bezier(.2, .7, .2, 1)" });
+      const { page: index, total, last } = view;
+      setPage(before => before.index === index && before.total === total && before.last === last ? before : { index, total, last });
+    };
+    measure();
+    const watch = new ResizeObserver(measure); watch.observe(text);
+    window.addEventListener("resize", measure);
+    void document.fonts.ready.then(measure);
+    return () => { active = false; watch.disconnect(); window.removeEventListener("resize", measure); };
+  }, [at.line, at.word, text, size, layout, editable, leaking, checking]);
   const c = lines[at.line];
   const p = pace(script.sections, at.line, Math.round((now - started) / 1000));
   const followText = !recording ? s.ptFollowOff.replace("{down}", keyLabel(keys.Down)).replace("{up}", keyLabel(keys.Up)) : paused ? s.ptPaused.replace("{key}", keyLabel(keys.Backslash)) : slow ? s.ptFollowSlow : s.ptFollowing;
@@ -165,20 +252,31 @@ export default function Prompter() {
 
   if (layout === "Tucked") return <div ref={root}>{markerEl}<button type="button" className="pttuck" data-control aria-label={s.ptShowScript} title={s.ptShowScript} onClick={() => void ipc.prompterLayout("Strip")}><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M2 3h10M2 7h10M2 11h6" /></svg></button></div>;
   const words = (line: NonNullable<typeof c>, live: boolean) => {
-    let i = 0;
-    // A long current line shows from a few words before where you are, so you never read
-    // past the strip's three lines.
-    const from = live && line.words.length > 24 ? Math.max(0, at.word - 8) : 0;
-    // Words and cues joined by plain spaces, so an underline never runs into the gap.
-    return line.text.split(/(\[[^\]]*\])/).flatMap(part => part.startsWith("[") ? [<span key={`c${i}`} className="ptcue">{part.slice(1, -1)}</span>] : part.split(/\s+/).filter(Boolean).map(w => { const k = i++; return k < from ? null : <span key={k} className={live ? k < at.word ? "ptsaid" : k === at.word ? "ptnow" : "" : ""}>{w}</span>; })).filter(Boolean).flatMap((node, n) => n ? [" ", node] : from ? ["… ", node] : [node]);
+    let i = 0, key = 0;
+    // Keep the complete paragraph laid out; its viewport advances without discarding words.
+    return line.text.split(/(\[[^\]]*\])/).flatMap(part => part.startsWith("[") ? [<span key={`c${key++}`} data-word={i} className="ptcue">{part.slice(1, -1)}</span>] : part.split(/(\s+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/u).filter(Boolean).map(w => {
+      if (/^\s+$/.test(w)) return w;
+      const k = i; i += tokens(w).length;
+      return <span key={`w${key++}`} data-word={k} className={live ? i <= at.word ? "ptsaid" : k <= at.word && at.word < i ? "ptnow" : "" : ""}>{w}</span>;
+    }));
   };
-  return <div ref={root}>{markerEl}<div className={`pt${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
+  return <div ref={root}>{markerEl}<div className={`pt${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
     <div className="pth">
       <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}>⠿</button>
-      {c && !checking && !(script.sections.length === 1 && script.sections[0].minutes === 0 && !text.trimStart().startsWith("#")) && <span className="ptchip">{`${c.section + 1}/${script.sections.length} · ${script.sections[c.section]?.title ?? ""}`}</span>}
+      {c && !checking && name && (() => {
+        // "Team X demo · 2/4 Demo ▾": the script, where you are, and the menu to switch.
+        const where = script.sections.length === 1 && script.sections[0].minutes === 0 && !text.trimStart().startsWith("#") ? "" : ` · ${c.section + 1}/${script.sections.length} ${script.sections[c.section]?.title ?? ""}`;
+        return rehearsing ? <span className="ptchip"><b>{name}</b>{where}</span>
+          : <button type="button" className="ptchip" data-control aria-haspopup="menu" aria-expanded={menu !== null} title={s.ptSwitch} onClick={() => void (menu ? setMenu(null) : ipc.scriptsList().then(list => setMenu(Array.isArray(list) ? list.map(info => info.name) : [])).catch(() => setMenu([])))}><b>{name}</b>{where} ▾</button>;
+      })()}
+      {menu && <div className="ptmenu" role="menu" data-control>
+        {menu.map(n => <button key={n} type="button" role="menuitemradio" aria-checked={n === name} onClick={() => { setMenu(null); if (n !== name) void ipc.prompterScript(n).catch(e => setCloseError(String(e))); }}><i>{n === name ? "✓" : ""}</i>{n}</button>)}
+        <div className="sep" />
+        <button type="button" role="menuitem" className="more" onClick={() => { setMenu(null); void ipc.openScripts().catch(() => {}); }}><i />{s.ptOpenScripts}</button>
+      </div>}
       {editable && <span className="ptedhint">{note || s.ptEditing}</span>}
-      <span className={`ptpace${p.behind ? " behind" : ""}`} title={p.behind ? s.ptBehind : s.ptOnPlan}>{p.totalS > 0 && <i />}{fmt(Math.round((now - started) / 1000))}{p.totalS ? ` / ${fmt(p.totalS)}` : ""}</span>
       {rehearsing && <span className="ptreh" role="status"><i /><span title={s.rehearsing}>{s.rehearsing}</span><button type="button" data-control onClick={() => void ipc.rehearseStop().catch(() => {})}>{s.rehearsalStop}</button></span>}
+      <span className={`ptpace${p.behind ? " behind" : ""}`} title={p.behind ? s.ptBehind : s.ptOnPlan}>{p.totalS > 0 && <i />}{fmt(Math.round((now - started) / 1000))}{p.totalS ? ` / ${fmt(p.totalS)}` : ""}</span>
       {!rehearsing && <button type="button" className={`ptvis${checking ? " checking" : ""}`} role="switch" aria-checked={shown} data-control title={s.ptShowInShare} onClick={() => void ipc.setShareVisible(!shown)}>
         <span className="h"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><path d="M2 10 10 2" /></svg>{checking ? s.ptChecking : s.ptHidden}</span>
         <span className="s"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><circle cx="6" cy="6" r="1.5" /></svg>{s.ptShown}</span>
@@ -201,12 +299,18 @@ export default function Prompter() {
       : <>
         <div className="ptlines" style={checking ? { visibility: "hidden" } : undefined}>
           {!c ? <div className="ptln cur">{name ? s.ptEmpty : s.ptNoScript}</div> : <>
-            {lines[at.line - 1] && <div className="ptln prev">{words(lines[at.line - 1], false)}</div>}
-            <div className="ptln cur">{words(c, true)}</div>
-            {lines[at.line + 1] && <div className="ptln">{words(lines[at.line + 1], false)}</div>}
+            {/* The end of the paragraph before: what you just said, for a glance back. */}
+            <div className="ptln prev" style={{ visibility: page.index > 0 || !lines[at.line - 1] ? "hidden" : undefined }}><span dir="ltr">{lines[at.line - 1] ? words(lines[at.line - 1], false) : " "}</span></div>
+            <div className="ptln cur" ref={current}><div className="pttext">{words(c, true)}</div></div>
+            {/* Filled as you read (measure above): what comes next, lighter and fading out. */}
+            <div className="ptln ptahead" ref={nextRef} aria-hidden="true" data-next={lines[at.line + 1]?.text.replace(/\[([^\]]*)\]/g, "$1") ?? ""} />
           </>}
         </div>
-        <div className="ptfoot"><div className="ptprog"><i style={{ width: `${lines.length ? (at.line + 1) / lines.length * 100 : 0}%` }} /></div><span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
+        <div className="ptfoot"><div className="ptnav" role="group" aria-label={s.ptReadControls}>
+          <button type="button" data-control aria-label={s.ptPrevious} title={`${s.ptPrevious} · ${keyLabel(keys.Up)}`} disabled={!at.line && !page.index} onClick={() => move(-1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m8 2-4 4 4 4" /></svg></button>
+          <span className="ptpage" title={s.ptParagraph.replace("{n}", String(at.line + 1))} aria-label={`${s.ptParagraph.replace("{n}", String(at.line + 1))} · ${page.index + 1}/${page.total}`}>{page.index + 1}/{page.total}</span>
+          <button type="button" data-control aria-label={s.ptNext} title={`${page.index < page.total - 1 ? s.ptContinue : s.ptNext} · ${keyLabel(keys.Down)}`} disabled={at.line >= lines.length - 1 && page.index >= page.total - 1} onClick={() => move(1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg></button>
+        </div><div className="ptprog"><i style={{ width: `${lines.length ? (at.line + (page.index + 1) / page.total) / lines.length * 100 : 0}%` }} /></div><span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
       </>}
   </div></div>;
 }

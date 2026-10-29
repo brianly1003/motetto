@@ -72,17 +72,12 @@ pub fn start(
                     return;
                 }
             };
-            // The script strip follows the voice on this same server (follow.rs).
+            // The script strip's Whisper following shares this server (follow.rs; the recording
+            // starts the follower).
             *app.state::<crate::follow::State>()
                 .server
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()) = Some(server.clone());
-            crate::follow::start(
-                app.clone(),
-                format!("{base}.mic.wav").into(),
-                stop.clone(),
-                false,
-            );
             let _shared = Shared(app.clone());
             let vad = motetto_core::config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty());
             let mut cursor = 0;

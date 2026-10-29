@@ -114,9 +114,12 @@ fn start(app: &tauri::AppHandle, script: String) -> Result<Rehearsal, String> {
     let mic = crate::microphone::for_capture(&app);
     let capture = {
         let (base, stop) = (base.clone(), stop.clone());
+        // The live meters carry the mic listener the strip's recogniser reads.
+        let meters = app.state::<crate::live::State>().meters.clone();
         std::thread::spawn(move || {
             #[cfg(target_os = "macos")]
-            let captured = motetto_core::capture::record_mic_only(&base, stop, mic.as_deref());
+            let captured =
+                motetto_core::capture::record_mic_only(&base, stop, mic.as_deref(), Some(meters));
             #[cfg(not(target_os = "macos"))]
             let captured = {
                 // Windows: a mic-only WASAPI capture is part of plan task W5; until then the
@@ -147,9 +150,17 @@ fn start(app: &tauri::AppHandle, script: String) -> Result<Rehearsal, String> {
 
 #[tauri::command]
 pub async fn rehearse_stop(app: tauri::AppHandle) -> Result<Rehearsal, String> {
-    tauri::async_runtime::spawn_blocking(move || stop(&app))
+    tauri::async_runtime::spawn_blocking(move || stop_asked(&app))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// You stopped it (Stop or the shortcut): the strip closes and the report opens in the library.
+/// A recording starting stops it with `stop` instead, and keeps the strip for the call.
+pub fn stop_asked(app: &tauri::AppHandle) -> Result<Rehearsal, String> {
+    let rehearsal = stop(app)?;
+    crate::prompter::prompter_hide(app.clone())?;
+    Ok(rehearsal)
 }
 
 /// Stops the rehearsal running now, if any; also called when a recording starts.

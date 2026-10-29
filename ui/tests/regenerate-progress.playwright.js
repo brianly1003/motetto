@@ -51,10 +51,28 @@ async (page) => {
     await p.waitForTimeout(100);
     const part = (await steps()).join(' | ');
     if (part !== (transcriptReady ? 'done:Transcript ready 2 lines | now:Summarizing part 2 of 4 00:01 | todo:Saving' : 'done:Transcript ready 00:01 | now:Summarizing part 2 of 4 00:00 | todo:Saving')) fails.push('a part: ' + part);
+    // The bar fills summarizing's share (45 to 80 %) by parts finished: one of four (owner 2026-10-28).
+    await p.waitForTimeout(500);
+    const bar = await p.locator('.procbar i').evaluate(i => parseFloat(i.style.width));
+    if (Math.abs(bar - 53.75) > 0.01) fails.push('bar at part 2 of 4 is ' + bar);
+    // The notes engine's counts (SPEC 6.6): part 1 has no percent yet, only what it reads; from part
+    // 2 the percent and time left, and the words written; the bar follows the percent.
+    const notes = (part, progress) => p.evaluate(([part, progress]) => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: part ? { type: 'Summarizing', part, of: 4, progress } : { type: 'Merging', of: 4, progress }, percent: 0, eta_s: null }), [part, progress]);
+    const row = () => p.locator('.writing .step.now').evaluate(r => [r.children[2].textContent, r.querySelector('.sub > span')?.textContent ?? ''].join(' / '));
+    await notes(1, { percent: null, eta_s: null, step: { type: 'Reading', percent: 64 } }); await p.waitForTimeout(500);
+    if (!/^\d\d:\d\d \/ Reading the transcript, 64%$/.test(await row())) fails.push('part 1 reading: ' + await row());
+    await notes(2, { percent: 33, eta_s: 540, step: { type: 'Writing', words: 1412 } }); await p.waitForTimeout(500);
+    if (await row() !== '33% · about 9 min left / Writing the notes, 1,412 words') fails.push('part 2 writing: ' + await row());
+    const measuredBar = await p.locator('.procbar i').evaluate(i => parseFloat(i.style.width));
+    if (Math.abs(measuredBar - (45 + 35 * 0.33)) > 0.01) fails.push('bar at 33% of summarizing is ' + measuredBar);
+    await notes(0, { percent: 92, eta_s: 50, step: { type: 'Reading', percent: 40 } }); await p.waitForTimeout(500);
+    if (await row() !== "92% · less than a minute left / Reading the 4 parts' notes, 40%") fails.push('merge: ' + await row());
+    await p.locator('.writing').screenshot({ path: `.playwright-out/notes-progress-${theme}.png` });
     await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: '1', stage: { type: 'Saving' }, percent: 0, eta_s: null }));
     await p.waitForTimeout(100);
     const saving = (await steps()).join(' | ');
-    if (saving !== (transcriptReady ? 'done:Transcript ready 2 lines | done:Summarizing 00:01 | now:Saving 00:00' : 'done:Transcript ready 00:01 | done:Summarizing 00:00 | now:Saving 00:00')) fails.push('after Saving: ' + saving);
+    // Summarizing took as long as the notes checks above waited: any time, counted.
+    if (!(transcriptReady ? /^done:Transcript ready 2 lines \| done:Summarizing 00:0\d \| now:Saving 00:00$/ : /^done:Transcript ready 00:01 \| done:Summarizing 00:0\d \| now:Saving 00:00$/).test(saving)) fails.push('after Saving: ' + saving);
     await p.evaluate(() => window.emit('motetto://event', { type: 'Stage', meeting_id: 'other', stage: { type: 'Summarizing', part: 1, of: 1 }, percent: 0, eta_s: null }));
     await p.waitForTimeout(100);
     if ((await steps()).join(' | ') !== saving) fails.push("another meeting's stage moved these steps");

@@ -32,13 +32,17 @@ async (page) => {
   await p.goto('http://127.0.0.1:3000/main/');
   for(const title of ['English call','Written English']){
     await open(title);
-    if(await offer().count()||await p.locator('.readin-bar').count())fails.push(title+' offers its original language');
+    // Never the notes' own language; Vietnamese notes written in English may offer the call's Vietnamese.
+    if(await offer().count()||(title==='English call'&&await p.locator('.readin-bar').count()))fails.push(title+' offers its original language');
     await p.locator('.readin-button').click();
     if(await p.getByRole('option').filter({hasText:'English'}).count()!==1)fails.push(title+' duplicates English in the picker');
     await p.getByRole('combobox',{name:'Search languages'}).press('Escape');
   }
   if((await p.evaluate(()=>window.translationCalls)).length)fails.push('original-language translation was requested or loaded');
-  await open('Mixed call');await offer().waitFor();
+  // A mixed call's notes are in its main language (English here): the offer is its other one, never
+  // the notes' own (owner 2026-10-28).
+  await open('Mixed call');await p.getByText('Read these notes in Tiếng Việt?').waitFor({timeout:3000}).catch(()=>fails.push('a mixed call does not offer its other language'));
+  if(await offer().count())fails.push('a mixed call offers the language its notes are in');
   await p.locator('.docbody').screenshot({path:'.playwright-out/read-in-mixed-offer.png'});
   await open('English call');await p.locator('.docbody').screenshot({path:'.playwright-out/read-in-original-en.png'});
   await open('Kênh A');

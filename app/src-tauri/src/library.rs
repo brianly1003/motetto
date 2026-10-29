@@ -107,7 +107,13 @@ pub fn folder(root: &Path, id: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn text(path: &Path) -> Result<String, String> {
-    if path.canonicalize().map_err(|e| e.to_string())?.parent()
+    // The file's name in every error: a bare "No such file or directory" hid which one for a day.
+    let name = path
+        .file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    let named = |e: std::io::Error| format!("{name}: {e}");
+    if path.canonicalize().map_err(named)?.parent()
         != Some(
             path.parent()
                 .ok_or("Missing parent folder")?
@@ -120,10 +126,10 @@ pub(crate) fn text(path: &Path) -> Result<String, String> {
     }
     let mut result = String::new();
     fs::File::open(path)
-        .map_err(|e| e.to_string())?
+        .map_err(named)?
         .take(8 * 1024 * 1024 + 1)
         .read_to_string(&mut result)
-        .map_err(|e| e.to_string())?;
+        .map_err(named)?;
     if result.len() > 8 * 1024 * 1024 {
         return Err("Meeting text is too large to display".into());
     }
@@ -457,7 +463,11 @@ pub fn import(
         };
         let started = std::time::Instant::now();
         let spellings = used_spellings();
-        report(motetto_core::events::Stage::Summarizing { part: 1, of: 1 });
+        report(motetto_core::events::Stage::Summarizing {
+            part: 1,
+            of: 1,
+            progress: None,
+        });
         let title = motetto_core::summarize::notes(
             &dir.join("notes").to_string_lossy(),
             &notes_input,

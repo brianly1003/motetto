@@ -43,7 +43,8 @@ async (page) => {
   const button = p.getByRole('button', { name: /Read in/ });
   await button.waitFor();
   if (!/Original/.test(await button.innerText())) fails.push('button: ' + await button.innerText());
-  if (await p.locator('.readin-bar').count()) fails.push('a bar shows before any language was picked');
+  // Before any pick, an "en,vi" call's English notes offer its other language (owner 2026-10-28).
+  if (!/Read these notes in Tiếng Việt\?/.test(await p.locator('.readin-bar').innerText().catch(() => ''))) fails.push('no offer of the call\'s other language before any pick');
 
   // The list: Original with the call's languages, then a search by English name, accents ignored.
   await button.click();

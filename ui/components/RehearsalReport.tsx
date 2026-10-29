@@ -6,12 +6,15 @@ import * as ipc from "@/lib/ipc";
 import { strings as s } from "@/lib/strings";
 import { follow, parseScript } from "@/lib/script";
 import { report as measure, type Report } from "@/lib/rehearsal";
+import { meetingDate } from "@/lib/document";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
 
 const fmt = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
 const clock = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 // Earlier totals of each script in this session, for "vs rehearsal N".
 const history = new Map<string, number[]>();
+// The last one of each script, for the Scripts page's "Last rehearsal" card.
+export const lastRehearsal = new Map<string, { totalS: number; at: number }>();
 
 // Listen back: native on macOS (the key `rehearsal:<id>`), an audio element elsewhere.
 function Player({ id, durationMs }: { id: string; durationMs: number }) {
@@ -62,6 +65,8 @@ function Player({ id, durationMs }: { id: string; durationMs: number }) {
   </div>;
 }
 
+const MIC = <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><rect x="6" y="2" width="4" height="8" rx="2" /><path d="M3.5 8a4.5 4.5 0 0 0 9 0M8 12.5V14" /></svg>;
+
 export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdit, onError, device }: {
   rehearsal: Rehearsal; text: string; device: string;
   onUse: (line: number, to: string) => Promise<() => Promise<void>>; onAgain: () => void; onEdit: () => void; onError: (message: string) => void;
@@ -73,6 +78,8 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
   // Used lines, each with its Undo.
   const [used, setUsed] = useState<Map<number, () => Promise<void>>>(new Map());
   const [kept, setKept] = useState(false);
+  // "Today 16:20": when the report opened, near enough to when the rehearsal ended.
+  const [started] = useState(() => meetingDate(Date.now()));
   const keptRef = useRef(false);
   const script = parseScript(text);
   const earlier = history.get(rehearsal.script) ?? [];
@@ -83,6 +90,7 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
       const r = measure(script, transcript, rehearsal.duration_ms ?? 0, follow);
       setResult(r);
       history.set(rehearsal.script, [...earlier, r.totalS]);
+      lastRehearsal.set(rehearsal.script, { totalS: r.totalS, at: Date.now() });
       // One line at a time, so the notes model never runs five questions at once.
       void (async () => {
         for (const k of r.longLines) {
@@ -101,8 +109,13 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
     try { await ipc.rehearsalKeep(rehearsal.id, rehearsal.script); setKept(true); } catch (e) { keptRef.current = false; onError(String(e)); }
   }
   const title = s.rehearsalTitle.replace("{n}", String(earlier.length + (result ? 0 : 1))).replace("{script}", rehearsal.script);
-  if (failed) return <div className="scripts-pane"><div className="scripts-bar"><h2 className="scripts-heading">{title}</h2><button type="button" className="btn" onClick={onEdit}>{s.rehearsalEdit}</button></div><p className="scripts-hint" role="alert">{s.rehearsalFailed.replace("{error}", failed)}</p></div>;
-  if (!result) return <div className="scripts-pane"><div className="scripts-bar"><h2 className="scripts-heading">{title}</h2></div><p className="scripts-hint" role="status" aria-busy="true">{s.rehearsalWriting}</p></div>;
+  // As the mockup: the title, when and what it keeps, then Edit script and Rehearse again.
+  const head = (actions: boolean) => <header className="sp-head">
+    <div className="sp-titles"><h2 className="sp-name">{title}</h2><div className="sp-meta">{(kept ? s.rehearsalMetaKept : s.rehearsalMeta).replace("{when}", started)}</div></div>
+    {actions && <div className="sp-actions"><button type="button" className="btn" onClick={onEdit}>{s.rehearsalEdit}</button><button type="button" className="btn primary" onClick={onAgain}>{MIC}{s.rehearsalAgain}</button></div>}
+  </header>;
+  if (failed) return <>{head(true)}<div className="sp-scroll"><p className="scripts-hint" role="alert">{s.rehearsalFailed.replace("{error}", failed)}</p></div></>;
+  if (!result) return <>{head(false)}<div className="sp-scroll"><p className="scripts-hint" role="status" aria-busy="true">{s.rehearsalWriting}</p></div></>;
   const planned = script.sections.reduce((sum, x) => sum + x.minutes * 60, 0);
   const previous = earlier.at(-2);
   const fillers = Object.entries(result.fillers);
@@ -117,8 +130,7 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
     ...result.offScript.map((o, n) => <li key={`o${n}`}><span className="pttag">{s.rehearsalOffScript}</span><div>{s.rehearsalOffAt.replace("{secs}", String(Math.round((o.endMs - o.startMs) / 1000))).replace("{at}", clock(o.startMs)).replace("{section}", sectionOf(o.before)?.title ?? "")} {script.lines[o.before] && <q>{script.lines[o.before].text}</q>}</div></li>),
     ...(fillerTotal ? [<li key="f"><span className="pttag">{s.rehearsalFillers}</span><div>{fillers.map(([w, n]) => `"${w}" ${n}`).join(", ")}.</div></li>] : []),
   ];
-  return <div className="scripts-pane">
-    <div className="scripts-bar"><h2 className="scripts-heading">{title}</h2><button type="button" className="btn" onClick={onEdit}>{s.rehearsalEdit}</button><button type="button" className="btn primary" onClick={onAgain}>{s.rehearsalAgain}</button></div>
+  return <>{head(true)}<div className="sp-scroll">
     <div className="ptrep">
       <div className="rh"><div className="big">{fmt(result.totalS)} <span>{s.rehearsalPlanned.replace("{planned}", fmt(planned))}</span></div>
         <div className="kp"><div><b>{result.wpm}</b><span>{s.rehearsalWpm}</span></div><div><b>{result.skipped.length}</b><span>{s.rehearsalSkippedN}</span></div><div><b>{fillerTotal}</b><span>{s.rehearsalFillersN}</span></div>
@@ -128,7 +140,7 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
       {result.perSection.map((x, n) => <div className="sec" key={n}><span>{`${n + 1} ${x.title}`}</span><div className="trk"><i style={{ width: `${x.plannedS / scale * 100}%` }} /><em className={x.actualS > x.plannedS ? "over" : ""} style={{ width: `${x.actualS / scale * 100}%` }} /></div><span className={`t${x.actualS > x.plannedS ? " over" : ""}`}>{fmt(x.actualS)} / {fmt(x.plannedS)}</span></div>)}
       <div className="lab">{s.rehearsalWorth}</div>
       {items.length ? <ul>{items}</ul> : <p className="scripts-hint">{s.rehearsalNothing}</p>}
-      <div className="scripts-bar"><button type="button" className="btn sm" disabled={kept} onClick={() => void keep()}>{kept ? s.rehearsalKept : s.rehearsalKeep}</button><span className="scripts-hint">{s.rehearsalFoot.replace("{device}", device)}</span></div>
+      <div className="ptbar"><button type="button" className="btn sm" disabled={kept} onClick={() => void keep()}>{kept ? s.rehearsalKept : s.rehearsalKeep}</button><span className="pthint">{s.rehearsalFoot.replace("{device}", device)}</span></div>
     </div>
-  </div>;
+  </div></>;
 }

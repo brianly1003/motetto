@@ -1,19 +1,26 @@
 //! Native window placement and macOS companion behavior across full-screen Spaces.
 #[cfg(target_os = "macos")]
 pub fn configure(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    use objc2::{msg_send, runtime::AnyObject};
-    let native = window.ns_window()? as *mut AnyObject;
-    // SAFETY: setup calls this on AppKit's main thread; ns_window is the live NSWindow owned
-    // by Tauri. Preserve its existing flags and add NSWindowCollectionBehaviorFullScreenAuxiliary.
-    // Tauri's always-on-top is the floating level (3), under other apps' floating panels. Use
-    // NSMainMenuWindowLevel - 1 (23): above every app window, below the menu bar and the menus
-    // and popovers it opens (Sound, Control Center), which the screen-saver level (1000) covered.
-    unsafe {
-        let behavior: usize = msg_send![native, collectionBehavior];
-        let _: () = msg_send![native, setCollectionBehavior: behavior | (1 << 8)];
-        let _: () = msg_send![native, setLevel: 23isize];
-    }
-    Ok(())
+    // Callers include shortcut and command threads; AppKit aborts the app when these setters
+    // run anywhere but the main thread, so they always go there.
+    let target = window.clone();
+    window.run_on_main_thread(move || {
+        use objc2::{msg_send, runtime::AnyObject};
+        let Ok(native) = target.ns_window() else {
+            return;
+        };
+        let native = native as *mut AnyObject;
+        // SAFETY: this closure runs on AppKit's main thread; ns_window is the live NSWindow owned
+        // by Tauri. Preserve its existing flags and add NSWindowCollectionBehaviorFullScreenAuxiliary.
+        // Tauri's always-on-top is the floating level (3), under other apps' floating panels. Use
+        // NSMainMenuWindowLevel - 1 (23): above every app window, below the menu bar and the menus
+        // and popovers it opens (Sound, Control Center), which the screen-saver level (1000) covered.
+        unsafe {
+            let behavior: usize = msg_send![native, collectionBehavior];
+            let _: () = msg_send![native, setCollectionBehavior: behavior | (1 << 8)];
+            let _: () = msg_send![native, setLevel: 23isize];
+        }
+    })
 }
 #[cfg(not(target_os = "macos"))]
 pub fn configure(_window: &tauri::WebviewWindow) -> tauri::Result<()> {

@@ -295,6 +295,24 @@ fn watch(app: tauri::AppHandle) {
     });
 }
 
+/// The script the strip shows now, if any.
+pub fn shown_script(app: &tauri::AppHandle) -> Option<String> {
+    app.state::<State>()
+        .script
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// A new script on the strip: the next words it sends replace the last script's.
+fn forget_hint(app: &tauri::AppHandle) {
+    app.state::<crate::follow::State>()
+        .hint
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
 #[tauri::command]
 pub fn prompter_show(app: tauri::AppHandle, name: Option<String>) -> Result<(), String> {
     let window = window(&app)?;
@@ -305,6 +323,7 @@ pub fn prompter_show(app: tauri::AppHandle, name: Option<String>) -> Result<(), 
     let state = app.state::<State>();
     if let Some(name) = &name {
         *state.script.lock().unwrap_or_else(|e| e.into_inner()) = Some(name.clone());
+        forget_hint(&app);
     }
     arrange(&app, &window)?;
     window.show().map_err(|e| e.to_string())?;
@@ -313,6 +332,37 @@ pub fn prompter_show(app: tauri::AppHandle, name: Option<String>) -> Result<(), 
     crate::shortcuts::prompting(&app, true);
     check(app);
     Ok(())
+}
+
+/// Another script on the strip (its chip menu), from its start; it is the one ⌃⌥T opens from
+/// now on. The window, its place and the share check stay as they are.
+#[tauri::command]
+pub fn prompter_script(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    if app
+        .state::<crate::rehearse::State>()
+        .0
+        .lock()
+        .is_ok_and(|r| r.is_some())
+    {
+        return Err("Stop rehearsing to switch scripts.".into());
+    }
+    let name = crate::scripts::checked_name(&name)?;
+    app.state::<crate::settings::Store>()
+        .change(|s| s.prompter.last_script = Some(name.clone()))?;
+    *app.state::<State>()
+        .script
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(name.clone());
+    forget_hint(&app);
+    let _ = app.emit("motetto://prompter-script", Some(name));
+    Ok(())
+}
+
+/// "Open Scripts in Motetto" (the chip menu): the library comes forward on its Scripts page.
+#[tauri::command]
+pub fn open_scripts(app: tauri::AppHandle) {
+    crate::desktop::show(&app);
+    let _ = app.emit("motetto://open-scripts", ());
 }
 
 /// What the page shows: "hidden", "visible", "unknown", "checking", "shown", "off" or "moved".

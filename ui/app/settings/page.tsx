@@ -16,7 +16,7 @@ import {MicLevel,MicNote,micSub,pickMic,useMicReport} from '@/components/Microph
 
 const CALL_ORDER=['zoom','teams','teams_classic','meet','whatsapp','telegram','browser','slack','webex','facetime'];
 const TABS=['General','Audio','Screen','Calls','Models','Spellings','Privacy','About'];
-const SHORTCUTS:Record<string,string>={S:'Start or stop',M:'Mark this moment',J:'Jot a note',N:'Open my notes',Space:'Tuck to the edge',H:'Sharing mode',P:'Peek while sharing',T:'Show or tuck the script',V:'Hidden or shown in your share',E:'Edit the script',Down:'Next line',Up:'Previous line',ShiftDown:'Next section',Backslash:'Pause or resume following',Equal:'Bigger script text',Minus:'Smaller script text',R:'Rehearse the script'};
+const SHORTCUTS:Record<string,string>={S:'Start or stop',M:'Mark this moment',J:'Jot a note',N:'Open my notes',Space:'Tuck to the edge',H:'Sharing mode',P:'Peek while sharing',T:'Show or tuck the script',V:'Hidden or shown in your share',E:'Edit the script',Down:'Next passage',Up:'Previous passage',ShiftDown:'Next section',Backslash:'Pause or resume following',Equal:'Bigger script text',Minus:'Smaller script text',R:'Rehearse the script'};
 function Row({label,help,children}:{label:string;help?:string;children:ReactNode}){return <div className="formrow"><span className="lbl">{label}</span><div>{children}{help&&<div className="help">{help}</div>}</div></div>;}
 function Switch({label,on,change}:{label:string;on:boolean;change:(value:boolean)=>void}){return <label className="switch"><input type="checkbox" aria-label={label} checked={on} onChange={e=>change(e.target.checked)}/><span/></label>;}
 const LANGUAGES=[['en','English'],['vi','Tiếng Việt'],['zh','中文'],['ja','日本語']] as const;
@@ -36,6 +36,7 @@ export default function SettingsPage(){
   const [failure,setFailure]=useState<Record<string,string>>({});
   const [storage,setStorage]=useState<ipc.StorageSummary|null>(null);
   const [info,setInfo]=useState<{version:string;licences:string;platform:string}|null>(null);
+  const [speech,setSpeech]=useState<string|null>(null);
   const [pending,setPending]=useState(false);
   const [working,setWorking]=useState('Saving…');
   const [error,setError]=useState('');
@@ -70,6 +71,7 @@ export default function SettingsPage(){
     setWipe(false);setError('');
     if(tab==='Models')void Promise.all([ipc.modelCatalog(),ipc.hardwareInfo(),ipc.setupState()]).then(([c,h,st])=>{setCatalog(c);setHw(h);setSetup(st);}).catch(e=>setError(String(e)));
     if(tab==='Privacy')void ipc.storageSummary().then(setStorage).catch(e=>setError(String(e)));
+    if(tab==='Privacy')void ipc.speechPermission().then(setSpeech).catch(()=>setSpeech(null));
     if(tab==='About')void ipc.about().then(setInfo).catch(e=>setError(String(e)));
   },[tab]);
   // Whichever tab is open: setup finishing a download or moving on changes settings and the catalog (SPEC 8.4).
@@ -231,6 +233,8 @@ export default function SettingsPage(){
         <Row label="Keep audio" help="Notes and transcripts are kept until you delete them. Retention runs after notes finish and when Motetto opens."><div className="field"><select aria-label="Keep audio" value={settings.keep_audio} onChange={e=>void save({keep_audio:e.target.value})}><option value="30_days">30 days after the notes</option><option value="forever">Until I delete the meeting</option><option value="after_notes">Delete right after the notes</option></select></div></Row>
         <Row label="Recording reminder" help={'Shows "Tell the people on the call" when Motetto asks to record.'}><Switch label="Recording reminder" on={settings.recording_reminder} change={recording_reminder=>void save({recording_reminder})}/></Row>
         <Row label="Keep video" help="Never longer than the audio, which the Video tab plays."><div className="field"><select aria-label="Keep video" value={settings.keep_video} onChange={e=>void save({keep_video:e.target.value})}><option value="same_as_audio">Same as the audio</option><option value="7_days">7 days after the notes</option><option value="forever">Until I delete the meeting</option></select></div></Row>
+        {/* Script following (SPEC 14.5): Apple's on-device recogniser on a Mac, asked when it first follows. */}
+        <Row label="Script following" help={info?.platform==='windows'?'Follows your voice with the speech model on this PC.':'Uses Speech Recognition, on this Mac only. macOS asks the first time the script follows your voice.'}>{info?.platform==='windows'?<span className="chip plain">Nothing to allow</span>:speech==='Allowed'?<span className="chip ok">Allowed</span>:speech==='Denied'?<button type="button" className="btn sm" onClick={()=>void ipc.openSpeechSettings().catch(e=>setError(String(e)))}>Denied - Open settings</button>:<span className="chip plain">Asked when the script first follows you</span>}</Row>
         <Row label="Storage"><dl className="kv settings-storage"><dt>Meetings</dt><dd>{storage?.meetings??'…'}</dd><dt>Audio</dt><dd>{storage?fileSize(storage.audio_bytes):'…'}</dd><dt>Video</dt><dd>{storage?fileSize(storage.video_bytes):'…'}</dd><dt>Notes and transcripts</dt><dd>{storage?fileSize(storage.notes_bytes):'…'}</dd><dt>Free on disk</dt><dd>{storage?fileSize(storage.free_bytes):'…'}</dd></dl></Row>
         <Row label="Delete everything"><div className="field">{wipe?<><span>Delete {storage?.meetings??'all'} meetings and {storage?fileSize(storage.audio_bytes+storage.video_bytes):'all'} of audio and video? This can&apos;t be undone. Recently deleted meetings are included.</span><button className="btn sm rec" onClick={()=>void action(async()=>{await ipc.deleteAllMeetings();setStorage(await ipc.storageSummary());setWipe(false);},'All meetings deleted')}>Delete all</button><button className="btn sm ghost" onClick={()=>setWipe(false)}>Cancel</button></>:<button className="btn sm" disabled={!storage?.meetings} onClick={()=>setWipe(true)}>Delete all meetings…</button>}</div></Row>
         <NotificationPermission/>

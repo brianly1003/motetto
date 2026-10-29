@@ -28,7 +28,7 @@ pub type Shared = Arc<Mutex<crate::speech::Server>>;
 
 #[derive(Default)]
 pub struct State {
-    hint: Mutex<String>,
+    pub hint: Mutex<String>,
     pub server: Mutex<Option<Shared>>,
 }
 
@@ -83,6 +83,62 @@ pub fn clean_hint(words: &str) -> String {
     hint
 }
 
+#[cfg(any(target_os = "macos", test))]
+/// The on-device locale to follow in: the call language when set ("en", "vi"), else Vietnamese
+/// letters in the script's next words mean `vi-VN`, anything else English (`en-US` first). None
+/// when that language is not on this Mac: then the Whisper loop follows.
+pub fn pick_locale(hint: &str, call_language: &str, on_device: &[String]) -> Option<String> {
+    let vietnamese = match call_language {
+        "vi" => true,
+        "en" => false,
+        "detect" => hint
+            .to_lowercase()
+            .chars()
+            .any(|c| "ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ".contains(c)),
+        _ => return None,
+    };
+    let has = |locale: &str| on_device.iter().any(|l| l == locale);
+    if vietnamese {
+        return has("vi-VN").then(|| "vi-VN".into());
+    }
+    if has("en-US") {
+        return Some("en-US".into());
+    }
+    on_device.iter().find(|l| l.starts_with("en-")).cloned()
+}
+
+#[cfg(any(target_os = "macos", test))]
+/// No mic audio for 5 s while the strip is open: the recogniser hears nothing, so Whisper follows.
+pub fn starved(ms_without_audio: u64) -> bool {
+    ms_without_audio >= 5_000
+}
+
+#[cfg(any(target_os = "macos", test))]
+/// An Apple run goes on while the session lasts, the strip is open and shows the script it
+/// started with.
+pub fn keep_following(
+    stop: bool,
+    prompting: bool,
+    started: &Option<String>,
+    now: &Option<String>,
+) -> bool {
+    !stop && prompting && started == now
+}
+
+#[cfg(any(target_os = "macos", test))]
+/// The last `n` words heard: the follower only reads the end.
+pub fn tail_words(text: &str, n: usize) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    words[words.len().saturating_sub(n)..].join(" ")
+}
+
+#[cfg(any(target_os = "macos", test))]
+/// A recognition task restarts at a pause after 50 s, or at 58 s whatever is said, before
+/// Apple's one-minute limit ends it mid-word.
+pub fn restart_due(task_ms: u64, silent_ms: u64) -> bool {
+    (task_ms >= 50_000 && silent_ms >= 300) || task_ms >= 58_000
+}
+
 #[tauri::command]
 pub fn follow_hint(state: tauri::State<'_, State>, words: String) {
     *state.hint.lock().unwrap_or_else(|e| e.into_inner()) = clean_hint(&words);
@@ -111,11 +167,123 @@ impl Drop for Scratch {
     }
 }
 
-/// Follows `mic` (a growing WAV) until `stop`, while the strip is open. During a recording it
-/// uses only the captions' server (`own` false: never a second model mid-call); a rehearsal has
-/// no captions, so it starts its own (`own` true).
+#[cfg(target_os = "macos")]
+pub use crate::follow_macos::Access;
+#[cfg(all(not(target_os = "macos"), test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    Allowed,
+    Denied,
+    Unknown,
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, PartialEq, Eq)]
+pub enum Engine {
+    Apple(String),
+    Whisper,
+}
+
+#[cfg(any(target_os = "macos", test))]
+/// Apple only on a Mac that allows Speech Recognition and has the language on-device.
+pub fn engine(macos: bool, access: Access, locale: Option<String>) -> Engine {
+    match (macos, access, locale) {
+        (true, Access::Allowed, Some(locale)) => Engine::Apple(locale),
+        _ => Engine::Whisper,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn hint(app: &tauri::AppHandle) -> String {
+    app.state::<State>()
+        .hint
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Follows with Apple's on-device recogniser while the strip is open, until `stop`; false when it
+/// can't (not allowed, the language isn't on this Mac, or it failed): then Whisper follows.
+#[cfg(target_os = "macos")]
+fn apple(app: &tauri::AppHandle, stop: &Stop) -> bool {
+    use crate::follow_macos as mac;
+    let listener = app
+        .state::<crate::live::State>()
+        .meters
+        .mic_listener
+        .clone();
+    let mut locales: Option<Vec<String>> = None;
+    while !stop.load(Ordering::SeqCst) {
+        if !prompting(app) {
+            std::thread::sleep(Duration::from_millis(300));
+            continue;
+        }
+        // The script's own text picks the language (a hint left from the last script must not);
+        // its next words, sent as the strip loads, bias the first task.
+        let script = crate::prompter::shown_script(app);
+        let text = script
+            .clone()
+            .and_then(|name| crate::scripts::script_read(app.clone(), name).ok())
+            .unwrap_or_default();
+        let waited = Instant::now();
+        while hint(app).is_empty() && waited.elapsed() < Duration::from_secs(1) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // Asked here, when following starts, never at launch.
+        let access = match mac::access() {
+            Access::Unknown => mac::ask(),
+            known => known,
+        };
+        // The prompt can take a minute: this session may have ended meanwhile.
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        let on_device = locales.get_or_insert_with(mac::on_device_locales);
+        let call = app
+            .state::<crate::settings::Store>()
+            .get()
+            .map_or_else(|_| "detect".into(), |s| s.call_language);
+        let Engine::Apple(locale) = engine(true, access, pick_locale(&text, &call, on_device))
+        else {
+            return false;
+        };
+        // One run per open strip and script: closing it or switching script ends the run, and
+        // the next one picks the language again.
+        let open = Stop::default();
+        let watch = {
+            let (app, stop, open) = (app.clone(), stop.clone(), open.clone());
+            std::thread::spawn(move || {
+                while !open.load(Ordering::SeqCst) {
+                    let now = crate::prompter::shown_script(&app);
+                    if !keep_following(stop.load(Ordering::SeqCst), prompting(&app), &script, &now)
+                    {
+                        open.store(true, Ordering::SeqCst);
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            })
+        };
+        let result = mac::run(app, &listener, &open, &locale);
+        open.store(true, Ordering::SeqCst);
+        let _ = watch.join();
+        if let Err(error) = result {
+            eprintln!("Motetto: following with Apple: {error}; Whisper follows instead");
+            return false;
+        }
+    }
+    true
+}
+
+/// Follows until `stop`, while the strip is open: with Apple's on-device recogniser on a Mac
+/// that allows it, otherwise with Whisper windows of `mic` (a growing WAV). During a recording
+/// Whisper uses only the captions' server (`own` false: never a second model mid-call); a
+/// rehearsal has no captions, so it starts its own (`own` true).
 pub fn start(app: tauri::AppHandle, mic: PathBuf, stop: Stop, own: bool) {
     std::thread::spawn(move || {
+        #[cfg(target_os = "macos")]
+        if apple(&app, &stop) {
+            return;
+        }
         let scratch = Scratch::new();
         let mut mine: Option<Shared> = None;
         let mut step = 1000;
@@ -223,6 +391,88 @@ fn hear(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_mic_audio_for_five_seconds_gives_up() {
+        assert!(!starved(4_999));
+        assert!(starved(5_000));
+    }
+
+    #[test]
+    fn a_run_ends_when_the_strip_closes_or_shows_another_script() {
+        let demo = Some("Demo".to_string());
+        assert!(keep_following(false, true, &demo, &demo));
+        assert!(!keep_following(true, true, &demo, &demo));
+        assert!(!keep_following(false, false, &demo, &demo));
+        assert!(!keep_following(
+            false,
+            true,
+            &demo,
+            &Some("Quarterly review".into())
+        ));
+    }
+
+    #[test]
+    fn apple_only_when_allowed_and_on_device() {
+        assert_eq!(
+            engine(true, Access::Allowed, Some("en-US".into())),
+            Engine::Apple("en-US".into())
+        );
+        assert_eq!(
+            engine(true, Access::Denied, Some("en-US".into())),
+            Engine::Whisper
+        );
+        assert_eq!(
+            engine(true, Access::Unknown, Some("en-US".into())),
+            Engine::Whisper
+        );
+        assert_eq!(engine(true, Access::Allowed, None), Engine::Whisper);
+        assert_eq!(
+            engine(false, Access::Allowed, Some("en-US".into())),
+            Engine::Whisper
+        );
+    }
+
+    #[test]
+    fn locale_from_script_and_setting() {
+        let both = vec!["en-US".to_string(), "vi-VN".to_string()];
+        assert_eq!(
+            pick_locale("Xin chào, hôm nay", "detect", &both).as_deref(),
+            Some("vi-VN")
+        );
+        assert_eq!(
+            pick_locale("Thanks for having us", "detect", &both).as_deref(),
+            Some("en-US")
+        );
+        assert_eq!(
+            pick_locale("Xin chào", "en", &both).as_deref(),
+            Some("en-US")
+        );
+        assert_eq!(pick_locale("", "detect", &both).as_deref(), Some("en-US"));
+        assert_eq!(
+            pick_locale("Hello", "detect", &["en-PH".to_string()]).as_deref(),
+            Some("en-PH")
+        );
+        assert_eq!(
+            pick_locale("Xin chào, hôm nay", "detect", &["en-US".to_string()]),
+            None
+        );
+        assert_eq!(pick_locale("你好", "zh", &both), None);
+    }
+
+    #[test]
+    fn tail_keeps_last_words() {
+        assert_eq!(tail_words("one two three four", 2), "three four");
+        assert_eq!(tail_words("  ", 12), "");
+    }
+
+    #[test]
+    fn restart_at_a_pause_or_before_the_limit() {
+        assert!(!restart_due(49_000, 1_000));
+        assert!(restart_due(50_000, 300));
+        assert!(!restart_due(55_000, 100));
+        assert!(restart_due(58_000, 0));
+    }
 
     #[test]
     fn scratch_is_outside_and_removed() {

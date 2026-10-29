@@ -4,7 +4,7 @@ import type { Layout } from "./Layout";
 /**
  * The script prompter's saved look (SPEC 14.3).
  */
-export type Prompter = { layout: Layout,
+export type Prompter = { layout: Layout, 
 /**
  * The current line's size in px; the other lines scale with it.
  */

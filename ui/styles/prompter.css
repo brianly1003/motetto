@@ -5,10 +5,30 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 .pt { box-sizing: border-box; position: fixed; inset: 0 0 auto 0; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--line); border-radius: 14px; padding: 9px 14px 11px; color: var(--ink-1); font-family: var(--font-ui); transition: opacity var(--duration-fade), border-color var(--duration-fade); max-height: 100vh; }
 .pt.through { opacity: .18; }
 .pt.shown { border-color: var(--attention); box-shadow: inset 0 0 0 1px var(--attention); }
+/* Column (300 px): the header takes two rows, the handle, the chip, ✎ and × on the first, the
+   pace and the Hidden / Shown switch (or the rehearsal bar) on the second. */
+.pt.col .pth { flex-wrap: wrap; row-gap: 6px; }
+.pt.col :is(.ptchip, .ptedhint) { flex: 1 1 150px; }
+.pt.col :is(.ptedit, .ptclose) { order: 1; }
+.pt.col :is(.ptpace, .ptreh, .ptvis) { order: 2; }
+.pt.col .ptpace { margin-left: 0; }
+.pt.col .ptvis { margin-left: auto; }
+.pt.col .ptedit { margin-left: auto; }
+.pt.col .ptclose { margin-left: 0; }
 .pth { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 0; }
 .ptgrab { cursor: pointer; width: 24px; height: 24px; margin: -3px 0; border-radius: 6px; display: grid; place-items: center; font-size: 17px; line-height: 1; color: var(--ink-2); flex: none; border: 0; background: transparent; padding: 0; }
 .ptgrab:hover { background: var(--surface-3); }
-.ptchip { background: var(--surface-3); border-radius: var(--radius-pill); padding: 1px 9px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ptchip { background: var(--surface-3); border-radius: var(--radius-pill); padding: 1px 9px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The chip is the script switcher: "Team X demo · 2/4 Demo ▾" opens the scripts list. */
+button.ptchip { border: 0; font: inherit; white-space: nowrap; cursor: pointer; flex: 0 1 auto; }
+button.ptchip:hover { background: var(--line); }
+.ptchip b { font-weight: 500; }
+.ptmenu { position: absolute; top: 30px; left: 34px; z-index: 5; width: 230px; max-height: calc(100vh - 40px); overflow: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 5px; display: grid; gap: 1px; font-size: 12.5px; }
+.ptmenu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--ink-1); display: flex; gap: 8px; align-items: center; font: inherit; cursor: pointer; }
+.ptmenu button:hover { background: var(--surface-2); }
+.ptmenu button i { width: 12px; flex: none; font-style: normal; color: var(--voice-me); }
+.ptmenu .sep { height: 1px; background: var(--line); margin: 4px 2px; }
+.ptmenu .more { color: var(--ink-2); }
 .ptpace { margin-left: auto; display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
 .ptpace i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .ptpace.behind i { background: var(--attention); }
@@ -25,11 +45,21 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 .ptln.prev { opacity: .45; }
 /* The lines around stay one line; the current one at most three, so nothing runs off the strip. */
 .ptln:not(.cur) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ptln.cur { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.ptln.cur { overflow: hidden; overflow-anchor: none; flex: none; }
+.pttext { position: relative; padding: 2px 0; }
+.pttext [data-word] { display: inline-block; vertical-align: top; }
+.pt.tight .ptln.prev { display: none; }
 .ptln.cur { color: var(--ink-1); font-size: var(--pt-size, 22px); }
 .ptln.cur .ptsaid { color: var(--voice-me); }
 .ptln.cur .ptnow { color: var(--voice-me); text-decoration: underline 2px; text-underline-offset: 4px; }
-.ptcue { font-family: var(--font-ui); font-size: .72em; border: 1px solid var(--line); border-radius: 5px; padding: 0 .4em; color: var(--voice-them); white-space: nowrap; }
+/* What comes next, readable while the highlight catches up: lighter, a little smaller, and
+   fading toward the bottom, so it reads as "next" and never competes with the current rows. */
+.ptln.cur [data-word] { transition: color .3s ease-out; }
+.ptln.ptahead { min-height: 1.3em; font-size: calc(var(--pt-size, 22px) * .82); color: color-mix(in srgb, var(--ink-3) 80%, transparent); text-overflow: clip;
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 30%, rgba(0, 0, 0, .12) 100%); mask-image: linear-gradient(180deg, #000 0, #000 30%, rgba(0, 0, 0, .12) 100%); }
+/* The paragraph before shows its end (what you just said), cut at the start. */
+.ptln.prev { direction: rtl; text-align: left; }
+.ptcue { font-family: var(--font-ui); font-size: .72em; border: 1px solid var(--line-2); border-radius: 5px; padding: 0 .4em; color: var(--voice-them); white-space: nowrap; }
 .ptfoot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .ptprog { flex: 1; height: 2px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
 .ptprog i { display: block; height: 100%; background: var(--voice-me); transition: width .3s; }
@@ -47,7 +77,8 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 .pt.editing { border-color: var(--voice-me); box-shadow: inset 0 0 0 1px var(--voice-me); height: 100vh; }
 .pt.editing :is(.ptlines, .ptfoot, .ptchip) { display: none; }
 .ptedhint { color: var(--voice-me); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.pt :focus-visible { outline: 2px solid var(--voice-me); outline-offset: 1px; }
+/* The editor needs no ring of its own: the editing strip is already outlined in the Me colour. */
+:root .pted:focus-visible { box-shadow: none; }
 .ptmarker { position: fixed; left: 2px; top: 2px; width: 4px; height: 4px; display: grid; grid-template-columns: repeat(4, 1px); z-index: 10; }
 .ptmarker i { width: 1px; height: 1px; background: #f0f; }
 .ptmarker i.b { background: #0f0; }
@@ -56,7 +87,7 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 @media (prefers-reduced-motion: reduce) { .pt, .ptprog i { transition: none; } }
 .ptreh { display: inline-flex; align-items: center; gap: 6px; color: var(--rec); min-width: 0; }
 .ptreh i { width: 7px; height: 7px; border-radius: 50%; background: var(--rec); }
-.ptreh button { font: inherit; font-size: 11px; border: 1px solid var(--line); background: var(--surface-1); color: var(--ink-1); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+.ptreh button { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 12px; font-weight: 500; border: 1px solid var(--line-2); background: var(--surface-1); color: inherit; border-radius: 7px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
 
 .ptclose { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 5px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .ptclose svg { width: 14px; height: 14px; }
@@ -64,3 +95,11 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 
 .ptreh > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ptreh > i, .ptreh > button { flex: none; }
+
+.ptnav { display: flex; align-items: center; gap: 2px; flex: none; }
+.ptnav button { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; padding: 5px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.ptnav button:hover:not(:disabled) { background: var(--surface-3); color: var(--ink-1); }
+.ptnav button:disabled { opacity: .35; cursor: default; }
+.ptnav svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.ptpage { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.ptfollow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

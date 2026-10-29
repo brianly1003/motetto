@@ -66,8 +66,9 @@ pub fn record_mic_only(
     base: &str,
     stop: Stop,
     mic: Option<&str>,
+    meters: Option<Meters>,
 ) -> Result<Captured, Box<dyn Error>> {
-    record_tracks(base, stop, None, mic, None, false)
+    record_tracks(base, stop, meters, mic, None, false)
 }
 
 fn record_tracks(
@@ -184,6 +185,10 @@ fn record_tracks(
                     .as_ref()
                     .filter(|_| suffix == "mic")
                     .map(|m| m.mic_clips.clone()),
+                listen: meters
+                    .as_ref()
+                    .filter(|_| suffix == "mic")
+                    .map(|m| m.mic_listener.clone()),
             },
             kind,
         )?;
@@ -338,7 +343,7 @@ mod tests {
             std::thread::sleep(Duration::from_secs(2));
             timer.store(true, Ordering::SeqCst);
         });
-        let captured = record_mic_only(&base, stop, None).unwrap();
+        let captured = record_mic_only(&base, stop, None, None).unwrap();
         assert_eq!(captured.files, [format!("{base}.mic.wav")]);
         assert!(!std::path::Path::new(&format!("{base}.system.wav")).exists());
         let reader = hound::WavReader::open(format!("{base}.mic.wav")).unwrap();

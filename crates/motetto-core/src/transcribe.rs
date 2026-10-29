@@ -6,7 +6,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use crate::events::{TranscribeProgress, Who};
@@ -101,25 +100,14 @@ pub fn transcript_parts(
     report: &(dyn Fn(TranscribeProgress) + Sync),
 ) -> Result<Transcript, Box<dyn Error>> {
     let run = Run::new(parts);
-    let finished = AtomicBool::new(false);
-    std::thread::scope(|scope| {
-        scope.spawn(|| {
-            while !finished.load(Ordering::Relaxed) {
-                for _ in 0..10 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    if finished.load(Ordering::Relaxed) {
-                        return;
-                    }
-                }
-                if let Some(progress) = run.report() {
-                    report(progress);
-                }
+    progress::ticking(
+        || {
+            if let Some(progress) = run.report() {
+                report(progress);
             }
-        });
-        let result = transcribe_parts(parts, quiet, &run);
-        finished.store(true, Ordering::Relaxed);
-        result
-    })
+        },
+        || transcribe_parts(parts, quiet, &run),
+    )
 }
 
 /// The stages of one transcription, priced up front (SPEC 6.6): per track, converting, echo
@@ -220,7 +208,7 @@ fn transcribe_parts(
             let stem = Path::new(src).with_extension("");
             let wav16 = format!("{}.16k.wav", stem.to_string_lossy());
             if !decoded.contains(src) {
-                decode::to_wav(Path::new(src), Path::new(&wav16))?;
+                decode::to_wav_measured(Path::new(src), Path::new(&wav16))?;
                 decoded.push(src.clone());
             }
             Ok(wav16)
@@ -828,6 +816,22 @@ fn parse_csv(csv: &str) -> Vec<(u64, u64, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panicking_job_stops_its_progress_ticker() {
+        // On a thread with a deadline: a ticker left running would hang the scope, not fail.
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result =
+                std::panic::catch_unwind(|| progress::ticking(|| {}, || panic!("job failed")));
+            done.send(result.is_err()).unwrap();
+        });
+        assert_eq!(
+            wait.recv_timeout(std::time::Duration::from_secs(3)),
+            Ok(true),
+            "the panic came back"
+        );
+    }
 
     #[test]
     fn an_outro_over_music_goes_but_one_read_aloud_stays() {

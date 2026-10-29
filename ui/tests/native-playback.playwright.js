@@ -41,6 +41,31 @@ async (page) => {
   await p.waitForTimeout(300);
   const seek = (await calls()).filter(c => c.c === 'playback_set' && c.playing).at(-1);
   if (!seek || seek.atMs !== 30000) fails.push('a transcript time did not seek natively: ' + JSON.stringify(seek));
+  // The bar is a slider: dragging while paused moves the position and Play starts there;
+  // a click while playing jumps there at once.
+  await p.getByRole('button', { name: '❚❚ Pause' }).click();
+  await p.waitForTimeout(200);
+  const bar = await p.locator('.player .bar').boundingBox();
+  await p.mouse.move(bar.x + 2, bar.y + bar.height / 2); await p.mouse.down();
+  await p.mouse.move(bar.x + bar.width * .5, bar.y + bar.height / 2, { steps: 5 });
+  await p.mouse.move(bar.x + bar.width * .75, bar.y + bar.height / 2, { steps: 5 }); await p.mouse.up();
+  const dragged = +(await p.locator('.player .bar').inputValue());
+  if (Math.abs(dragged - 45000) > 1500) fails.push('drag did not move the slider to 3/4: ' + dragged);
+  if ((await calls()).filter(c => c.c === 'playback_set').at(-1).playing) fails.push('dragging while paused started playing');
+  if (!/00:4[45]/.test(await p.locator('.player .mono').innerText())) fails.push('time did not follow the drag: ' + await p.locator('.player .mono').innerText());
+  await p.getByRole('button', { name: '▶ Play' }).click();
+  await p.waitForTimeout(200);
+  const resumed = (await calls()).filter(c => c.c === 'playback_set' && c.playing).at(-1);
+  if (!resumed || Math.abs(resumed.atMs - dragged) > 200) fails.push('Play did not start where the slider was: ' + JSON.stringify(resumed));
+  await p.mouse.click(bar.x + bar.width * .25, bar.y + bar.height / 2);
+  await p.waitForTimeout(300);
+  const jumped = (await calls()).filter(c => c.c === 'playback_set' && c.playing).at(-1);
+  if (!jumped || Math.abs(jumped.atMs - 15000) > 1500) fails.push('a click on the bar did not jump while playing: ' + JSON.stringify(jumped));
+  // Keyboard: the slider takes arrow keys.
+  await p.locator('.player .bar').focus(); const before = +(await p.locator('.player .bar').inputValue());
+  await p.keyboard.press('ArrowRight');
+  if (+(await p.locator('.player .bar').inputValue()) <= before) fails.push('arrow key did not move the slider');
+  await p.screenshot({ path: '.playwright-out/player-slider.png' });
   await p.close();
   return fails.length ? fails : 'PASS';
 }

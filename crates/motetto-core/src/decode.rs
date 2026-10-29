@@ -18,7 +18,17 @@ type Writer = hound::WavWriter<BufWriter<File>>;
 
 /// Decode one audio track without loading the entire recording into memory.
 pub fn to_wav(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
-    let result = match convert(source, destination) {
+    to_wav_with(source, destination, false)
+}
+
+/// `to_wav` for a transcription, its frames reported as progress. Live captions convert too, while
+/// a call records, and must not move another job's progress.
+pub(crate) fn to_wav_measured(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+    to_wav_with(source, destination, true)
+}
+
+fn to_wav_with(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<dyn Error>> {
+    let result = match convert(source, destination, measured) {
         Err(e) if unsupported(e.as_ref()) => ffmpeg(source, destination, e.as_ref()),
         other => other,
     };
@@ -31,7 +41,7 @@ pub fn to_wav(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
     })
 }
 
-fn convert(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<dyn Error>> {
     if source == destination
         || (destination.exists() && source.canonicalize()? == destination.canonicalize()?)
     {
@@ -92,7 +102,7 @@ fn convert(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
             return Err("sample rate changed within the file".into());
         }
         decoded += audio.frames() as u64;
-        if let Some(total) = total {
+        if let Some(total) = total.filter(|_| measured) {
             crate::progress::step(decoded, total);
         }
         samples.resize(audio.samples_interleaved(), 0.0);
