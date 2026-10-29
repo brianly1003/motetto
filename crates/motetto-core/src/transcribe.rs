@@ -272,10 +272,9 @@ fn transcribe_parts(
             let _ = fs::remove_file(format!("{stem}.json"));
             let rows = match &speech {
                 Some(speech) => {
-                    let pieces = split_pieces(&rows, speech);
-                    run.units(track, CHECK, pieces as f64);
+                    run.units(track, CHECK, split_pieces(&rows, speech) as f64);
                     run.begin(track, CHECK);
-                    split_joined(&model, &wav16, &stem, rows, speech, pieces, quiet)?
+                    split_joined(&model, &wav16, &stem, rows, speech, quiet)?
                 }
                 None => rows, // without VAD whisper keeps the silence and splits there itself
             };
@@ -475,10 +474,9 @@ fn split_joined(
     stem: &str,
     rows: Vec<Row>,
     speech: &[(u64, u64)],
-    pieces: usize,
     quiet: bool,
 ) -> Result<Vec<Row>, Box<dyn Error>> {
-    let mut count = Pieces::new(pieces);
+    let mut count = Pieces::new(split_pieces(&rows, speech));
     let mut out = Vec::with_capacity(rows.len());
     for (start, end, text) in rows {
         let cuts = cuts(start, end, speech);
@@ -486,7 +484,8 @@ fn split_joined(
             out.push((start, end, text));
             continue;
         }
-        match pieces_of(model, wav16, stem, (start, end), &cuts, quiet, &mut count) {
+        let pieces = trimmed(start, end, &cuts, speech);
+        match pieces_of(model, wav16, stem, &pieces, quiet, &mut count) {
             Ok(Some(rows)) => out.extend(rows),
             Ok(None) => out.push((start, end, text)),
             Err(e) => {
@@ -560,7 +559,7 @@ fn relanguage(
         let end = rows
             .get(last + 1)
             .map_or(run[run.len() - 1].1 + 1_000, |next| next.0);
-        match pieces_of(model, wav16, stem, (run[0].0, end), &[], quiet, &mut count) {
+        match pieces_of(model, wav16, stem, &[(run[0].0, end)], quiet, &mut count) {
             Ok(Some(again)) if !mostly_in(&again, track) => out.extend(again),
             Ok(_) => out.extend_from_slice(run),
             Err(e) => {
@@ -630,28 +629,54 @@ fn cuts(start: u64, end: u64, speech: &[(u64, u64)]) -> Vec<u64> {
     cuts
 }
 
-/// Whisper on each piece of `start..end` between `cuts`, times put back on the track. `None`
+/// Speech kept either side of a piece, as whisper's own VAD pads it.
+const PIECE_PAD_MS: u64 = 200;
+
+/// The pieces of `start..end` between `cuts`, each trimmed to the speech heard in it. With half a
+/// long silence left in, whisper's VAD times drift: Me's line said at 2:45 was stamped 2:19, and
+/// 0.35 s of "ok" in 39 s of silence became "I'll help" (2026-10-29). A piece without speech
+/// stays whole.
+fn trimmed(start: u64, end: u64, cuts: &[u64], speech: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    let bounds: Vec<u64> = std::iter::once(start)
+        .chain(cuts.iter().copied())
+        .chain(std::iter::once(end))
+        .collect();
+    bounds
+        .windows(2)
+        .map(|piece| {
+            let (a, b) = (piece[0], piece[1]);
+            let heard = speech.iter().filter(|(s, e)| *e > a && *s < b);
+            match (
+                heard.clone().map(|(s, _)| *s).min(),
+                heard.map(|(_, e)| *e).max(),
+            ) {
+                (Some(s), Some(e)) => (
+                    a.max(s.saturating_sub(PIECE_PAD_MS)),
+                    b.min(e + PIECE_PAD_MS),
+                ),
+                _ => (a, b),
+            }
+        })
+        .collect()
+}
+
+/// Whisper on each piece (start and end on the track), times put back on the track. `None`
 /// when a piece comes back empty, so no words are lost.
 /// one whisper-cli per piece (model loaded each time); rare enough not to matter.
 fn pieces_of(
     model: &str,
     wav16: &str,
     stem: &str,
-    (start, end): (u64, u64),
-    cuts: &[u64],
+    pieces: &[(u64, u64)],
     quiet: bool,
     count: &mut Pieces,
 ) -> Result<Option<Vec<Row>>, Box<dyn Error>> {
-    let bounds: Vec<u64> = std::iter::once(start)
-        .chain(cuts.iter().copied())
-        .chain(std::iter::once(end))
-        .collect();
-    let all = bounds.len() - 1;
+    let all = pieces.len();
     let mut out = vec![];
-    for (i, piece) in bounds.windows(2).enumerate() {
+    for (i, &(from, to)) in pieces.iter().enumerate() {
         let piece_stem = format!("{stem}.piece{i}");
         let piece_wav = format!("{piece_stem}.16k.wav");
-        let rows = slice::write(Path::new(wav16), Path::new(&piece_wav), piece[0], piece[1])
+        let rows = slice::write(Path::new(wav16), Path::new(&piece_wav), from, to)
             .and_then(|()| whisper(model, &piece_wav, &piece_stem, quiet, false));
         let _ = fs::remove_file(&piece_wav);
         let _ = fs::remove_file(format!("{piece_stem}.csv"));
@@ -670,7 +695,7 @@ fn pieces_of(
         }
         out.extend(
             rows.into_iter()
-                .map(|(s, e, text)| (s + piece[0], e.min(piece[1] - piece[0]) + piece[0], text)),
+                .map(|(s, e, text)| (s + from, e.min(to - from) + from, text)),
         );
     }
     Ok(Some(out))
@@ -862,6 +887,18 @@ mod tests {
             vec![14_500]
         );
         assert_eq!(cuts(0, 10_000, &[]), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn each_piece_is_trimmed_to_its_speech() {
+        // 2026-10-29, Silero on the mic: "ok" at 207.49 s, then speech from 284.9 s.
+        let speech = [(207_490, 207_840), (284_900, 285_820), (290_000, 291_000)];
+        assert_eq!(
+            trimmed(207_550, 300_000, &[246_370], &speech),
+            vec![(207_550, 208_040), (284_700, 291_200)]
+        );
+        // A piece without speech stays whole.
+        assert_eq!(trimmed(0, 5_000, &[], &speech), vec![(0, 5_000)]);
     }
 
     #[test]
