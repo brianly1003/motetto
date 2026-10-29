@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Appearance from "../components/Appearance";
+import "../styles/fonts.css";
 import "../styles/theme.css";
 import "../styles/app.css";
 export const metadata: Metadata = { title: "Motetto", description: "Local meeting notes" };
