@@ -317,7 +317,7 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
           : <button type="button" className={`owner ${task.owner==='You'||task.owner==='Me'?'me':''}`} aria-haspopup="menu" aria-pressed={ownerFilter===(task.owner==='Me'?'You':task.owner)} onClick={event=>{const r=event.currentTarget.getBoundingClientRect();const name=task.owner==='Me'?'You':task.owner;setOwnerMenu(ownerMenu?.line===line.line?null:{name,line:line.line,x:r.left,y:r.bottom+4});}}>{task.owner==='Me'?'You':task.owner}</button>)}<span className="task-text" dangerouslySetInnerHTML={{__html:inline(task.text)}}/>{marked(line.text)&&<span className="unsure" contentEditable={false} title={s.unsureTitle}>{s.unsure}</span>}</span>{quoteOf(task.text)&&<span className="aq rcpt" contentEditable={false} dangerouslySetInnerHTML={{__html:quoteInner(task.text)}}/>}</li>;
       })}</ul><div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!taskLine(text))}}/></> : <div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!ownerFilter&&!!taskLine(text), DECISIONS.test(kind))}}/>}
     </section>;
-  }))}<p className="tip notes-hint">{translated ? translated.hint : locked ? s.lockedHint : s.editHint}</p>
+  }))}
     {mention && <PeoplePicker options={people(mention.query)} known={known()} index={mention.index} x={mention.x} y={mention.y} onPick={pick}/>}
     {ownerMenu && <div className="mention gmenu" role="menu" aria-label={ownerMenu.name} style={{left: ownerMenu.x, top: ownerMenu.y}}>
       <button type="button" role="menuitem" onClick={() => { setOwnerFilter(ownerFilter === ownerMenu.name ? null : ownerMenu.name); setOwnerMenu(null); }}>{ownerFilter === ownerMenu.name ? s.showEveryone : s.showOnly.replace('{name}', ownerMenu.name)}</button>

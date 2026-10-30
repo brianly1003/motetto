@@ -112,7 +112,11 @@ async (page) => {
     if(await p.locator('.notes .editing').count()||(await saved())!==before)failures.push('locked notes were edited');
     if(await p.locator('.notes [data-editable="1"]').count())failures.push('locked block still marked editable');
     if(await p.locator('.dochead .pen').count())failures.push('rename pencil shown while locked');
-    if(await p.locator('.notes .notes-hint').innerText()!=='Locked for review. Click Locked to edit again.')failures.push('locked hint missing');
+    // The state is said in the shortcuts popover ("?"), which then lists no editing keys.
+    await p.keyboard.press('?');
+    if(await p.locator('.keys-pop .keys-foot').innerText()!=='Locked for review. Click Locked to edit again.')failures.push('locked hint missing');
+    if(await p.locator('.keys-pop dt',{hasText:'Edit a line'}).count())failures.push('edit keys listed while locked');
+    await p.keyboard.press('Escape');
     await p.getByRole('button',{name:'More actions'}).click();
     if(!await p.getByRole('menuitem',{name:'Write the notes again'}).isDisabled())failures.push('regenerate allowed while locked');
     if(!await p.getByRole('menuitem',{name:'Rename'}).isDisabled())failures.push('rename allowed while locked');
@@ -207,7 +211,11 @@ async (page) => {
     await p.getByRole('menuitemcheckbox',{name:'Lock notes'}).click();
     await p.locator('.locked-mark').waitFor();
     if(await p.locator('.tline .words[contenteditable]').count())failures.push('locked transcript is editable');
-    if(await p.locator('.transcript-edit .thint').innerText()!=='Locked for review. Click Locked to edit again.')failures.push('locked transcript hint missing');
+    // The Lock menu stays open after its tick; close it before opening the shortcuts.
+    await p.keyboard.press('Escape');
+    await p.getByRole('button',{name:'Keyboard shortcuts'}).click();
+    if(await p.locator('.keys-pop .keys-foot').innerText()!=='Locked for review. Click Locked to edit again.')failures.push('locked transcript hint missing');
+    await p.keyboard.press('Escape');
     await p.locator('.locked-mark').click(); await p.waitForTimeout(150);
     await p.screenshot({path:`.playwright-out/transcript-edit-${theme}.png`});
 

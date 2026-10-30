@@ -4,6 +4,7 @@ import * as ipc from "@/lib/ipc";
 import { elapsedLabel } from "@/lib/session";
 import { matchPeople, mentionWord } from "@/lib/people";
 import PeoplePicker from "./PeoplePicker";
+import { Kbd } from "@/components/ui/Kbd";
 
 export function MyNotes({ meetingId, elapsed, registerFlush, hints = true }: { meetingId: string; elapsed: number; registerFlush: (flush: () => Promise<void>) => void; hints?: boolean }) {
   const editor = useRef<HTMLDivElement>(null);
@@ -118,5 +119,5 @@ export function MyNotes({ meetingId, elapsed, registerFlush, hints = true }: { m
     event.preventDefault();
     event.clipboardData.getData("text/plain").split(/\r?\n/).forEach((line, index) => { if (index) newLine(); document.execCommand("insertText", false, line); });
     changed();
-  }} />{mention && <PeoplePicker options={matchPeople(known(mention.query), mention.query)} known={known(mention.query)} index={mention.index} x={mention.x} y={mention.y} onPick={pick}/>}{hints && <div className="hints"><code>[]</code> action <code>!</code> decision <code>?</code> question <code>#</code> topic <code>@</code> owner <span>· <kbd>Esc</kbd> back to the call</span></div>}</>;
+  }} />{mention && <PeoplePicker options={matchPeople(known(mention.query), mention.query)} known={known(mention.query)} index={mention.index} x={mention.x} y={mention.y} onPick={pick}/>}{hints && <div className="hints"><code>[]</code> action <code>!</code> decision <code>?</code> question <code>#</code> topic <code>@</code> owner <span>· <Kbd>Esc</Kbd> back to the call</span></div>}</>;
 }

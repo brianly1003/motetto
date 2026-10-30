@@ -73,7 +73,7 @@ async (page) => {
     // The working page.
     r.bar = await p.locator('.recbar').innerText();
     if (!r.bar.includes('Recording') || !r.bar.includes('01:14') || !r.bar.includes('Both sides')) throw Error(`Recording bar: ${r.bar}`);
-    if (await p.getByRole('button', {name: 'Copy ▾'}).count() || await p.getByRole('button', {name: 'More actions'}).count()) throw Error('Copy or ••• shown while recording');
+    if (await p.getByRole('button', {name: 'Copy', exact: true}).count() || await p.getByRole('button', {name: 'More actions'}).count()) throw Error('Copy or ••• shown while recording');
     if (await p.locator('.session-banner').count()) throw Error('Session banner repeats the recording bar');
     // Another meeting's page: its sidebar chip already says Recording, so no banner (owner 2026-10-20).
     await p.getByRole('button', {name: /Earlier call/}).first().click();
@@ -128,7 +128,7 @@ async (page) => {
     await p.evaluate(() => { window.fixtureStatus('Finishing'); window.fixtureState({state: {type: 'Finishing', meeting_id: 'rec1'}}); });
     await p.locator('.writing h4').waitFor();
     r.writing = await p.locator('.writing').innerText();
-    if (await p.getByRole('button', {name: 'Copy ▾'}).count()) throw Error('Copy shown while the notes are written');
+    if (await p.getByRole('button', {name: 'Copy', exact: true}).count()) throw Error('Copy shown while the notes are written');
     await p.screenshot({path: `.playwright-out/app-writing-${theme}.png`});
     if (differences.length || errors.length) throw Error(JSON.stringify({theme, differences, errors, r}));
     out.push({theme, differences, errors, ...r});

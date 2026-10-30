@@ -11,6 +11,7 @@ import { readingPages, readingRows, readingWindow, type ReadingPage } from "@/li
 import type { Heard } from "@/lib/bindings/Heard";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
 import "../../styles/prompter.css";
+import { ChevronDown, GripVertical } from "@/components/ui/Icon";
 
 type Check = "checking" | "hidden" | "visible" | "unknown" | "shown" | "off" | "moved";
 const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
@@ -267,12 +268,12 @@ export default function Prompter() {
   };
   return <div ref={root}>{markerEl}<div className={`pt${rehearsing ? " rehearsing" : ""}${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
     <div className="pth">
-      <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}>⠿</button>
+      <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}><GripVertical/></button>
       {c && !checking && name && (() => {
         // "Team X demo · 2/4 Demo ▾": the script, where you are, and the menu to switch.
         const where = script.sections.length === 1 && script.sections[0].minutes === 0 && !text.trimStart().startsWith("#") ? "" : ` · ${c.section + 1}/${script.sections.length} ${script.sections[c.section]?.title ?? ""}`;
         return rehearsing ? <span className="ptchip"><b>{name}</b>{where}</span>
-          : <button type="button" className="ptchip" data-control aria-haspopup="menu" aria-expanded={menu !== null} title={s.ptSwitch} onClick={() => void (menu ? setMenu(null) : ipc.scriptsList().then(list => setMenu(Array.isArray(list) ? list.map(info => info.name) : [])).catch(() => setMenu([])))}><b>{name}</b>{where} ▾</button>;
+          : <button type="button" className="ptchip" data-control aria-haspopup="menu" aria-expanded={menu !== null} title={s.ptSwitch} onClick={() => void (menu ? setMenu(null) : ipc.scriptsList().then(list => setMenu(Array.isArray(list) ? list.map(info => info.name) : [])).catch(() => setMenu([])))}><b>{name}</b>{where}<ChevronDown/></button>;
       })()}
       {menu && <div className="ptmenu" role="menu" data-control>
         {menu.map(n => <button key={n} type="button" role="menuitemradio" aria-checked={n === name} onClick={() => { setMenu(null); if (n !== name) void ipc.prompterScript(n).catch(e => setCloseError(String(e))); }}><i>{n === name ? "✓" : ""}</i>{n}</button>)}

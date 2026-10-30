@@ -85,7 +85,7 @@ async (page) => {
     await p.keyboard.press('Escape');
 
     // 2. Copy › Transcript copies the saved lines with Me/Them.
-    await p.getByRole('button', {name: 'Copy ▾', exact: true}).click();
+    await p.getByRole('button', {name: 'Copy', exact: true}).click();
     const items = await p.getByRole('menu', {name: 'Copy'}).getByRole('menuitem').allInnerTexts();
     if (items.at(-1) !== 'Transcript') throw Error(`Copy menu: ${items}`);
     await p.getByRole('menuitem', {name: 'Transcript', exact: true}).click();
@@ -144,6 +144,7 @@ async (page) => {
             if (c === 'list_meetings') return [rec]; if (c === 'get_meeting') return {summary: rec, notes_md: '', transcript: '', transcript_heard: ''};
             if (c === 'deleted_meetings' || c === 'open_action_items') return []; if (c === 'library_bytes') return 1; if (c === 'importing') return null;
             if (c === 'meeting_media') return {tracks: [], duration_ms: 0, folder: '~'}; if (c === 'notification_permission') return true;
+            if (c === 'list_screen_sources' || c === 'microphones') return []; // the screen and mic menus list these
             return null;
           }};
       }, {where, many});

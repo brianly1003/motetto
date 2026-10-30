@@ -44,7 +44,7 @@ async (page) => {
     const read=(e,props)=>Object.fromEntries(props.map(k=>[k,getComputedStyle(e)[k]]));
     for(const width of [760,1200]){
       await p.setViewportSize({width,height:720});await ref.setViewportSize({width,height:1000});
-      for(const selector of ['.tline .ts','.tline .who.me','.tline .who.them','.tline .words','.transcript-edit .thint','.panel h5','.kv dt','.kv dd','.player .mono','.player .tip']) {
+      for(const selector of ['.tline .ts','.tline .who.me','.tline .who.them','.tline .words','.panel h5','.kv dt','.kv dd','.player .mono','.player .tip']) {
         if(!await p.locator(selector).count())throw Error('App missing '+selector+' '+await p.locator('.player').count());
         if(!await ref.locator(selector).count())throw Error('Mockup missing '+selector);
         const actual=await p.locator(selector).first().evaluate(read,props),expected=await ref.locator(selector).first().evaluate(read,props);

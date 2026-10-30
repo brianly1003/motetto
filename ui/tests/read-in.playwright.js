@@ -92,7 +92,7 @@ async (page) => {
 
   // Copy › Action items copies what is shown.
   await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await p.getByRole('button', { name: 'Copy ▾' }).click();
+  await p.getByRole('button', { name: 'Copy', exact: true }).click();
   await p.getByRole('menuitem', { name: /Action items/ }).click();
   const copied = await p.evaluate(() => navigator.clipboard.readText());
   if (!/Hantar dek/.test(copied) || /Hantar pada/.test(copied)) fails.push('copied: ' + copied);

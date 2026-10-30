@@ -8,6 +8,7 @@ import {removeLine} from '@/lib/noteEdit';
 import {useReadIn, ReadInPicker, ReadInBar} from './ReadIn';
 import Transcript from './Transcript';
 import DocumentFind from './DocumentFind';
+import Shortcuts from './Shortcuts';
 import {meetingDate, meetingTitle, timeLabel, fileSize, durationLabel, notesTime, myNoteTimes, withoutTranscript, taskLine, noteSections} from '@/lib/document';
 import {RecordingPage, ProcessingPage, RewritingPage, RetranscribingPage} from './RecordingPage';
 import type {AppState} from '@/lib/bindings/AppState';
@@ -18,6 +19,7 @@ import * as ipc from '@/lib/ipc';
 import {strings as s} from '@/lib/strings';
 import {MenuIcon} from './MenuIcon';
 import {Alert} from './Alert';
+import { Kbd } from "@/components/ui/Kbd";
 
 const TITLE_MAX=80;
 
@@ -246,7 +248,7 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
         {!locked&&<button type="button" className="pen" aria-label={s.rename} title={s.rename} onClick={startRename}><MenuIcon name="rename"/></button>}</div>
         {/* Copy and ••• have nothing to act on while the meeting records or its notes are written. */}
         {deletable(meeting.summary.status)&&!rewriting&&<MeetingActions meeting={meeting} shown={tab==='Notes'?readIn.markdown??undefined:undefined} reading={tab==='Notes'?readIn.view:null} ask={writeIn} hasAudio={tracks.length>0} onToast={onToast} onError={onError} onChanged={onChanged} onRename={startRename} onDelete={onDelete} onLock={on=>void lock(on)}/>}</div>
-      <div className="edithint" aria-live="polite"><span><kbd>Enter</kbd> {s.renameSave}</span><span><kbd>Esc</kbd> {s.renameCancel}</span><span className={`count${count>=72?' near':''}`}>{count>=60?`${count}/${TITLE_MAX}`:''}</span></div>
+      <div className="edithint" aria-live="polite"><span><Kbd>Enter</Kbd> {s.renameSave}</span><span><Kbd>Esc</Kbd> {s.renameCancel}</span><span className={`count${count>=72?' near':''}`}>{count>=60?`${count}/${TITLE_MAX}`:''}</span></div>
       {live?<div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{session?.state?.app&&<><i className="sep"/><span>{session.state.app}</span></>}</div>:
       <div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{duration>0&&<><i className="sep"/><span>{durationLabel(duration)}</span></>}{(meeting.summary.apps??[]).length>0&&<><i className="sep"/><span>{meeting.summary.apps.join(', ')}</span></>}{meeting.summary.notes_ms!=null&&<><i className="sep"/><span>Notes in {notesTime(meeting.summary.notes_ms)}</span></>}{locked&&<><i className="sep"/><button type="button" className="locked-mark" title={s.unlockTitle} aria-label={s.unlockTitle} onClick={()=>void lock(false)}><MenuIcon name="lock"/>{s.locked}</button></>}<span className="sr-only" role="status">{lockMessage}</span></div>}
       {!live&&!writing&&!rewriting&&<div className="tl">
@@ -267,7 +269,7 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
       const names=tabs;let next=index;
       if(event.key==='ArrowRight')next=(index+1)%names.length;else if(event.key==='ArrowLeft')next=(index+names.length-1)%names.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=names.length-1;else return;
       event.preventDefault();setTab(names[next]);document.getElementById(`tab-${names[next]}`)?.focus();
-    }}>{name}</button>)}</div>{tab==='Notes'&&meeting.notes_md&&readIn.desktop&&<ReadInPicker readIn={readIn} meeting={meeting}/>}<DocumentFind tab={tab} body={body} start={find?.query}/></div>
+    }}>{name}</button>)}</div>{tab==='Notes'&&meeting.notes_md&&readIn.desktop&&<ReadInPicker readIn={readIn} meeting={meeting}/>}<DocumentFind tab={tab} body={body} start={find?.query}/>{(tab==='Notes'&&!!meeting.notes_md||tab==='Transcript')&&<Shortcuts tab={tab} readOnly={locked||tab==='Notes'&&readIn.markdown!==null} note={locked?s.lockedHint:tab==='Transcript'?s.transcriptNote:readIn.markdown!==null?(readIn.stale?s.translatedStaleHint:s.translatedHint):s.editHint}/>}</div>
     <div ref={body} className="docbody" id="meeting-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
       {tab==='Notes'?(meeting.notes_md?<div className="readin-col"><ReadInBar readIn={readIn} onWriteIn={locked||!deletable(meeting.summary.status)?undefined:code=>setWriteIn({code})}/><NotesView key={readIn.markdown===null?'notes':readIn.view} id={meeting.summary.id} markdown={readIn.markdown??meeting.notes_md} locked={locked} translated={readIn.markdown===null?undefined:{hint:readIn.stale?s.translatedStaleHint:s.translatedHint,labelOf:line=>headings.get(line),onToggle:readIn.toggle}} durationMs={notesDuration} onSeek={notesDuration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError} transcript={meeting.transcript} check={readIn.markdown===null?check:undefined}/></div>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined} running={playing}/>:tab==='Video'?(media?<VideoTab media={media} position={position} playing={playing} seek={seek} togglePlay={togglePlay} rate={rate} setRate={setRate} lines={transcriptLines(meeting.transcript,[])} meetingId={meeting.summary.id} onToast={onToast} onError={onError} onMediaChange={value=>{setPlaying(false);setMedia(value);if(!value.videos.length)setTab('Audio');else setTab('Video');}}/>:<p className="muted" role={mediaFailed?'alert':'status'}>{mediaFailed?s.video_load_failed:s.video_loading}</p>):<div className="notes"><section><h3>Audio</h3>{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
       {tab!=='Video'&&<aside className="meeting-aside">

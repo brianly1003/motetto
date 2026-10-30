@@ -37,11 +37,11 @@ async (page) => {
     await p.getByPlaceholder('Search notes and transcripts').fill('roadmap');
     await p.getByRole('button', {name: /Design review/}).first().click();
     if (await p.locator('.titlerow').getByRole('button', {name: 'Meetings', exact: true}).count()) throw Error('Obsolete Meetings button remains');
-    await p.getByRole('button', {name: 'Copy ▾', exact: true}).click();
+    await p.getByRole('button', {name: 'Copy', exact: true}).click();
     await p.getByRole('menuitem', {name: /^Action items/}).click();
     if (await p.evaluate(() => window.copiedText) !== 'Share the design before Thursday') throw Error('Copied wrong action items');
     for (const label of ['Notes as Markdown', 'Notes as plain text']) {
-      await p.getByRole('button', {name: 'Copy ▾', exact: true}).click();
+      await p.getByRole('button', {name: 'Copy', exact: true}).click();
       await p.getByRole('menuitem', {name: label, exact: true}).click();
       const copied = await p.evaluate(() => window.copiedText);
       if (!copied.includes('Share the design before Thursday') || (label === 'Notes as plain text' && copied.includes('#'))) throw Error('Wrong copy format');

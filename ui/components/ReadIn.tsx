@@ -5,6 +5,7 @@ import * as ipc from "@/lib/ipc";
 import { englishName, matches, nativeName, NOTE_LANGUAGES, offerLanguage, originalNotesLanguage, systemLanguages, withTicks } from "@/lib/languages";
 import { strings as s } from "@/lib/strings";
 import { MenuIcon } from "./MenuIcon";
+import { ChevronDown } from "@/components/ui/Icon";
 
 // Read in (owner 2026-10-26): notes.md stays the one you edit; each language is a saved
 // translation beside it, made on request by the local notes model. The language you pick is
@@ -171,7 +172,7 @@ export function ReadInPicker({ readIn, meeting }: { readIn: ReadIn; meeting: Mee
   const calls = callLanguages(meeting.summary.language);
   return <div className="readin" ref={root}>
     <button ref={button} type="button" className={`readin-button${readIn.view ? " on" : ""}`} aria-haspopup="dialog" aria-expanded={open} title={s.readIn} onClick={() => { setOpen(!open); setQuery(""); }}>
-      <TranslateIcon/><span className="readin-label"><span className="sr-only">{s.readIn}: </span>{label}</span>{readIn.busyHere && <i className="readin-spin" aria-hidden="true"/>}<svg className="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <TranslateIcon/><span className="readin-label"><span className="sr-only">{s.readIn}: </span>{label}</span>{readIn.busyHere && <i className="readin-spin" aria-hidden="true"/>}<ChevronDown/>
     </button>
     {open && <div className="readin-pop" role="dialog" aria-label={s.readIn} onKeyDown={event => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); button.current?.focus(); }
@@ -231,8 +232,9 @@ export function ReadInBar({ readIn, onWriteIn }: { readIn: ReadIn; onWriteIn?: (
     </div>;
     return <div className="readin-bar" role="status">
       <TranslateIcon/><div className="readin-text"><b lang={readIn.view}>{name}</b><span className="readin-sub">{s.translatedFrom}</span></div>
-      {onWriteIn && <button type="button" className="doc-action ghost" title={s.writeInOfferTip.replace("{lang}", name)} onClick={() => onWriteIn(readIn.view!)}>{s.writeInOffer.replace("{lang}", name)}</button>}
-      <button type="button" className="doc-action ghost" onClick={() => readIn.show(null)}>{s.showOriginal}</button>
+      {/* The first action carries the border, as in every other bar (owner 2026-10-30). */}
+      {onWriteIn && <button type="button" className="doc-action" title={s.writeInOfferTip.replace("{lang}", name)} onClick={() => onWriteIn(readIn.view!)}>{s.writeInOffer.replace("{lang}", name)}</button>}
+      <button type="button" className={`doc-action${onWriteIn ? " ghost" : ""}`} onClick={() => readIn.show(null)}>{s.showOriginal}</button>
       <button type="button" className="doc-action ghost" title={s.translateAgain} aria-label={s.translateAgain} onClick={() => readIn.translate(readIn.view!)}><MenuIcon name="again"/></button>
     </div>;
   }

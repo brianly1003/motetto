@@ -16,13 +16,14 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 .pt.col .ptedit { margin-left: auto; }
 .pt.col .ptclose { margin-left: 0; }
 .pth { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 0; }
-.ptgrab { cursor: pointer; width: 24px; height: 24px; margin: -3px 0; border-radius: 6px; display: grid; place-items: center; font-size: 17px; line-height: 1; color: var(--ink-2); flex: none; border: 0; background: transparent; padding: 0; }
+.ptgrab { cursor: pointer; width: 24px; height: 24px; margin: -3px 0; border-radius: 6px; display: grid; place-items: center; color: var(--ink-2); flex: none; border: 0; background: transparent; padding: 0; }
 .ptgrab:hover { background: var(--surface-3); }
 .ptchip { background: var(--surface-3); border-radius: var(--radius-pill); padding: 1px 9px; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* The chip is the script switcher: "Team X demo · 2/4 Demo ▾" opens the scripts list. */
 button.ptchip { border: 0; font: inherit; white-space: nowrap; cursor: pointer; flex: 0 1 auto; }
 button.ptchip:hover { background: var(--line); }
 .ptchip b { font-weight: 500; }
+.ptchip .chev { vertical-align: -2px; margin-left: 3px; }
 .ptmenu { position: absolute; top: 30px; left: 34px; z-index: 5; width: 230px; max-height: calc(100vh - 40px); overflow: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 5px; display: grid; gap: 1px; font-size: 12.5px; }
 .ptmenu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--ink-1); display: flex; gap: 8px; align-items: center; font: inherit; cursor: pointer; }
 .ptmenu button:hover { background: var(--surface-2); }

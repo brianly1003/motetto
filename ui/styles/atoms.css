@@ -1,0 +1,13 @@
+/* Atoms (DESIGN 4.0): the smallest pieces every feature reuses. Loaded before app.css. */
+
+/* Kbd, after shadcn/ui's: a muted 20 px key, 4 px corners, no border; keys pressed together sit
+   4 px apart in a group. On the dark tooltip it is a light wash of the tooltip's own colour. */
+.kbd { pointer-events: none; user-select: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: fit-content; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 4px; background: var(--surface-3); color: var(--ink-2); font: 500 12px/1 var(--font-ui); white-space: nowrap; }
+.kbd svg { width: 12px; height: 12px; }
+.kbd-group { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+[role="tooltip"] .kbd { background: color-mix(in srgb, currentColor 20%, transparent); color: inherit; }
+
+/* Icons (components/ui/Icon.tsx): 16 px by default, never a target of their own; the chevron is
+   14 px and faded, as shadcn's select and dropdown triggers draw it. */
+.icon { width: 16px; height: 16px; flex: none; pointer-events: none; }
+.icon.chev { width: 14px; height: 14px; opacity: .6; }

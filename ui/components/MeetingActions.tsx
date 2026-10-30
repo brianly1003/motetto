@@ -9,6 +9,8 @@ import { renderNotes } from "@/lib/md";
 import { withoutTranscript } from "@/lib/document";
 import { strings as s } from "@/lib/strings";
 import { MenuItem, MenuSwitch } from "@/components/MenuIcon";
+import { KbdGroup } from "@/components/ui/Kbd";
+import { ChevronDown } from "@/components/ui/Icon";
 
 /** Text for Copy: the whole notes as Markdown or plain text, or only the action items. A Read in
  *  translation has the `original`'s lines, so its action items are found where the original's are. */
@@ -87,10 +89,10 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       items[event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length]?.focus();
     }
   }}>
-    <button className="doc-action" data-menu="copy" aria-haspopup="menu" aria-expanded={menu === "copy"} disabled={busy} onClick={() => setMenu(menu === "copy" ? null : "copy")}>{s.copyMenu}</button>
+    <button className="doc-action" data-menu="copy" aria-haspopup="menu" aria-expanded={menu === "copy"} disabled={busy} onClick={() => setMenu(menu === "copy" ? null : "copy")}>{s.copyMenu}<ChevronDown/></button>
     <button className="doc-action ghost" data-menu="more" aria-label={s.moreActions} aria-haspopup="menu" aria-expanded={menu === "more"} disabled={busy} onClick={() => setMenu(menu === "more" ? null : "more")}>•••</button>
     {menu === "copy" && <div className="doc-dropdown" role="menu" aria-label="Copy">
-      <button role="menuitem" onClick={() => copy("items")}><span>{s.copyItems}</span><kbd>⇧⌘C</kbd></button><button role="menuitem" onClick={() => copy("markdown")}>{s.copyMarkdown}</button><button role="menuitem" onClick={() => copy("plain")}>{s.copyPlain}</button><div className="sep"/><button role="menuitem" disabled={!meeting.transcript.trim()} onClick={() => copy("transcript")}>{s.copyTranscript}</button>
+      <button role="menuitem" onClick={() => copy("items")}><span>{s.copyItems}</span><KbdGroup keys="⇧⌘C"/></button><button role="menuitem" onClick={() => copy("markdown")}>{s.copyMarkdown}</button><button role="menuitem" onClick={() => copy("plain")}>{s.copyPlain}</button><div className="sep"/><button role="menuitem" disabled={!meeting.transcript.trim()} onClick={() => copy("transcript")}>{s.copyTranscript}</button>
     </div>}
     {menu === "more" && <div className="doc-dropdown gmenu" role="menu" aria-label={s.moreActions}>
       {/* Locked notes are read-only for review (SPEC 7.11): no rename, no new notes over them. */}

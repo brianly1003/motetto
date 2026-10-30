@@ -24,5 +24,5 @@ export default function NotificationPermission() {
     catch (error) { setMessage(String(error)); }
     finally { setPending(false); }
   }
-  return !allowed && <Alert variant="warning" title="Recording notifications" actions={<button className="quiet" disabled={pending} onClick={request}>{s.allowNotifications}</button>}>{message}</Alert>;
+  return !allowed && <Alert variant="warning" title="Recording notifications" actions={<button className="doc-action ghost" disabled={pending} onClick={request}>{s.allowNotifications}</button>}>{message}</Alert>;
 }

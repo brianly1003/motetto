@@ -23,6 +23,7 @@ import type { MeetingSummary } from "@/lib/bindings/MeetingSummary";
 import type { Stage } from "@/lib/bindings/Stage";
 import { markStage, startRun } from "@/lib/stageClock";
 import type { SearchHit } from "@/lib/bindings/SearchHit";
+import { KbdGroup } from "@/components/ui/Kbd";
 
 const GROUPS=["Today","This week","Earlier"];
 
@@ -243,7 +244,7 @@ export default function Main(){
       if(next===rows[index])return;
       next.focus({preventScroll:true});next.scrollIntoView({block:"nearest"});next.click();
     }}>
-      <label className="search"><span className="sr-only">{s.search}</span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input placeholder={s.search} value={query} onChange={e=>setQuery(e.target.value)}/><button className="search-key" aria-label="Command palette" onClick={event=>{event.preventDefault();setPalette(true);}}><kbd>⌘K</kbd></button></label>
+      <label className="search"><span className="sr-only">{s.search}</span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input placeholder={s.search} value={query} onChange={e=>setQuery(e.target.value)}/><button className="search-key" aria-label="Command palette" onClick={event=>{event.preventDefault();setPalette(true);}}><KbdGroup keys="⌘K"/></button></label>
       {meetings.length>0&&<button className="homerow" aria-current={!trashOpen&&!scriptsOpen&&!selected?"page":undefined} onClick={goHome}><MenuIcon name="items"/><span>{s.actionItems}</span><span className="n" aria-label={openCount?s.openCount.replace("{n}",String(openCount)):undefined}>{openCount||""}</span></button>}
       {/* Scripts, as in the mockup: under Action items, with their names listed below it while open. */}
       <button className="homerow scripts-entry" aria-current={scriptsOpen?"page":undefined} onClick={()=>{selection.current++;setSelected(null);setTrashOpen(false);setScriptsOpen(true);}}><MenuIcon name="script"/><span>{s.scripts}</span><span className="n">{scriptCount||""}</span></button>
@@ -268,7 +269,7 @@ export default function Main(){
     </aside>
     <section className="workspace" aria-busy={loading}>
       <NotificationPermission/><SessionControls hideActive={!!selected}/>
-      {error&&<Alert variant="danger" role="alert" title={s.error} actions={<button className="quiet" onClick={()=>setError("")}>{s.dismiss}</button>}>{error}</Alert>}
+      {error&&<Alert variant="danger" role="alert" title={s.error} onDismiss={()=>setError("")}>{error}</Alert>}
       {quitPending&&<Alert title="Saving before quitting">{s.quitPending}</Alert>}
       {loading?<div className="empty" role="status"><p>{s.loading}</p></div>
         :scriptsOpen?<ScriptsPage onError={setError} device={mac?"Mac":"PC"} pending={rehearsed} onTaken={()=>setRehearsed(null)} onCount={setScriptCount}/>

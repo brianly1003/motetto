@@ -43,10 +43,13 @@ async (page) => {
   if (await kevin.locator('.aq').isVisible()) fails.push('quote shown before hover');
   // Showing it floats over the notes: nothing below moves (owner 2026-10-30), and it waits a beat.
   const below = () => p.locator('.notes .suggest').evaluate(e => e.getBoundingClientRect().top);
-  const before = await below();
-  await kevin.hover();
-  await p.waitForTimeout(600);
-  if (!await kevin.locator('.aq').isVisible()) fails.push('quote not shown on hover');
+  // The notifications banner can land late and move the notes, so point again until it shows.
+  let shown = false, before = 0;
+  for (let i = 0; i < 5 && !shown; i++) {
+    await kevin.hover(); before = await below();
+    shown = await kevin.locator('.aq').waitFor({ state: 'visible', timeout: 1000 }).then(() => true, () => false);
+  }
+  if (!shown) fails.push('quote not shown on hover');
   if (await below() !== before) fails.push('showing the quote moved the notes');
   if ((await kevin.locator('.aq').textContent()) !== 'They saidWhat does Plan B cost?') fails.push('task quote: ' + await kevin.locator('.aq').textContent());
   const keep = p.locator('.notes ul:not(.todo) li').first();

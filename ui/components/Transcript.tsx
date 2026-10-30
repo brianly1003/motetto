@@ -7,7 +7,6 @@ import { handBack } from "@/lib/focus";
 
 const esc = (text: string) => text.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const READ_MS = 1500;
-const mac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
 // As in the mockup: the time plays from its line; the words are the line's text, edited in place
 // (SPEC 7.11). The speaker and time never change; an emptied line is removed but keeps its place,
@@ -167,6 +166,5 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
         </div>;
       })}
     </div>
-    <p className="tip thint">{locked ? s.lockedHint : mac() ? s.transcriptHintMac : s.transcriptHintWin}</p>
   </div>;
 }
