@@ -43,6 +43,7 @@ pub fn run() {
             crate::meeting_actions::deleted_meetings,
             crate::meeting_actions::rename_meeting,
             crate::meeting_actions::set_locked,
+            crate::meeting_actions::set_unconfirmed,
             library_commands::search_meetings,
             library_commands::open_action_items,
             library_commands::get_meeting,

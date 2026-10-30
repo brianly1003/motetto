@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {replaceBlock, splitBlock, assignBlock, cleanName, renameOwner} from '../lib/noteEdit.ts';
+import {replaceBlock, splitBlock, assignBlock, cleanName, renameOwner, removeLine} from '../lib/noteEdit.ts';
 const md='### Action items\n- [ ] **Kevin**: Check the project [00:56]\n\n### Overview\n- Compared **FCM**.\n- Second\n\nA paragraph\nwrapped\n\n### My notes\n[01:01] Kevin decides.';
 test('an edit keeps the parts the user does not type',()=>{
  assert.equal(replaceBlock(md,1,2,'task','Check the 2021 project [00:56]').split('\n')[1],'- [ ] **Kevin**: Check the 2021 project [00:56]');
@@ -43,4 +43,11 @@ test('Fix this name renames every task of that owner; reassigning changes one',(
  assert.equal(renameOwner(doc,'Kenvin','Kevin',null),'- [ ] Kevin: a\n- [x] Kevin: b\n- [ ] Linh: c\n- [ ] no owner');
  assert.equal(renameOwner(doc,'Kenvin','Linh',0),'- [ ] Linh: a\n- [x] **Kenvin**: b\n- [ ] Linh: c\n- [ ] no owner');
  assert.equal(renameOwner('- [ ] Me: x','You','Anna',null),'- [ ] Anna: x');
+});
+test('Remove takes the line out; an emptied section says None or goes',()=>{
+ const notes='### Action items\n- [ ] Kevin: Check it [00:56]\n\n### Decisions\n- Move to the paid plan [01:00]\n\n### Overview\n- A call.\n\n<details><summary>Transcript</summary>\n</details>';
+ assert.equal(removeLine(notes,1),notes.replace('- [ ] Kevin: Check it [00:56]','- None'));
+ assert.equal(removeLine(notes,4),notes.replace('### Decisions\n- Move to the paid plan [01:00]\n\n',''));
+ const two='### Decisions\n- One [00:01]\n- Two [00:02]';
+ assert.equal(removeLine(two,1),'### Decisions\n- Two [00:02]');
 });

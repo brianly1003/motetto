@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { noteSections, taskLine } from '@/lib/document';
+import { noteSections, taskLine, timeLabel } from '@/lib/document';
+import { transcriptLines } from '@/lib/transcript';
 import { renderInline, renderNotes, timeChip, timeMs } from '@/lib/md';
 import { assignBlock, cleanName, renameOwner, replaceBlock, splitBlock, type Kind } from '@/lib/noteEdit';
 import { alike, matchPeople } from '@/lib/people';
@@ -9,10 +10,11 @@ import { strings as s } from '@/lib/strings';
 import * as ipc from '@/lib/ipc';
 
 // Mockup: these sections take the small label heading wherever they appear; topics take the serif one.
-const LABELS = /^(action items|overview|open questions|my notes|your jots)$/i;
+const LABELS = /^(action items|decisions|overview|open questions|my notes|your jots)$/i;
+const DECISIONS = /^decisions$/i, CHECKED = /^(action items|decisions)$/i;
 const MY_NOTES = /^my notes$/i;
 // Atoms keep their look and their own controls while a block is edited (SPEC 7.11).
-const ATOMS = 'input, button, .owner, .jotmark, .tip';
+const ATOMS = 'input, button, .owner, .jotmark, .tip, .aq, .unsure';
 // Blocks with links (an autolink is "<scheme:...>" or "<a@b>") or code stay read-only until the
 // serializer round-trips them. Other "<" is text (no HTML in notes), so "<You>" stays editable.
 const UNSAFE = /\]\(|<[^<>\s]*[:@][^<>\s]*>|`/;
@@ -23,7 +25,7 @@ function rawOf(node: Node): string {
     if (n.nodeType === Node.TEXT_NODE) return n.nodeValue ?? '';
     if (!(n instanceof HTMLElement)) return '';
     if (n.matches('button.src')) return `[${n.textContent}]`;
-    if (n.matches('input, .owner, .jotmark, .tip')) return '';
+    if (n.matches('input, .owner, .jotmark, .tip, .aq, .unsure')) return '';
     if (n.matches('b, strong')) return `**${rawOf(n)}**`;
     if (n.matches('em, i')) return `*${rawOf(n)}*`;
     if (n.matches('br')) return '\n';
@@ -50,6 +52,15 @@ function atEdge(el: HTMLElement, last: boolean) {
   if (last) { r.setStart(sel.focusNode, sel.focusOffset); r.setEnd(el, el.childNodes.length); } else { r.setStart(el, 0); r.setEnd(sel.focusNode, sel.focusOffset); }
   const f = r.cloneContents(); f.querySelectorAll(ATOMS).forEach(x => x.remove()); return !f.textContent?.replace(/​/g, '').trim();
 }
+const esc = (text: string) => text.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+// A note line as the notes writer lists an unconfirmed one (verify::claim): no list mark or checkbox.
+export const claimOf = (text: string) => text.trim().replace(/^[-*] (?:\[[ xX]\] )?/, '').trim();
+// The time a line cites: its last [m:ss], in ms; -1 for none.
+const citedMs = (text: string) => { const all = [...text.matchAll(/\[(\d+):(\d{2})\]/g)], t = all[all.length - 1]; return t && Number(t[2]) < 60 ? (Number(t[1])*60+Number(t[2]))*1000 : -1; };
+
+/** Verified notes (SPEC 7.13): `lines` are the unconfirmed claims; Keep and Remove in Quick check. */
+export type Check = {lines: string[]; keep: (claim: string) => void; remove: (claim: string, line: number, decision: boolean) => void};
+
 const editableOf = (block: HTMLElement) => block.querySelector<HTMLElement>(':scope .task-text, :scope .jot-text') ?? block;
 const kindOf = (block: HTMLElement): Kind => (block.dataset.kind as Kind) ?? (block.tagName === 'LI' ? 'li' : 'p');
 
@@ -57,7 +68,7 @@ const kindOf = (block: HTMLElement): Kind => (block.dataset.kind as Kind) ?? (bl
  *  keeps its original's look (`labelOf`) and a tick goes to notes.md (`onToggle`, none when stale). */
 export type Translated = {hint:string; labelOf:(line:number)=>string|undefined; onToggle?:(line:number, done:boolean)=>Promise<void>};
 
-export default function NotesView({id, markdown, locked=false, translated, onChange, onError, durationMs, onSeek}: {id:string; markdown:string; locked?:boolean; translated?:Translated; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void}) {
+export default function NotesView({id, markdown, locked=false, translated, onChange, onError, durationMs, onSeek, transcript='', check}: {id:string; markdown:string; locked?:boolean; translated?:Translated; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void; transcript?:string; check?:Check}) {
   const [saving, setSaving] = useState(false);
   // The @ picker (SPEC 7.11): the one way to assign. `at` is the "@" being typed: its text node,
   // offset and the query after it; the menu lists You, then owners already in these notes.
@@ -241,10 +252,19 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
     catch(error) { onError(String(error)); }
     finally { setSaving(false); }
   }
+  // The line each task or decision rests on, looked up by its time (mockup: shown on hover or focus).
+  const said = new Map<number, {speaker: string; text: string}>();
+  for (const line of transcriptLines(transcript, [])) if (line.ms !== null && !said.has(line.ms)) said.set(line.ms, line);
+  const quoteOf = (text: string) => said.get(citedMs(text));
+  const saidLabel = (speaker: string) => !speaker ? '' : speaker === 'You' ? `<span class="said me">${s.youSaid}</span>` : `<span class="said them">${s.theySaid}</span>`;
+  const quoteInner = (text: string) => { const q = quoteOf(text); return q ? `${saidLabel(q.speaker)}<q>${esc(q.text)}</q>` : ''; };
+  const quoteHtml = (text: string) => quoteOf(text) ? `<span class="aq rcpt" contenteditable="false">${quoteInner(text)}</span>` : '';
+  const marked = (text: string) => !translated && !!check?.lines.includes(claimOf(text));
+  const unsureHtml = `<span class="unsure" contenteditable="false" title="${esc(s.unsureTitle)}">${esc(s.unsure)}</span>`;
   const all = markdown.split('\n');
   const editable = (a:number, b:number) => locked || translated || all.slice(a, b).some(line => UNSAFE.test(line)) ? '0' : '1';
   // A section's non-task text, rendered with its real line numbers so each block knows its range.
-  const body = (lines:{text:string; line:number}[], skip:(text:string)=>boolean) => {
+  const body = (lines:{text:string; line:number}[], skip:(text:string)=>boolean, decisions = false) => {
     if (!lines.length) return '';
     const first = lines[0].line, text = Array(lines[lines.length-1].line - first + 1).fill('');
     lines.forEach(line => { if (!skip(line.text)) text[line.line - first] = line.text; });
@@ -253,16 +273,27 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
     // lines after a list item as part of it, and here those can stand for a skipped task or the
     // hidden transcript copy, which an edit must never rewrite.
     const own = new Set(lines.filter(line => !skip(line.text)).map(line => line.line));
-    return html.replace(/<(li|p) data-lines="(\d+),(\d+)">/g, (tag, name, a, b) => {
+    const blocks = html.replace(/<(li|p) data-lines="(\d+),(\d+)">/g, (tag, name, a, b) => {
       let end = +a + 1; while (end < +b && own.has(end)) end++;
       // Blocks with nested lists, links, HTML or code stay read-only (see UNSAFE).
       return `<${name} data-lines="${a},${end}" data-editable="${editable(+a, end)}">`;
     });
+    // A decision is one flat bullet: its mark and quote go at the end of its <li>.
+    return decisions ? blocks.replace(/(<li data-lines="(\d+),\d+"[^>]*>)([\s\S]*?)<\/li>/g, (whole, open, a, inner) => `${open}${inner}${marked(all[+a]) ? unsureHtml : ''}${quoteHtml(all[+a])}</li>`) : blocks;
   };
   const inline = (text:string) => renderNotes(text, onSeek ? durationMs : 0);
   // "Show all" sits once, on the first section with tasks (Action items), as in the mockup.
   const sections = noteSections(markdown), firstTasks = sections.findIndex(section => section.lines.some(line => taskLine(line.text)));
-  return <div ref={box} className="notes" tabIndex={0} role="document" aria-label={translated ? s.notesTranslatedLabel : locked ? s.notesLockedLabel : s.notesLabel} onClick={event=>{const chip=(event.target as HTMLElement).closest<HTMLButtonElement>('button.src');if(chip){event.preventDefault();onSeek?.(Number(chip.dataset.ms));}}}>{sections.map((section,index)=>{
+  // Quick check (mockup): the unconfirmed lines, at most 5, after Action items; editable notes only.
+  const rows = check && !locked && !translated ? sections.flatMap(section => CHECKED.test(section.title) ? section.lines.filter(line => /^\s*[-*] /.test(line.text) && check.lines.includes(claimOf(line.text))).map(line => ({line: line.line, claim: claimOf(line.text), decision: DECISIONS.test(section.title)})) : []).slice(0, 5) : [];
+  const checkAt = Math.max(0, sections.findIndex(section => /^action items$/i.test(section.title)) + 1);
+  const quickCheck = rows.length > 0 && check && <section key="check" className="suggest" aria-label={s.quickCheck}><h4>{s.quickCheck}</h4><div className="cgroup"><b>{s.unsure}</b><span className="tip">{s.unsureTip}</span>{rows.map(row => {
+    const ms = citedMs(row.claim), q = said.get(ms), kind = row.decision ? s.unsureDecision : s.unsureTask, time = ms >= 0 ? timeLabel(ms) : '';
+    return <div className="sg" key={row.line}><span className="ctask">{row.claim.replace(/\s*\[\d+:\d{2}\]\s*$/, '').replace(/\*\*/g, '')}</span><span className="rcpt"><span className="tip">{time ? s.unsureFrom.replace('{kind}', kind).replace('{time}', time) : s.unsureNoTime.replace('{kind}', kind)}</span>{q && <q>{q.text}</q>}{time && onSeek && ms <= durationMs && <button type="button" className="src" data-ms={ms} title={`Play from ${time}`}>{time}</button>}</span>
+      <span className="field"><button type="button" className="btn sm" onClick={() => check.keep(row.claim)}>{s.keep}</button><button type="button" className="btn sm ghost" onClick={() => check.remove(row.claim, row.line, row.decision)}>{s.remove}</button></span></div>;
+  })}</div></section>;
+  const withCheck = (out: React.ReactNode[]) => { if (quickCheck) out.splice(Math.min(checkAt, out.length), 0, quickCheck); return out; };
+  return <div ref={box} className="notes" tabIndex={0} role="document" aria-label={translated ? s.notesTranslatedLabel : locked ? s.notesLockedLabel : s.notesLabel} onClick={event=>{const chip=(event.target as HTMLElement).closest<HTMLButtonElement>('button.src');if(chip){event.preventDefault();onSeek?.(Number(chip.dataset.ms));}}}>{withCheck(sections.map((section,index)=>{
     const tasks = section.lines.filter(line=>{const t=taskLine(line.text);return t&&(!ownerFilter||(t.owner==='Me'?'You':t.owner)===ownerFilter);});
     const kind = translated?.labelOf(section.line) ?? section.title;
     const Heading = LABELS.test(kind) ? 'h3' : 'h4';
@@ -283,10 +314,10 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
               onInput={event=>{event.currentTarget.size=Math.max(3,event.currentTarget.value.length);}}
               onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void fixName(renaming.name,line.line,event.currentTarget.value);}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setRenaming(null);}}}
               onBlur={event=>void fixName(renaming.name,line.line,event.currentTarget.value)}/>
-          : <button type="button" className={`owner ${task.owner==='You'||task.owner==='Me'?'me':''}`} aria-haspopup="menu" aria-pressed={ownerFilter===(task.owner==='Me'?'You':task.owner)} onClick={event=>{const r=event.currentTarget.getBoundingClientRect();const name=task.owner==='Me'?'You':task.owner;setOwnerMenu(ownerMenu?.line===line.line?null:{name,line:line.line,x:r.left,y:r.bottom+4});}}>{task.owner==='Me'?'You':task.owner}</button>)}<span className="task-text" dangerouslySetInnerHTML={{__html:inline(task.text)}}/></span></li>;
-      })}</ul><div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!taskLine(text))}}/></> : <div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!ownerFilter&&!!taskLine(text))}}/>}
+          : <button type="button" className={`owner ${task.owner==='You'||task.owner==='Me'?'me':''}`} aria-haspopup="menu" aria-pressed={ownerFilter===(task.owner==='Me'?'You':task.owner)} onClick={event=>{const r=event.currentTarget.getBoundingClientRect();const name=task.owner==='Me'?'You':task.owner;setOwnerMenu(ownerMenu?.line===line.line?null:{name,line:line.line,x:r.left,y:r.bottom+4});}}>{task.owner==='Me'?'You':task.owner}</button>)}<span className="task-text" dangerouslySetInnerHTML={{__html:inline(task.text)}}/>{marked(line.text)&&<span className="unsure" contentEditable={false} title={s.unsureTitle}>{s.unsure}</span>}</span>{quoteOf(task.text)&&<span className="aq rcpt" contentEditable={false} dangerouslySetInnerHTML={{__html:quoteInner(task.text)}}/>}</li>;
+      })}</ul><div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!taskLine(text))}}/></> : <div dangerouslySetInnerHTML={{__html:body(section.lines, text=>!!ownerFilter&&!!taskLine(text), DECISIONS.test(kind))}}/>}
     </section>;
-  })}<p className="tip notes-hint">{translated ? translated.hint : locked ? s.lockedHint : s.editHint}</p>
+  }))}<p className="tip notes-hint">{translated ? translated.hint : locked ? s.lockedHint : s.editHint}</p>
     {mention && <PeoplePicker options={people(mention.query)} known={known()} index={mention.index} x={mention.x} y={mention.y} onPick={pick}/>}
     {ownerMenu && <div className="mention gmenu" role="menu" aria-label={ownerMenu.name} style={{left: ownerMenu.x, top: ownerMenu.y}}>
       <button type="button" role="menuitem" onClick={() => { setOwnerFilter(ownerFilter === ownerMenu.name ? null : ownerMenu.name); setOwnerMenu(null); }}>{ownerFilter === ownerMenu.name ? s.showEveryone : s.showOnly.replace('{name}', ownerMenu.name)}</button>

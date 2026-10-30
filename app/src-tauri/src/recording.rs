@@ -345,6 +345,7 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 language: None,
                 notes_language: None,
                 apps: vec![],
+                unconfirmed: vec![],
             },
         )?;
     }
@@ -407,7 +408,7 @@ fn finish(
         } else {
             String::new()
         };
-        let title = summarize::notes(
+        let written = summarize::notes(
             &dir.join("notes").to_string_lossy(),
             &text,
             &mine,
@@ -416,7 +417,8 @@ fn finish(
             &stage,
         )?;
         let mut metadata = library::summary(root, &record.id)?;
-        metadata.titled(title);
+        metadata.titled(written.title);
+        metadata.unconfirmed = written.unconfirmed;
         metadata.language = heard.language;
         metadata.notes_language = config::notes_language();
         metadata.notes_ms = Some(started.elapsed().as_millis() as u64);

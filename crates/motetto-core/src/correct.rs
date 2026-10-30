@@ -59,7 +59,7 @@ fn accept<'a>(original: &[&str], answer: &'a str) -> Option<Vec<&'a str>> {
 /// Share of the answer's words that already appear in the original (case and punctuation aside).
 /// Prefixes are left out (they always match), and Chinese, Japanese and Korean characters count
 /// one by one, since those languages don't put spaces between words.
-fn kept_words(original: &[&str], answer: &[&str]) -> f64 {
+pub(crate) fn kept_words(original: &[&str], answer: &[&str]) -> f64 {
     let words = |lines: &[&str]| -> Vec<String> {
         lines
             .iter()

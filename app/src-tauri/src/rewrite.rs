@@ -190,7 +190,7 @@ pub(crate) fn regenerate(
             of: 1,
             progress: None,
         });
-        let title = motetto_core::summarize::notes(
+        let wrote = motetto_core::summarize::notes(
             &staging.join("notes").to_string_lossy(),
             &transcript,
             &notes,
@@ -221,7 +221,8 @@ pub(crate) fn regenerate(
         let mut summary = library::summary(root, id)?;
         summary.notes_ms = Some(started.elapsed().as_millis() as u64);
         summary.spellings = spellings;
-        summary.titled(title);
+        summary.titled(wrote.title);
+        summary.unconfirmed = wrote.unconfirmed;
         summary.language = language;
         summary.notes_language = match write_in {
             Some("same_as_call") => None,

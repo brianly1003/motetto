@@ -24,4 +24,10 @@ notes_language: string | null,
  * Call apps the meeting was recorded from (Zoom, Microsoft Teams...); empty when none was
  * detected, for imports and meetings saved before it was kept.
  */
-apps: Array<string>, };
+apps: Array<string>, 
+/**
+ * Action items and decisions the call doesn't seem to support, as their lines read without
+ * the list mark and checkbox (`verify::claim`); shown as "Couldn't confirm in the call" until
+ * Keep or Remove in Quick check (SPEC 7.13). Written with the notes.
+ */
+unconfirmed: Array<string>, };

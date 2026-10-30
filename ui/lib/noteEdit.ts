@@ -31,6 +31,20 @@ function lines(kind: Kind, first: string, body: string) {
   return [lead(kind, first) + one];
 }
 
+// Remove in Quick check (SPEC 7.13): the line goes. An Action items section left empty says
+// "- None", as the notes writer does; any other section left empty goes with its heading.
+export function removeLine(markdown: string, line: number) {
+  const all = markdown.split("\n"), heading = (text: string) => /^#{1,6}\s/.test(text);
+  let head = line; while (head >= 0 && !heading(all[head])) head--;
+  all.splice(line, 1);
+  if (head < 0) return all.join("\n");
+  let end = head + 1; while (end < all.length && !heading(all[end]) && !all[end].includes("<details>")) end++;
+  if (all.slice(head + 1, end).some(text => text.trim())) return all.join("\n");
+  if (/^#{1,6}\s+action items\s*$/i.test(all[head])) all.splice(head + 1, 0, "- None");
+  else all.splice(head, end - head);
+  return all.join("\n");
+}
+
 // Blank lines that end the range (markdown-it counts them in a list item) stay where they are.
 function splice(markdown: string, start: number, end: number, replacement: (old: string[]) => string[]) {
   const all = markdown.split("\n"), old = all.slice(start, end);

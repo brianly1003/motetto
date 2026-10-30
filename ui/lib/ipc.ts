@@ -163,6 +163,7 @@ export const meetingAction = (id: string, action: "reveal" | "regenerate" | "ret
 export const deletedMeetings = () => invoke<MeetingSummary[]>("deleted_meetings");
 export const renameMeeting = (id: string, title: string) => invoke<MeetingSummary>("rename_meeting", { id, title });
 export const setLocked = (id: string, locked: boolean) => invoke<MeetingSummary>("set_locked", { id, locked });
+export const setUnconfirmed = (id: string, lines: string[]) => invoke<MeetingSummary>("set_unconfirmed", { id, lines });
 
 import type { MeetingMedia } from './bindings/MeetingMedia';
 export async function meetingMedia(id: string): Promise<MeetingMedia> {

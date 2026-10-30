@@ -1050,3 +1050,29 @@ input.sp-name:hover { background: var(--surface-2); }
 .sidebar-control:hover .sidebar-tip, .sidebar-control:has(.sidebar-toggle:focus-visible) .sidebar-tip { visibility: visible; opacity: 1; transform: none; transition-delay: 300ms; }
 .window-titlebar .sidebar-control[data-tip-off] .sidebar-tip { visibility: hidden; opacity: 0; transition: none; }
 @media (prefers-reduced-motion: reduce) { .shell, .sidebar, .sidebar-tip { transition: none; } }
+
+/* Verified notes (SPEC 7.13; mockup .hint, .aq, .rcpt, .said, .suggest): the line a task or decision
+   rests on shows on hover or focus; a line the call doesn't support carries the amber mark and a row
+   in Quick check. */
+.notes .unsure { font-size: 12px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 6px; padding: 1px 7px; margin-left: 4px; white-space: nowrap; }
+.notes .rcpt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12.5px; color: var(--ink-2); }
+.notes .rcpt q { font: italic 400 13px/1.45 var(--font-doc); color: var(--ink-2); }
+.notes .said { font: 500 10.5px/1.7 var(--font-data); padding: 0 6px; border-radius: 5px; white-space: nowrap; }
+.notes .said.me { background: var(--me-soft); color: var(--voice-me); } .notes .said.them { background: var(--them-soft); color: var(--voice-them); }
+.notes li:has(> .aq) { position: relative; }
+/* A card under the line, over the notes: showing it never moves a line (owner 2026-10-30: inline it
+   pushed the list down and flickered as the pointer crossed it). Shown after a short pause. */
+.notes .aq { position: absolute; z-index: 20; top: calc(100% + 2px); left: 28px; width: max-content; max-width: min(60ch, calc(100% - 28px)); display: flex; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); box-shadow: var(--shadow); pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .12s, visibility 0s .12s; }
+.notes li:hover > .aq, .notes li:focus-within > .aq { opacity: 1; visibility: visible; transition: opacity .12s .35s, visibility 0s .35s; }
+.notes ul:not(.todo) > li > .aq { left: 0; max-width: min(60ch, 100%); }
+.notes .editing > .aq { display: none; }
+@media (prefers-reduced-motion: reduce) { .notes .aq, .notes li:hover > .aq, .notes li:focus-within > .aq { transition: none; } }
+.notes .aq .said { align-self: baseline; }
+.notes .suggest { border: 1px dashed var(--line-2); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; background: var(--surface-2); }
+.notes .suggest h4 { margin: 0; font: 600 13px var(--font-ui); }
+.notes .suggest .sg { display: grid; gap: 6px; }
+.notes .suggest q { font: italic 400 14px/1.5 var(--font-doc); }
+.notes .suggest .cgroup { display: grid; gap: 8px; }
+.notes .suggest .cgroup > b { font: 600 12.5px var(--font-ui); color: var(--ink-2); }
+.notes .suggest .ctask { font-weight: 500; }
+.notes .suggest .rcpt q { font-size: 13px; }

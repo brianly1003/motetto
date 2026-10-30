@@ -563,6 +563,40 @@ mod tests {
         stop_server(false);
     }
 
+    #[cfg(unix)]
+    /// The support check (SPEC 7.13) on the real notes model: a paraphrase, a translation and a
+    /// line the cited one doesn't say. Only the last may be marked.
+    #[test]
+    #[ignore = "needs the bundled llama-server and MOTETTO_TEST_GGUF"]
+    fn support_check_on_the_real_model() {
+        let dir = std::env::temp_dir().join(format!("motetto-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let built = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/binaries"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("llama-server-"))
+            .unwrap();
+        let _ = std::os::unix::fs::symlink(built.path(), dir.join("llama-server"));
+        tools::configure_bundled(dir);
+        let model = std::env::var("MOTETTO_TEST_GGUF").unwrap();
+        let call = "[00:48] Me: Then let's go with Provider B for the launch.\n\
+            [00:53] Them: Agreed, Provider B it is.\n\
+            [01:02] Them: Can you write the integration plan?\n\
+            [01:06] Me: Sure, I'll write the integration plan by Friday.\n\
+            [01:15] Them: I'll ask Team X whether they need the refund reports.\n";
+        let notes = "### Action items\n- [ ] You: Draft how we connect to the provider, due end of week [01:06]\n\
+            - [ ] Them: Cancel the contract with Provider A next month [01:15]\n\
+            ### Decisions\n- Chọn nhà cung cấp B cho đợt ra mắt [00:48]\n";
+        let found = motetto_core::verify::unconfirmed(notes, call, |prompt| {
+            ask_with(&model, prompt).map_err(|e| e.to_string().into())
+        });
+        stop_server(false);
+        assert_eq!(
+            found,
+            ["Them: Cancel the contract with Provider A next month [01:15]"]
+        );
+    }
+
     #[test]
     #[ignore = "needs the bundled llama-server and MOTETTO_TEST_GGUF"]
     fn server_killed_on_drop() {

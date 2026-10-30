@@ -134,4 +134,8 @@ export const strings = {
   scriptsStep3: "Present", scriptsStep3Body: "The strip sits under the camera, hidden from your screen share.",
   scriptEdited: "Edited {when} · {n} sections", scriptEditedOne: "Edited {when} · 1 section", scriptEditedOn: "Edited {when}", deleteScript: "Delete script", untitledScript: "Untitled script", newScriptEmpty: "“{name}” is still empty. Write in it before starting another.", spStillEmpty: "This script is still empty. Start writing here, then you can make another.",
   notesModelPending: "The notes model is still downloading; notes start working when it's done.",
+  // Verified notes (SPEC 7.13, mockup "Verified notes · proposed").
+  youSaid: "You said", theySaid: "They said", unsure: "Couldn't confirm in the call", unsureTitle: "The line at this time doesn't say this. Check it in Quick check.",
+  quickCheck: "Quick check", unsureTip: "The notes say it, but the line they point to doesn't.", unsureFrom: "{kind} from {time}, where the call says", unsureNoTime: "{kind} with no line of the call given",
+  unsureTask: "Task", unsureDecision: "Decision", keep: "Keep", remove: "Remove", keptToast: "Kept. It won't be marked again.", removedTask: "Removed from the action items.", removedDecision: "Removed from the decisions.",
 };

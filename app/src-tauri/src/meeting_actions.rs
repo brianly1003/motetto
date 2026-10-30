@@ -97,6 +97,15 @@ pub fn set_locked(
     Ok(summary)
 }
 
+#[tauri::command]
+pub fn set_unconfirmed(
+    app: tauri::AppHandle,
+    id: String,
+    lines: Vec<String>,
+) -> Result<library::MeetingSummary, String> {
+    crate::bookmarks::set_unconfirmed(&app.state::<Library>().root, &id, lines)
+}
+
 fn run(root: &Path, id: &str, action: &str) -> Result<(), String> {
     match action {
         "delete" => move_meeting(root, id, false),

@@ -97,6 +97,30 @@ pub fn set_locked(root: &Path, id: &str, locked: bool) -> Result<MeetingSummary,
     Ok(value)
 }
 
+/// Keep or Remove in Quick check (SPEC 7.13): the lines still marked "Couldn't confirm in the call".
+/// Undo puts a line back, so any list is taken, within the notes' own limits.
+pub fn set_unconfirmed(
+    root: &Path,
+    id: &str,
+    lines: Vec<String>,
+) -> Result<MeetingSummary, String> {
+    if lines.len() > 200 || lines.iter().any(|l| l.chars().count() > 500) {
+        return Err("Too many or too long lines to keep".into());
+    }
+    let _guard = WRITER
+        .lock()
+        .map_err(|_| "Meeting storage is unavailable")?;
+    let mut value = library::summary(root, id)?;
+    if value.locked {
+        return Err(LOCKED.into());
+    }
+    if value.unconfirmed != lines {
+        value.unconfirmed = lines;
+        write(root, &value)?;
+    }
+    Ok(value)
+}
+
 // A meeting without metadata (an older import) is unlocked; unreadable metadata refuses the edit.
 pub fn locked(root: &Path, id: &str) -> Result<bool, String> {
     if !library::folder(root, id)?.join("meeting.json").exists() {
@@ -131,6 +155,27 @@ fn write(root: &Path, value: &MeetingSummary) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unconfirmed_lines_are_saved_and_locked_notes_refuse_them() {
+        let root = std::env::temp_dir().join(format!(
+            "motetto-unconfirmed-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("123")).unwrap();
+        fs::write(
+            root.join("123/meeting.json"),
+            r#"{"id":"123","title":"Call","created_ms":0,"status":"Ready","unconfirmed":["A [00:01]","B"]}"#,
+        )
+        .unwrap();
+        let saved = set_unconfirmed(&root, "123", vec!["B".into()]).unwrap();
+        assert_eq!(saved.unconfirmed, ["B"]);
+        assert_eq!(library::summary(&root, "123").unwrap().unconfirmed, ["B"]);
+        assert!(set_unconfirmed(&root, "123", vec!["x".repeat(501)]).is_err());
+        set_locked(&root, "123", true).unwrap();
+        assert_eq!(set_unconfirmed(&root, "123", vec![]).unwrap_err(), LOCKED);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn stale_worker_updates_keep_marks_and_old_meetings_load() {
         let root = std::env::temp_dir().join(format!(

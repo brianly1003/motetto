@@ -45,6 +45,11 @@ pub struct MeetingSummary {
     /// detected, for imports and meetings saved before it was kept.
     #[serde(default)]
     pub apps: Vec<String>,
+    /// Action items and decisions the call doesn't seem to support, as their lines read without
+    /// the list mark and checkbox (`verify::claim`); shown as "Couldn't confirm in the call" until
+    /// Keep or Remove in Quick check (SPEC 7.13). Written with the notes.
+    #[serde(default)]
+    pub unconfirmed: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -311,6 +316,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         language: None,
         notes_language: None,
         apps: vec![],
+        unconfirmed: vec![],
     }
 }
 
@@ -435,6 +441,7 @@ pub fn import(
         language: None,
         notes_language: None,
         apps: vec![],
+        unconfirmed: vec![],
     };
     let dir = root.join(&summary.id);
     fs::create_dir(&dir).map_err(|e| e.to_string())?;
@@ -477,7 +484,7 @@ pub fn import(
             of: 1,
             progress: None,
         });
-        let title = motetto_core::summarize::notes(
+        let written = motetto_core::summarize::notes(
             &dir.join("notes").to_string_lossy(),
             &notes_input,
             "",
@@ -485,7 +492,8 @@ pub fn import(
             None,
             &report,
         )?;
-        summary.titled(title);
+        summary.titled(written.title);
+        summary.unconfirmed = written.unconfirmed;
         summary.notes_language = motetto_core::config::notes_language();
         summary.notes_ms = Some(started.elapsed().as_millis() as u64);
         summary.spellings = spellings;
@@ -674,6 +682,7 @@ mod tests {
                     language: None,
                     notes_language: None,
                     apps: vec![],
+                    unconfirmed: vec![],
                 },
             )
             .unwrap();
@@ -720,6 +729,7 @@ mod tests {
                 language: None,
                 notes_language: None,
                 apps: vec![],
+                unconfirmed: vec![],
             };
             save(&root, &summary).unwrap();
         }
