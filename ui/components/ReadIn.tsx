@@ -4,7 +4,6 @@ import type { Meeting } from "@/lib/bindings/Meeting";
 import * as ipc from "@/lib/ipc";
 import { englishName, matches, nativeName, NOTE_LANGUAGES, offerLanguage, originalNotesLanguage, systemLanguages, withTicks } from "@/lib/languages";
 import { strings as s } from "@/lib/strings";
-import { Alert } from "./Alert";
 import { MenuIcon } from "./MenuIcon";
 
 // Read in (owner 2026-10-26): notes.md stays the one you edit; each language is a saved
@@ -20,6 +19,11 @@ const recent = (): string[] => { try { return JSON.parse(stored(RECENT) ?? "[]")
 
 export function TranslateIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 3.5h6.5M5.25 2v1.5M7.2 3.5C6.6 6 4.9 7.9 2.5 8.8M3.9 5.6c.8 1.4 2 2.5 3.4 3.1"/><path d="m8.6 14 2.7-6.3L14 14M9.5 12h3.6"/></svg>;
+}
+
+// The Alert component's warning triangle, drawn at the bar's 16 px.
+function WarningIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M10.3 3.9 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg>;
 }
 
 export type ReadIn = ReturnType<typeof useReadIn>;
@@ -212,10 +216,19 @@ export function ReadInBar({ readIn, onWriteIn }: { readIn: ReadIn; onWriteIn?: (
       <i className="readin-progress" style={run.of ? { ["--done" as string]: `${(run.part - 1) / run.of * 100}%`, ["--next" as string]: `${run.part / run.of * 100}%` } : undefined} aria-hidden="true"/>
     </div>;
   }
-  if (readIn.failed) return <Alert variant="danger" role="alert" title={s.translateFailed} actions={<><button className="doc-action" onClick={() => readIn.translate(readIn.failed!.code)}>{s.translateRetry}</button><button className="doc-action ghost" onClick={readIn.clearFailed}>{s.cancel}</button></>}>{readIn.failed.message}</Alert>;
+  // A failed or out-of-date translation keeps the bar's shape and place (owner 2026-10-30), tinted.
+  if (readIn.failed) return <div className="readin-bar failed" role="alert">
+    <WarningIcon/><div className="readin-text"><b>{s.translateFailed}</b><span className="readin-sub">{readIn.failed.message}</span></div>
+    <button type="button" className="doc-action" onClick={() => readIn.translate(readIn.failed!.code)}>{s.translateRetry}</button>
+    <button type="button" className="doc-action ghost" onClick={readIn.clearFailed}>{s.cancel}</button>
+  </div>;
   if (readIn.view && readIn.markdown !== null) {
     const name = nativeName(readIn.view);
-    if (readIn.stale) return <Alert variant="warning" title={s.staleTitle} actions={<><button className="doc-action" onClick={() => readIn.translate(readIn.view!)}>{s.updateTranslation}</button><button className="doc-action ghost" onClick={() => readIn.show(null)}>{s.showOriginal}</button></>}>{s.staleBody}</Alert>;
+    if (readIn.stale) return <div className="readin-bar stale" role="status">
+      <WarningIcon/><div className="readin-text"><b>{s.staleTitle}</b><span className="readin-sub">{s.staleBody}</span></div>
+      <button type="button" className="doc-action" onClick={() => readIn.translate(readIn.view!)}>{s.updateTranslation}</button>
+      <button type="button" className="doc-action ghost" onClick={() => readIn.show(null)}>{s.showOriginal}</button>
+    </div>;
     return <div className="readin-bar" role="status">
       <TranslateIcon/><div className="readin-text"><b lang={readIn.view}>{name}</b><span className="readin-sub">{s.translatedFrom}</span></div>
       {onWriteIn && <button type="button" className="doc-action ghost" title={s.writeInOfferTip.replace("{lang}", name)} onClick={() => onWriteIn(readIn.view!)}>{s.writeInOffer.replace("{lang}", name)}</button>}

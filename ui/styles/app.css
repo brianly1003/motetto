@@ -177,10 +177,8 @@ button.srcchip:hover { background: var(--surface-2); color: var(--ink-1); border
 .alert-title { font-size: 13px; line-height: 20px; font-weight: 600; }
 .alert-description { margin-top: 4px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
 .alert-actions { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-@media (min-width: 1000px) {
-  .banner.alert:has(.alert-actions) { grid-template-columns: 16px minmax(0, 1fr) auto; }
-  .alert-actions { grid-column: 3; grid-row: 1; }
-}
+/* Buttons go under the text, never beside it: beside it they squeezed the message into a narrow
+   column (owner 2026-10-30). Same rule for the Read in bars (.readin-bar:has(.readin-sub)). */
 
 .banner p { margin: 5px 0; }
 .muted, .list-empty { color: var(--ink-2); }
@@ -753,9 +751,19 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .readin-sub { display: block; font-size: 12px; color: var(--ink-3); }
 .readin-bar .doc-action svg { width: 14px; height: 14px; }
 .readin-bar.quiet { border-style: dashed; background: transparent; }
+/* A bar with a second line keeps the text full width and puts its buttons on the row below, lined
+   up with the text (owner 2026-10-30: beside it they squeezed the message). One-line bars stay one row. */
+.readin-bar:has(.readin-sub) { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; }
+.readin-bar:has(.readin-sub) > svg { margin-top: 2px; }
+.readin-bar:has(.readin-sub) > .readin-text { flex: 1 0 calc(100% - 25px); }
+.readin-bar:has(.readin-sub) > .readin-text + * { margin-left: 25px; }
 .readin-bar.offer, .readin-bar.running { border-color: color-mix(in srgb, var(--voice-me) 28%, var(--line)); background: color-mix(in srgb, var(--voice-me) 4%, var(--surface-1)); }
 .readin-bar.offer > svg, .readin-bar.running > svg { color: var(--voice-me); }
 .readin-bar.running > svg { animation: pulse 1.6s ease-in-out infinite; }
+/* Out of date and failed: the offer's shape and place, in attention amber or recording red. */
+.readin-bar.stale { border-color: color-mix(in srgb, var(--attention) 30%, var(--line)); background: color-mix(in srgb, var(--attention) 4%, var(--surface-1)); }
+.readin-bar.failed { border-color: color-mix(in srgb, var(--rec) 30%, var(--line)); background: color-mix(in srgb, var(--rec) 4%, var(--surface-1)); }
+.readin-bar.stale > svg { color: var(--attention); } .readin-bar.failed > svg { color: var(--rec); }
 /* Done parts solid, the part being written light with a sweep; before the first part, the sweep alone. */
 .readin-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--voice-me) var(--done, 0%), color-mix(in srgb, var(--voice-me) 30%, transparent) var(--done, 0%) var(--next, 100%), transparent var(--next, 100%)); }
 .readin-progress::after { content: ""; position: absolute; inset: 0; width: 30%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--voice-me) 80%, transparent), transparent); animation: working 1.4s ease-in-out infinite; transform: translateX(-100%); }

@@ -88,7 +88,7 @@ async (page) => {
   await p.getByRole('checkbox').first().check();
   await p.waitForFunction(() => window.calls.includes('tick:1:true'));
   if (!await p.getByRole('checkbox').first().isChecked()) fails.push('tick not shown');
-  if (await p.locator('.readin-col .alert[data-variant="warning"]').count()) fails.push('a tick made it stale');
+  if (await p.locator('.readin-col .readin-bar.stale').count()) fails.push('a tick made it stale');
 
   // Copy › Action items copies what is shown.
   await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -123,9 +123,16 @@ async (page) => {
   // Back on the first meeting it opens in Melayu; an edit to the notes makes it out of date.
   await p.evaluate(() => { window.meetings[1].notes_md = window.meetings[1].notes_md.replace('Planned the launch.', 'Planned the launch and the beta.'); });
   await p.getByRole('button', { name: /Launch sync/ }).first().click();
-  await p.locator('.readin-col .alert[data-variant="warning"]').waitFor();
-  if (!/The notes changed after this translation/.test(await p.locator('.readin-col .alert[data-variant="warning"]').innerText())) fails.push('stale alert text');
+  await p.locator('.readin-col .readin-bar.stale').waitFor();
+  if (!/The notes changed after this translation/.test(await p.locator('.readin-col .readin-bar.stale').innerText())) fails.push('stale alert text');
   if (!await p.getByRole('checkbox').first().isDisabled()) fails.push('ticks allowed on a stale translation');
+  // Same shape and place as the offer (owner 2026-10-30), not a separate card.
+  const at = await p.locator('.readin-col .readin-bar.stale').evaluate(e => { const c = getComputedStyle(e), r = e.getBoundingClientRect(), notes = document.querySelector('.readin-col .notes').getBoundingClientRect(); return [r.left - notes.left, c.borderRadius, c.paddingLeft, c.fontSize]; });
+  if (JSON.stringify(at) !== JSON.stringify([0, '10px', '12px', '12.5px'])) fails.push('stale bar shape: ' + JSON.stringify(at));
+  await p.screenshot({ path: '.playwright-out/read-in-stale.png' });
+  await p.emulateMedia({ colorScheme: 'dark' });
+  await p.screenshot({ path: '.playwright-out/read-in-stale-dark.png' });
+  await p.emulateMedia({ colorScheme: 'light' });
 
   // Original in the list stops reading in Melayu.
   await button.click();
