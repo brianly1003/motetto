@@ -186,7 +186,7 @@ impl Drop for Server {
 mod tests {
     use super::*;
     #[test]
-    #[ignore = "requires whisper-server, an installed local model and MOTETTO_TEST_SPEECH WAV"]
+    #[ignore = "requires whisper-server, WHISPER_MODEL, WHISPER_VAD_MODEL and MOTETTO_TEST_SPEECH WAV"]
     fn managed_server_transcribes_synthetic_speech_and_reaps_child() {
         let source = std::env::var("MOTETTO_TEST_SPEECH").unwrap();
         let samples = hound::WavReader::open(source)
@@ -195,7 +195,14 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let stop = Default::default();
-        let mut server = Server::start(&stop).unwrap();
+        // The models e2e.sh exports: a global ~/.config/motetto/.env would win over them in
+        // `Server::start`, and cargo runs this from the crate folder, away from e2e's ./.env.
+        let mut server = Server::start_with(
+            &stop,
+            std::env::var("WHISPER_MODEL").unwrap(),
+            std::env::var("WHISPER_VAD_MODEL").ok(),
+        )
+        .unwrap();
         // Nonzero background noise passes the preview amplitude gate but VAD finds no speech.
         assert!(
             server
