@@ -10,7 +10,7 @@ use std::{
     process::Stdio,
 };
 use symphonia::core::{
-    formats::{TrackType, probe::Hint},
+    formats::{FormatReader, TrackType, probe::Hint},
     io::MediaSourceStream,
 };
 
@@ -41,23 +41,36 @@ fn to_wav_with(source: &Path, destination: &Path, measured: bool) -> Result<(), 
     })
 }
 
+fn reader(source: &Path) -> Result<Box<dyn FormatReader>, Box<dyn Error>> {
+    let stream = MediaSourceStream::new(Box::new(File::open(source)?), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = source.extension().and_then(|s| s.to_str()) {
+        hint.with_extension(ext);
+    }
+    Ok(symphonia::default::get_probe().probe(
+        &hint,
+        stream,
+        Default::default(),
+        Default::default(),
+    )?)
+}
+
+/// The audio track's length in seconds from the file's header, without decoding it; `None` when
+/// the header doesn't say (or the format falls back to ffmpeg).
+pub(crate) fn seconds(source: &Path) -> Option<f64> {
+    let format = reader(source).ok()?;
+    let track = format.default_track(TrackType::Audio)?;
+    let rate = track.codec_params.as_ref()?.audio()?.sample_rate?;
+    (rate > 0).then(|| track.num_frames.map(|n| n as f64 / f64::from(rate)))?
+}
+
 fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<dyn Error>> {
     if source == destination
         || (destination.exists() && source.canonicalize()? == destination.canonicalize()?)
     {
         return Err("input and output must be different files".into());
     }
-    let stream = MediaSourceStream::new(Box::new(File::open(source)?), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = source.extension().and_then(|s| s.to_str()) {
-        hint.with_extension(ext);
-    }
-    let mut format = symphonia::default::get_probe().probe(
-        &hint,
-        stream,
-        Default::default(),
-        Default::default(),
-    )?;
+    let mut format = reader(source)?;
     let track = format
         .default_track(TrackType::Audio)
         .ok_or("no audio track")?;

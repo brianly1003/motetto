@@ -117,6 +117,7 @@ struct Run {
     clock: Instant,
     /// Per track: the index of its first stage.
     first: Vec<usize>,
+    vad: bool,
 }
 const CONVERT: usize = 0;
 const ECHO: usize = 1;
@@ -134,9 +135,12 @@ impl Run {
             let system = sources.iter().any(|s| s.ends_with(".system.wav"));
             for src in sources {
                 let speaker = Speaker::from_path(src);
-                // A WAV's length is in its header; another format's is known once converted.
+                // A WAV's length is in its header, as most other formats' is; the rest are priced
+                // once converted (`Run::audio`).
                 let audio = hound::WavReader::open(src)
                     .map(|wav| f64::from(wav.duration()) / f64::from(wav.spec().sample_rate))
+                    .ok()
+                    .or_else(|| decode::seconds(Path::new(src)))
                     .unwrap_or(0.0);
                 let side = speaker.side();
                 let echo = speaker == Speaker::Me && system;
@@ -169,6 +173,7 @@ impl Run {
             plan: Mutex::new(progress::Plan::new(items, 0.0)),
             clock,
             first,
+            vad,
         }
     }
     fn plan(&self) -> std::sync::MutexGuard<'_, progress::Plan> {
@@ -182,6 +187,19 @@ impl Run {
     /// What `track`'s `stage` will take, once measured: seconds of audio or speech, or pieces.
     fn units(&self, track: usize, stage: usize, units: f64) {
         self.plan().items[self.first[track] + stage].units = units;
+    }
+    /// `track`'s length, once converted: its later stages are priced from it, so a file whose
+    /// header had none doesn't price them at nothing (99 %, then back to 18 % on an import).
+    fn audio(&self, track: usize, audio: f64) {
+        // Echo removal runs only on a call's mic WAV, whose length was already known.
+        let mut plan = self.plan();
+        let first = self.first[track];
+        let side = plan.items[first].side;
+        plan.items[first + WHISPER].units = progress::whisper_units(audio, None, side);
+        if self.vad {
+            plan.items[first + SPEECH].units = audio;
+            plan.items[first + CHECK].units = progress::pieces_expected(audio, side);
+        }
     }
     fn report(&self) -> Option<TranscribeProgress> {
         let now = self.clock.elapsed().as_secs_f64();
@@ -224,6 +242,7 @@ fn transcribe_parts(
             let audio = hound::WavReader::open(&wav16)
                 .map(|wav| f64::from(wav.duration()) / 16_000.0)
                 .unwrap_or(0.0);
+            run.audio(track, audio);
             // Through loudspeakers the mic records the other side again: cancel that echo
             // against the system track and transcribe (and play) the cleaned mic instead.
             let system = sources.iter().find(|s| s.ends_with(".system.wav"));

@@ -128,3 +128,25 @@ fn imported_formats_decode_without_ffmpeg() {
         assert!(reader.samples::<f32>().any(|s| s.unwrap().abs() > 0.01));
     }
 }
+
+#[test]
+fn seconds_come_from_the_header_without_decoding() {
+    let dir = std::env::temp_dir().join(format!("motetto-seconds-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("tone.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 8000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut wav = hound::WavWriter::create(&path, spec).unwrap();
+    for _ in 0..8000 * 2 * 2 {
+        wav.write_sample(0i16).unwrap();
+    }
+    wav.finalize().unwrap();
+    assert_eq!(super::seconds(&path), Some(2.0));
+    std::fs::write(&path, b"broken media").unwrap();
+    assert_eq!(super::seconds(&path), None);
+    std::fs::remove_dir_all(dir).unwrap();
+}

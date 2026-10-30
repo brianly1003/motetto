@@ -97,6 +97,8 @@ pub struct Plan {
     /// 100-minute call) doesn't count as progress at 0 %.
     first: Option<(f64, f64)>,
     latest: Option<(f64, f64)>,
+    /// The highest percent reported: an estimate that grows holds the bar still, never moves it back.
+    shown: u8,
 }
 
 impl Plan {
@@ -109,6 +111,7 @@ impl Plan {
             stage_started: now,
             first: None,
             latest: None,
+            shown: 0,
         }
     }
 
@@ -173,7 +176,9 @@ impl Plan {
             (elapsed / total * 100.0).floor().min(99.0) as u8
         } else {
             0
-        };
+        }
+        .max(self.shown);
+        self.shown = percent;
         Report {
             percent,
             // Too early to say: the first stages alone don't tell this run's speed.
@@ -490,6 +495,18 @@ mod tests {
             ],
             0.0,
         )
+    }
+
+    #[test]
+    fn percent_never_goes_back_when_the_estimate_grows() {
+        // An import's length unknown at first: the second stage priced at nothing reads 99 %.
+        let mut plan = plan();
+        plan.items[1].units = 0.0;
+        plan.items[0].units = 0.0;
+        assert_eq!(plan.report(10.0, 0.0).percent, 99);
+        // Its real length arrives: the bar holds still instead of jumping back to 20 %.
+        plan.items[1].units = 40.0 / 0.033;
+        assert_eq!(plan.report(11.0, 0.0).percent, 99);
     }
 
     #[test]
