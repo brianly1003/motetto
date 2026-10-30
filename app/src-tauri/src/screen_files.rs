@@ -38,7 +38,9 @@ pub fn video_size(path: &Path) -> Option<(u32, u32)> {
         } else if size == 0 {
             size = len - at;
         }
-        if size < header || at + size > len {
+        // A crafted size must not wrap around and send the scan backwards.
+        let end = at.checked_add(size)?;
+        if size < header || end > len {
             return None;
         }
         if &head[4..8] == b"moov" {
@@ -53,7 +55,7 @@ pub fn video_size(path: &Path) -> Option<(u32, u32)> {
                 .filter(|(kind, _)| kind == b"trak")
                 .find_map(|(_, trak)| track_size(trak));
         }
-        at += size;
+        at = end;
     }
     None
 }
@@ -306,6 +308,15 @@ mod tests {
         assert_eq!(video_size(&file), Some((1920, 1080)));
         let audio = atom(b"moov", &track(b"soun", 0, 0));
         fs::write(&file, [&ftyp[..], &audio].concat()).unwrap();
+        assert_eq!(video_size(&file), None);
+        // A 64-bit size near u64::MAX ends the scan instead of overflowing.
+        let huge = [
+            &1u32.to_be_bytes()[..],
+            b"mdat",
+            &(u64::MAX - 4).to_be_bytes(),
+        ]
+        .concat();
+        fs::write(&file, [&ftyp[..], &huge, &moov].concat()).unwrap();
         assert_eq!(video_size(&file), None);
         fs::write(&file, &moov[..moov.len() - 4]).unwrap();
         assert_eq!(video_size(&file), None);
