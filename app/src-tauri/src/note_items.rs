@@ -142,7 +142,7 @@ mod tests {
     }
     #[test]
     fn saves_edits_but_not_stale_ones_or_the_transcript_copy() {
-        let root = std::env::temp_dir().join(format!("motetto-save-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("motetto-note-save-{}", std::process::id()));
         fs::create_dir_all(root.join("1")).unwrap();
         let text = "### Overview\n- Keep **FCM**.\n\n<details><summary>Transcript</summary>\n\n[00:01] Me: hi\n</details>\n";
         fs::write(root.join("1/notes.md"), text).unwrap();

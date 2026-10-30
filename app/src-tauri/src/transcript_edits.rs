@@ -13,11 +13,12 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 pub const EDITED: &str = "transcript.edited.txt";
 const MAX_LINE: usize = 2000;
 
-// `[mm:ss] Speaker: `, the part of a line an edit never touches.
+// `[mm:ss] Speaker: `, or `[mm:ss] ` on an unlabelled import: the part of a line an edit never
+// touches. Labels are those the Transcript tab shows (Me, Them, Speaker N), so a colon in an
+// unlabelled line's text stays text.
 fn prefix(line: &str) -> Option<&str> {
-    let close = line.strip_prefix('[')?.find("] ")? + 3;
-    let colon = line[close..].find(": ")? + close + 2;
-    Some(&line[..colon])
+    Some(motetto_core::correct::prefix(line))
+        .filter(|head| line.starts_with('[') && !head.is_empty())
 }
 
 // The transcript as shown: the edited copy when there is one.
@@ -53,9 +54,7 @@ fn save(root: &Path, id: &str, index: usize, text: &str) -> Result<String, Strin
         .filter(|line| !line.trim().is_empty())
         .nth(index)
         .ok_or("This transcript line no longer exists")?;
-    let head = prefix(line)
-        .ok_or("This line has no time and speaker")?
-        .to_owned();
+    let head = prefix(line).ok_or("This line has no time")?.to_owned();
     *line = format!("{head}{text}");
     let next = lines.join("\n");
     let edited = dir.join(EDITED);
@@ -131,6 +130,19 @@ mod tests {
         save(&root, "1", 1, "Ok: fine").unwrap();
         save(&root, "1", 0, "After studying push beams, I see.").unwrap();
         assert!(!root.join("1").join(EDITED).exists());
+        // A single-file import has no speaker labels: its time stays, and a colon is text.
+        let import = "[00:03] Alo, lò, lò.\n[00:05] Note: nghe anh.\n";
+        fs::write(root.join("1/transcript.txt"), import).unwrap();
+        fs::remove_file(root.join("1").join(EDITED)).ok();
+        assert_eq!(
+            save(&root, "1", 0, "Alô, lô.").unwrap(),
+            "[00:03] Alô, lô.\n[00:05] Note: nghe anh.\n"
+        );
+        assert!(
+            save(&root, "1", 1, "Nghe anh.")
+                .unwrap()
+                .contains("\n[00:05] Nghe anh.\n")
+        );
         // Locked meetings are read-only.
         fs::write(
             root.join("1/meeting.json"),

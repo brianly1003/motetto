@@ -92,8 +92,8 @@ fn is_cjk(c: char) -> bool {
 }
 
 /// `[mm:ss] Me: `, `[mm:ss] Speaker 2: ` (or `[mm:ss] ` for unlabelled lines): the part a
-/// correction must not touch.
-fn prefix(line: &str) -> &str {
+/// correction (or a line edit in the app) must not touch.
+pub fn prefix(line: &str) -> &str {
     let Some(end) = line.find("] ").map(|i| i + 2) else {
         return "";
     };
