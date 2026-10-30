@@ -198,6 +198,7 @@ pub fn run() {
             ) {
                 eprintln!("Motetto couldn't apply audio retention: {error}");
             }
+            crate::meeting_actions::purge_daily(root.clone());
             // Nothing records or imports yet at launch, so any busy meeting was cut off by a quit or crash.
             if let Err(e) = library::recover_interrupted(&root) {
                 eprintln!("Motetto: couldn't check for interrupted meetings: {e}");

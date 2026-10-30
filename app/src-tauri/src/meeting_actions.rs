@@ -7,8 +7,19 @@ use tauri::{Emitter, Manager};
 /// The error Write the notes again and Transcribe again end with after Stop; the UI shows a toast.
 pub(crate) const STOPPED: &str = "stopped";
 
+/// When a meeting went to Recently deleted, in ms, inside its folder: renaming a folder doesn't
+/// reliably change its own times, so the 30 days count from this file (`purge_expired`).
+const DELETED_AT: &str = "deleted-at";
+const KEEP_DELETED_MS: u128 = 30 * 86_400_000;
+
+fn now_ms() -> Result<u128, String> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis())
+}
+
 pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), String> {
-    // shortcut: retain deleted files until the planned 30-day retention scheduler is implemented.
     let deleted = root.join(".deleted");
     fs::create_dir_all(&deleted).map_err(|e| e.to_string())?;
     if deleted.canonicalize().map_err(|e| e.to_string())?.parent()
@@ -26,7 +37,61 @@ pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), S
     if destination.exists() {
         return Err("A meeting already exists at the destination".into());
     }
-    fs::rename(source, destination).map_err(|e| e.to_string())
+    fs::rename(source, &destination).map_err(|e| e.to_string())?;
+    // The meeting has moved either way; a missing stamp only restarts its 30 days at the next purge.
+    if restore {
+        let _ = fs::remove_file(destination.join(DELETED_AT));
+    } else {
+        let _ = fs::write(destination.join(DELETED_AT), now_ms()?.to_string());
+    }
+    Ok(())
+}
+
+/// SPEC 7.6: meetings in Recently deleted for 30 days are removed for good, at launch and every
+/// 24 h. One without a stamp (deleted before stamps existed) gets one now, so nothing goes early.
+/// Every meeting is tried; the first failure is returned.
+pub(crate) fn purge_expired(root: &Path, now: u128) -> Result<(), String> {
+    let deleted = root.join(".deleted");
+    if !deleted.exists() {
+        return Ok(());
+    }
+    let mut first = Ok(());
+    for entry in fs::read_dir(&deleted).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let stamp = entry.path().join(DELETED_AT);
+        let result = match fs::read_to_string(&stamp)
+            .ok()
+            .and_then(|text| text.trim().parse::<u128>().ok())
+        {
+            Some(at) if now.saturating_sub(at) >= KEEP_DELETED_MS => purge_meeting(root, &id),
+            Some(_) => Ok(()),
+            None if entry.file_type().is_ok_and(|t| t.is_dir()) => {
+                fs::write(&stamp, now.to_string()).map_err(|e| e.to_string())
+            }
+            None => Ok(()),
+        };
+        if first.is_ok() {
+            first = result
+                .map_err(|e| format!("Couldn't clear meeting {id} from Recently deleted: {e}"));
+        }
+    }
+    first
+}
+
+/// Runs `purge_expired` now and every 24 h after, on its own thread for the app's lifetime.
+pub(crate) fn purge_daily(root: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        loop {
+            if let Err(error) = now_ms().and_then(|now| purge_expired(&root, now)) {
+                eprintln!("Motetto: {error}");
+            }
+            std::thread::sleep(std::time::Duration::from_secs(86_400));
+        }
+    });
 }
 
 fn purge_meeting(root: &Path, id: &str) -> Result<(), String> {
@@ -269,6 +334,50 @@ mod tests {
             meeting_id: "456".into(),
         };
         assert_eq!(live_id(&state), Some("456"));
+    }
+    #[test]
+    fn deleted_meetings_go_after_30_days_and_restore_clears_the_clock() {
+        let root = std::env::temp_dir().join(format!("motetto-expire-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for id in ["1", "2", "3"] {
+            fs::create_dir_all(root.join(id)).unwrap();
+            fs::write(root.join(id).join("notes.md"), id).unwrap();
+            move_meeting(&root, id, false).unwrap();
+        }
+        let stamped = |id: &str| -> u128 {
+            fs::read_to_string(root.join(".deleted").join(id).join(DELETED_AT))
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+        let at = stamped("1");
+        fs::write(
+            root.join(".deleted/2").join(DELETED_AT),
+            (at - KEEP_DELETED_MS).to_string(),
+        )
+        .unwrap();
+        // Deleted before stamps existed: its 30 days start now.
+        fs::remove_file(root.join(".deleted/3").join(DELETED_AT)).unwrap();
+        purge_expired(&root, at).unwrap();
+        assert!(root.join(".deleted/1").exists(), "inside 30 days");
+        assert!(!root.join(".deleted/2").exists(), "30 days and over");
+        assert_eq!(stamped("3"), at);
+        purge_expired(&root, at + KEEP_DELETED_MS - 1).unwrap();
+        assert!(root.join(".deleted/3").exists());
+        // Restored meetings carry no stamp back into the library.
+        move_meeting(&root, "1", true).unwrap();
+        assert!(!root.join("1").join(DELETED_AT).exists());
+        assert_eq!(fs::read_to_string(root.join("1/notes.md")).unwrap(), "1");
+        purge_expired(&root, at + 10 * KEEP_DELETED_MS).unwrap();
+        assert!(root.join("1").exists() && !root.join(".deleted/3").exists());
+        // A link in the bin is never followed or removed through.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("1"), root.join(".deleted/4")).unwrap();
+            assert!(purge_expired(&root, at + 10 * KEEP_DELETED_MS).is_ok());
+            assert!(root.join("1/notes.md").exists());
+        }
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn permanent_delete_only_removes_deleted_meetings() {
