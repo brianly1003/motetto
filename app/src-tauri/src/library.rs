@@ -411,7 +411,7 @@ pub fn import(
         .and_then(|s| s.to_str())
         .filter(|s| s.bytes().all(|b| b.is_ascii_alphanumeric()))
         .ok_or("Choose an audio or video file with an extension")?
-        .to_owned();
+        .to_ascii_lowercase();
     let created_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -456,6 +456,29 @@ pub fn import(
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
         let copied = dir.join(format!("source.{extension}"));
         fs::copy(source, &copied)?;
+        // A video keeps its picture: the Video tab plays it muted under the meeting's audio,
+        // as it does a recorded screen.
+        if let Some((width, height)) =
+            (crate::screen_files::imported_video(&format!("source.{extension}")))
+                .then(|| crate::screen_files::video_size(&copied))
+                .flatten()
+        {
+            let part = crate::screen::ScreenPart {
+                file: format!("source.{extension}"),
+                offset_ms: 0,
+                source: crate::screen::ScreenSourceInfo {
+                    kind: "file".into(),
+                    name: source
+                        .file_name()
+                        .map(|n| n.to_string_lossy().chars().take(120).collect())
+                        .unwrap_or_default(),
+                },
+                while_sharing: false,
+                width,
+                height,
+            };
+            crate::screen_files::write(&dir, "screen.json", &vec![part])?;
+        }
         report(motetto_core::events::Stage::Transcribing { progress: None });
         let heard = motetto_core::transcribe::transcript_parts(
             &[(vec![copied.to_string_lossy().into_owned()], 0)],

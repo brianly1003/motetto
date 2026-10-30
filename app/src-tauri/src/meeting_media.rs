@@ -29,6 +29,8 @@ pub struct VideoPart {
     #[ts(type = "number")]
     pub duration_ms: u64,
     pub source: String,
+    /// `file` for an imported video, else what was recorded (`window`, `display`).
+    pub kind: String,
     pub while_sharing: bool,
     pub width: u32,
     pub height: u32,
@@ -105,7 +107,9 @@ fn video_parts(dir: &Path) -> Vec<(crate::screen::ScreenPart, PathBuf)> {
     parts
         .into_iter()
         .filter_map(|part| {
-            if !crate::screen_files::video_name(&part.file) {
+            if !crate::screen_files::video_name(&part.file)
+                && !crate::screen_files::imported_video(&part.file)
+            {
                 return None;
             }
             let path = crate::screen_files::safe_file(dir, &part.file)?;
@@ -219,6 +223,7 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
             offset_ms: part.offset_ms,
             duration_ms,
             source: part.source.name,
+            kind: part.source.kind,
             while_sharing: part.while_sharing,
             width: part.width,
             height: part.height,
@@ -359,6 +364,54 @@ mod tests {
             std::os::unix::fs::symlink("/etc/passwd", &path).unwrap();
             assert!(read(&root, "1").unwrap_err().contains("outside"));
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn imported_video_plays_on_the_import_audio_clock() {
+        let root =
+            std::env::temp_dir().join(format!("motetto-media-import-{}", std::process::id()));
+        fs::create_dir_all(root.join("1")).unwrap();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut wav = hound::WavWriter::create(root.join("1/source.16k.wav"), spec).unwrap();
+        for _ in 0..32000 {
+            wav.write_sample(0i16).unwrap();
+        }
+        wav.finalize().unwrap();
+        fs::write(root.join("1/source.mov"), b"video fixture").unwrap();
+        let part = |file: &str| crate::screen::ScreenPart {
+            file: file.into(),
+            offset_ms: 0,
+            source: crate::screen::ScreenSourceInfo {
+                kind: "file".into(),
+                name: "Demo.mov".into(),
+            },
+            while_sharing: false,
+            width: 1920,
+            height: 1080,
+        };
+        crate::screen_files::write(&root.join("1"), "screen.json", &vec![part("source.mov")])
+            .unwrap();
+        let dir = library::folder(&root, "1").unwrap();
+        assert!(has_video(&dir));
+        let media = read(&root, "1").unwrap();
+        assert_eq!(media.videos.len(), 1);
+        assert_eq!(
+            (media.videos[0].duration_ms, media.videos[0].kind.as_str()),
+            (2000, "file")
+        );
+        // Only the import's own copy plays, never another file named in the manifest.
+        crate::screen_files::write(
+            &root.join("1"),
+            "screen.json",
+            &vec![part("source.16k.wav")],
+        )
+        .unwrap();
+        assert!(!has_video(&dir));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -6,7 +6,7 @@ use crate::{
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -15,6 +15,69 @@ pub fn video_name(name: &str) -> bool {
     name.starts_with("part-")
         && name.ends_with(".screen.mp4")
         && Path::new(name).file_name().is_some_and(|n| n == name)
+}
+/// An imported video plays in the Video tab, but it is also the import's audio source
+/// (Transcribe again), so audio retention keeps it, not Delete video or video retention.
+pub fn imported_video(name: &str) -> bool {
+    matches!(name, "source.mp4" | "source.mov")
+}
+/// Picture size of the first video track in an MP4 or MOV file, from its `tkhd` box; `None` for
+/// audio-only or unreadable files. Reads box headers and the `moov` box (up to 64 MB) only.
+pub fn video_size(path: &Path) -> Option<(u32, u32)> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut at = 0;
+    while at + 8 <= len {
+        file.seek(SeekFrom::Start(at)).ok()?;
+        let mut head = [0u8; 16];
+        file.read_exact(&mut head[..8]).ok()?;
+        let (mut size, mut header) = (u64::from(u32::from_be_bytes(head[..4].try_into().ok()?)), 8);
+        if size == 1 {
+            file.read_exact(&mut head[8..]).ok()?;
+            (size, header) = (u64::from_be_bytes(head[8..].try_into().ok()?), 16);
+        } else if size == 0 {
+            size = len - at;
+        }
+        if size < header || at + size > len {
+            return None;
+        }
+        if &head[4..8] == b"moov" {
+            let mut moov = vec![
+                0;
+                usize::try_from(size - header)
+                    .ok()
+                    .filter(|n| *n <= 64 << 20)?
+            ];
+            file.read_exact(&mut moov).ok()?;
+            return boxes(&moov)
+                .filter(|(kind, _)| kind == b"trak")
+                .find_map(|(_, trak)| track_size(trak));
+        }
+        at += size;
+    }
+    None
+}
+fn boxes(mut data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    std::iter::from_fn(move || {
+        let size = usize::try_from(u32::from_be_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
+        let kind = data.get(4..8)?.try_into().ok()?;
+        let body = data.get(8..size)?;
+        data = &data[size..];
+        Some((kind, body))
+    })
+}
+fn track_size(trak: &[u8]) -> Option<(u32, u32)> {
+    let find = |data, name: &[u8; 4]| boxes(data).find(|(kind, _)| kind == name).map(|b| b.1);
+    let hdlr = find(find(trak, b"mdia")?, b"hdlr")?;
+    if hdlr.get(8..12)? != b"vide" {
+        return None;
+    }
+    // Width and height close the box as 16.16 fixed point, in both box versions.
+    let tkhd = find(trak, b"tkhd")?;
+    let end = tkhd.len().checked_sub(8)?;
+    let half = |at: usize| Some(u32::from_be_bytes(tkhd.get(at..at + 4)?.try_into().ok()?) >> 16);
+    let (width, height) = (half(end)?, half(end + 4)?);
+    (width > 0 && height > 0).then_some((width, height))
 }
 pub fn safe_file(dir: &Path, name: &str) -> Option<PathBuf> {
     if Path::new(name).file_name()?.to_str()? != name {
@@ -204,6 +267,51 @@ pub fn restore(root: &Path, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn atom(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        [&(body.len() as u32 + 8).to_be_bytes()[..], kind, body].concat()
+    }
+    fn track(handler: &[u8; 4], width: u32, height: u32) -> Vec<u8> {
+        // A version 0 tkhd body is 84 bytes, ending in width and height (16.16).
+        let mut tkhd = vec![0u8; 76];
+        tkhd.extend((width << 16).to_be_bytes());
+        tkhd.extend((height << 16).to_be_bytes());
+        let hdlr = [&[0u8; 8][..], handler, &[0u8; 13]].concat();
+        atom(
+            b"trak",
+            &[atom(b"tkhd", &tkhd), atom(b"mdia", &atom(b"hdlr", &hdlr))].concat(),
+        )
+    }
+    #[test]
+    fn video_size_reads_the_video_track_wherever_moov_sits() {
+        let dir = std::env::temp_dir().join(format!("motetto-video-size-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("source.mp4");
+        let ftyp = atom(b"ftyp", b"isom\0\0\0\0");
+        let moov = atom(
+            b"moov",
+            &[
+                track(b"soun", 0, 0),
+                track(b"text", 640, 60),
+                track(b"vide", 1920, 1080),
+            ]
+            .concat(),
+        );
+        fs::write(&file, [&ftyp[..], &moov, &atom(b"mdat", &[1; 32])].concat()).unwrap();
+        assert_eq!(video_size(&file), Some((1920, 1080)));
+        // A 64-bit mdat before moov, as cameras and screen recorders write it.
+        let mut mdat = [&1u32.to_be_bytes()[..], b"mdat", &48u64.to_be_bytes()].concat();
+        mdat.extend([0; 32]);
+        fs::write(&file, [&ftyp[..], &mdat, &moov].concat()).unwrap();
+        assert_eq!(video_size(&file), Some((1920, 1080)));
+        let audio = atom(b"moov", &track(b"soun", 0, 0));
+        fs::write(&file, [&ftyp[..], &audio].concat()).unwrap();
+        assert_eq!(video_size(&file), None);
+        fs::write(&file, &moov[..moov.len() - 4]).unwrap();
+        assert_eq!(video_size(&file), None);
+        assert!(imported_video("source.mov") && !imported_video("../source.mp4"));
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn moments_persist_on_the_meeting_clock_and_partial_parts_are_narrowed() {
         let dir =
