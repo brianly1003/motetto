@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Minimal hardened-runtime entitlements for the main app. Microphone captures the mic
+       track; Screen & System Audio Recording is a TCC permission granted at runtime, not an
+       entitlement. Nothing here weakens library validation: the whisper-server and llama-server
+       sidecars link only Apple frameworks (Metal, Accelerate) and are signed with the same Team
+       ID, so validation stays on. If a sidecar genuinely fails to launch or notarize, sign it
+       with its OWN entitlements file rather than adding allow-jit or disable-library-validation
+       to this TCC-privileged app. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.microphone</key>
+  <true/>
+</dict>
+</plist>

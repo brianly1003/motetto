@@ -115,7 +115,7 @@ pub struct Watcher {
 
 /// Motetto's own capture holds the mic while recording; it is never a call.
 fn is_own(own_pid: u32, p: &AudioProcess) -> bool {
-    p.pid == own_pid || id_matches("local.motetto.desktop", &p.bundle_id)
+    p.pid == own_pid || id_matches("app.motetto.desktop", &p.bundle_id)
 }
 
 impl Watcher {
@@ -429,7 +429,7 @@ mod tests {
         let snap = Snapshot {
             processes: vec![AudioProcess {
                 pid: 42,
-                bundle_id: "local.motetto.desktop".into(),
+                bundle_id: "app.motetto.desktop".into(),
                 input: true,
                 output: true,
             }],

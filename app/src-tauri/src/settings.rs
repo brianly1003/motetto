@@ -452,7 +452,7 @@ pub fn remember_apps(app: &tauri::AppHandle, snapshot: &watch::Snapshot) {
         for process in &snapshot.processes {
             if process.input
                 && process.pid != std::process::id()
-                && process.bundle_id != "local.motetto.desktop"
+                && process.bundle_id != "app.motetto.desktop"
                 && process.bundle_id.len() <= 255
                 && (recent.contains_key(&process.bundle_id) || recent.len() < 500)
             {
