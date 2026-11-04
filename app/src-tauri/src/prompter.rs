@@ -295,6 +295,43 @@ fn watch(app: tauri::AppHandle) {
     });
 }
 
+/// The script to open: the one on the strip, else the last one shown, while it exists; else the
+/// most recently edited script.
+fn opening(app: &tauri::AppHandle) -> Option<String> {
+    let current = shown_script(app).or_else(|| {
+        app.state::<crate::settings::Store>()
+            .get()
+            .ok()
+            .and_then(|s| s.prompter.last_script)
+    });
+    crate::scripts::opening_script(app, current.as_deref())
+}
+
+/// A script was renamed (`to`) or deleted in the library: if it was on the strip or is the one
+/// ⌃⌥T opens, both follow the new name, or move to the next script with text.
+pub(crate) fn script_moved(app: &tauri::AppHandle, from: &str, to: Option<&str>) {
+    let store = app.state::<crate::settings::Store>();
+    let remembered = store
+        .get()
+        .is_ok_and(|s| s.prompter.last_script.as_deref() == Some(from));
+    let on_strip = shown_script(app).as_deref() == Some(from);
+    if !remembered && !on_strip {
+        return;
+    }
+    let next = to
+        .map(str::to_owned)
+        .or_else(|| crate::scripts::opening_script(app, None));
+    let _ = store.change(|s| s.prompter.last_script = next.clone());
+    if on_strip {
+        *app.state::<State>()
+            .script
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = next.clone();
+        forget_hint(app);
+    }
+    let _ = app.emit("motetto://prompter-script", next);
+}
+
 /// The script the strip shows now, if any.
 pub fn shown_script(app: &tauri::AppHandle) -> Option<String> {
     app.state::<State>()
@@ -316,6 +353,7 @@ fn forget_hint(app: &tauri::AppHandle) {
 #[tauri::command]
 pub fn prompter_show(app: tauri::AppHandle, name: Option<String>) -> Result<(), String> {
     let window = window(&app)?;
+    let name = name.or_else(|| opening(&app));
     if let Some(name) = &name {
         app.state::<crate::settings::Store>()
             .change(|s| s.prompter.last_script = Some(name.clone()))?;
@@ -381,17 +419,7 @@ pub fn prompter_state(app: tauri::AppHandle) -> PageState {
     let state = app.state::<State>();
     state.ready.store(true, Ordering::SeqCst);
     PageState {
-        script: state
-            .script
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .or_else(|| {
-                app.state::<crate::settings::Store>()
-                    .get()
-                    .ok()
-                    .and_then(|s| s.prompter.last_script)
-            }),
+        script: opening(&app),
         // Nothing checked yet counts as checking: the text waits.
         check: match *state.check.lock().unwrap_or_else(|e| e.into_inner()) {
             "" => "checking".into(),

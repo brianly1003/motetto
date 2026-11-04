@@ -40,6 +40,10 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   // The script the strip shows and ⌃⌥T opens, the library folder and the shortcut, for the
   // sidebar key and the footer.
   const [shown, setShown] = useState<string | null>(null);
+  // As Rust picks it (scripts::opening): the last one shown while it has text, else the newest
+  // with text (here by size: whitespace-only files are rare), else the last one or the newest.
+  const remembered = list.find(info => info.name === shown);
+  const opens = (remembered && remembered.bytes > 0 ? remembered : list.find(info => info.bytes > 0) ?? remembered ?? list[0])?.name ?? null;
   const [folder, setFolder] = useState("");
   const [showKey, setShowKey] = useState("");
   useEffect(() => {
@@ -188,7 +192,7 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
   // reach; the open one is kept in view.
   useEffect(() => { side?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" }); }, [side, open]);
   const sidebar = side && list.length ? createPortal(<>
-    <div className="sp-subscroll">{list.map(info => <button key={info.name} type="button" className="sp-subitem" aria-current={info.name === open ? "true" : undefined} data-shown={info.name === shown ? "" : undefined} title={info.name === shown && showKey ? s.spShownKey.replace("{key}", showKey) : s.scriptEditedOn.replace("{when}", edited(info.modified_ms))} onClick={() => void choose(info.name).catch(e => onError(String(e)))}><span>{info.name}</span>{showKey && <KbdGroup keys={showKey}/>}</button>)}</div>
+    <div className="sp-subscroll">{list.map(info => <button key={info.name} type="button" className="sp-subitem" aria-current={info.name === open ? "true" : undefined} data-shown={info.name === opens ? "" : undefined} title={info.name === opens && showKey ? s.spShownKey.replace("{key}", showKey) : s.scriptEditedOn.replace("{when}", edited(info.modified_ms))} onClick={() => void choose(info.name).catch(e => onError(String(e)))}><span>{info.name}</span>{showKey && <KbdGroup keys={showKey}/>}</button>)}</div>
     <button type="button" className="sp-subitem sp-new" title={open && !text.trim() ? s.newScriptEmpty.replace("{name}", open) : undefined} onClick={() => void create()}>+ {s.newScript}</button>
   </>, side) : null;
   if (!list.length && !open) return <article className="document scripts">

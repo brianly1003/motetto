@@ -93,6 +93,24 @@ fn list(root: &Path) -> Result<Vec<ScriptInfo>, String> {
     Ok(scripts)
 }
 
+/// The script the prompter opens with none named: `last` while it exists and has text, else the
+/// most recently edited script with text, else `last` or the newest (empty) one; `None` with no
+/// scripts. Without it, ⌃⌥T before any Present, or after the last script was emptied or deleted,
+/// showed an empty strip (owner 2026-10-30).
+fn opening(root: &Path, last: Option<&str>) -> Option<String> {
+    let scripts = list(root).ok()?;
+    let has_text = |name: &str| read(root, name).is_ok_and(|text| !text.trim().is_empty());
+    let last = last.and_then(|last| scripts.iter().find(|s| s.name == last));
+    last.filter(|s| has_text(&s.name))
+        .or_else(|| scripts.iter().find(|s| has_text(&s.name)))
+        .or(last)
+        .or(scripts.first())
+        .map(|s| s.name.clone())
+}
+pub(crate) fn opening_script(app: &tauri::AppHandle, last: Option<&str>) -> Option<String> {
+    opening(&root(app), last)
+}
+
 fn read(root: &Path, raw: &str) -> Result<String, String> {
     crate::library::text(&path(root, raw)?)
 }
@@ -190,11 +208,15 @@ pub fn script_save(
 }
 #[tauri::command]
 pub fn script_rename(app: tauri::AppHandle, from: String, to: String) -> Result<(), String> {
-    rename(&root(&app), &from, &to)
+    rename(&root(&app), &from, &to)?;
+    crate::prompter::script_moved(&app, &from, Some(&checked_name(&to)?));
+    Ok(())
 }
 #[tauri::command]
 pub fn script_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
-    delete(&root(&app), &name)
+    delete(&root(&app), &name)?;
+    crate::prompter::script_moved(&app, &name, None);
+    Ok(())
 }
 /// Show in Finder (a script's ••• menu): the Scripts folder, where its `.md` file is.
 #[tauri::command]
@@ -221,6 +243,56 @@ mod tests {
     fn exports_bindings() {
         ScriptInfo::export_all(&ts_rs::Config::default().with_out_dir("../../ui/lib/bindings"))
             .unwrap();
+    }
+
+    #[test]
+    fn opening_falls_back_to_the_newest_script() {
+        let root = temp_root();
+        assert_eq!(opening(&root, None), None);
+        save(&root, "Script 001", "Hi.", None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        save(&root, "Script 003", "Hello.", None).unwrap();
+        assert_eq!(
+            opening(&root, Some("Script 001")).as_deref(),
+            Some("Script 001")
+        );
+        assert_eq!(opening(&root, None).as_deref(), Some("Script 003"));
+        // Renamed or deleted since: the newest one, never an empty strip.
+        assert_eq!(opening(&root, Some("Gone")).as_deref(), Some("Script 003"));
+        // An empty script is passed over for the newest one with text, remembered or not.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        save(&root, "Script 004", " \n", None).unwrap();
+        assert_eq!(opening(&root, None).as_deref(), Some("Script 003"));
+        assert_eq!(
+            opening(&root, Some("Script 004")).as_deref(),
+            Some("Script 003")
+        );
+        assert_eq!(
+            opening(&root, Some("Script 001")).as_deref(),
+            Some("Script 001")
+        );
+        // With no script holding text, the remembered one still opens, to be written in.
+        for name in ["Script 001", "Script 003"] {
+            save(
+                &root,
+                name,
+                "",
+                Some(
+                    list(&root)
+                        .unwrap()
+                        .iter()
+                        .find(|s| s.name == name)
+                        .unwrap()
+                        .modified_ms,
+                ),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            opening(&root, Some("Script 001")).as_deref(),
+            Some("Script 001")
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
