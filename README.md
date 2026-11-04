@@ -6,8 +6,9 @@
 
 **Meeting notes that never leave your computer.**
 
-Record a call from any app, get a timestamped transcript and Markdown notes,
-all made on your own machine by local models. No account, no upload, no subscription.
+Record a call from Zoom, Teams, Meet or any other app. Get a timestamped transcript that knows
+who spoke, and notes where every point links back to the moment it was said. All of it is made on
+your own Mac by local models. No account, no upload, no subscription.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20Windows%20(preview)-555)
 ![Status](https://img.shields.io/badge/status-early%20development-orange)
@@ -15,6 +16,8 @@ all made on your own machine by local models. No account, no upload, no subscrip
 ![License](https://img.shields.io/badge/license-MIT%20%C2%B7%20MPL--2.0%20(core)-blue)
 
 [Issues](https://github.com/brianly1003/motetto/issues)
+
+<!-- Demo: add a 20-30 s GIF (or MP4 dragged into GitHub's editor) here, with a link to the full video. -->
 
 </div>
 
@@ -26,6 +29,7 @@ all made on your own machine by local models. No account, no upload, no subscrip
 - [What it is](#what-it-is)
 - [Why Motetto](#why-motetto)
 - [Features](#features)
+- [Desktop app](#desktop-app)
 - [Status](#status)
 - [Quick start (CLI, macOS)](#quick-start-cli-macos)
 - [How it works](#how-it-works)
@@ -45,8 +49,8 @@ Motetto records a call from Teams, Meet, Zoom or any other app as two tracks: yo
 local model in [Ollama](https://ollama.com) writes the notes: action items with owners, a
 short overview and one section per topic, each point linked to the moment it was said.
 
-It runs as a command-line tool today. A desktop app for macOS and Windows (tray, floating
-recording pill, live captions, meeting library) is being built in `app/` and `ui/`.
+It comes as a desktop app for macOS (tray, floating recording pill, live captions, meeting
+library) and as a command-line tool. Windows is in preview.
 
 ## Why Motetto
 
@@ -58,6 +62,8 @@ recording pill, live captions, meeting library) is being built in `app/` and `ui
 - **Made for mixed-language calls.** Tested most on Vietnamese and English, including calls
   that switch between them. Notes are written in the call's language (Vietnamese, Chinese and
   Japanese are recognised from the text) unless you pick one.
+- **Notes you can check.** Every action item and decision ends with the `[mm:ss]` it came from;
+  click it to hear that moment again.
 - **Plain files.** Markdown notes and a `[mm:ss] You: …` transcript you can read, grep, version
   or paste anywhere.
 
@@ -72,21 +78,39 @@ recording pill, live captions, meeting library) is being built in `app/` and `ui
 | **Your spellings** | Product names and people (`TERMS`) bias the transcript and fix the notes' spelling. |
 | **Long calls** | Long transcripts are summarized in parts and merged. About 8 minutes of processing per hour of call on an M1 Max. |
 | **Optional extras** | Speaker labels (sherpa-onnx), a local correction pass for misheard words (`FIX_MODEL`). |
-| **Desktop app** *(in progress)* | Asks before recording when a call app takes the mic, live captions, My notes during the call, meeting library with search, editing and playback. |
+| **Desktop app** | See below. |
+
+## Desktop app
+
+| | |
+|---|---|
+| **Asks, never assumes** | When Zoom, Teams, Meet or another call app takes the microphone, Motetto asks "Record this call?". Nothing is recorded until you say yes, and a recording can always be stopped. |
+| **During the call** | A small floating pill with the timer, live captions, and My notes to jot points that go into the notes. |
+| **Screen too, if you want** | Choose Audio + screen to keep the video, then rewatch it in the meeting's Video tab. Imported videos get the same tab. |
+| **Edit in place** | Fix a transcript line or the notes directly; lock a meeting so nothing changes it by accident. |
+| **Read in** | Read a finished meeting's notes in another language without writing them again. |
+| **Script prompter** | A teleprompter strip for talks and demos, hidden from screen shares by default. |
+| **Library** | Search, playback, Recently deleted (kept 30 days). |
+| **First run** | Picks the right model size for your Mac with a 10-second speed test and downloads it; no Homebrew or terminal needed. |
 
 ## Status
 
 Early and moving fast. Be specific about what you rely on:
 
 - **Works:** the CLI on macOS 15+ (record, import, transcribe, notes), checked by an end-to-end
-  script with synthetic audio on every change.
-- **In progress:** the desktop app, first-run setup and model downloads, signed installers.
+  script with synthetic audio on every change, and the desktop app on macOS, used daily by its author.
+- **In progress:** signed and notarized installers, Windows desktop app.
 - **Not yet verified:** Windows capture on real hardware, and live desktop recording on real
   calls (owner tests are pending).
 - **Known issues:** see [GitHub issues](https://github.com/brianly1003/motetto/issues), for
   example a call that opens in one language and switches to another can lose speech ([#1](https://github.com/brianly1003/motetto/issues/1)).
 
-There is no release build yet; build from source.
+There is no release build yet; build from source. Desktop app on macOS:
+
+```sh
+scripts/build-sidecars.sh                       # whisper-server and llama-server, once
+cd ui && npm ci && cd ../app/src-tauri && ../../ui/node_modules/.bin/tauri build --bundles app
+```
 
 ## Quick start (CLI, macOS)
 
