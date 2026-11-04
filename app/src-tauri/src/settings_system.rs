@@ -59,6 +59,21 @@ pub fn reveal(path: &std::path::Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// The public releases page; "Check for updates" opens it, and Motetto never checks on its own.
+const RELEASES_URL: &str = "https://github.com/brianly1003/motetto/releases";
+#[tauri::command]
+pub fn open_releases() -> Result<(), String> {
+    // Same native opener as reveal(), with a fixed URL (no shell, no interpolation).
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = std::process::Command::new("explorer");
+    command
+        .arg(RELEASES_URL)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 #[tauri::command]
 pub fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;

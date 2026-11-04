@@ -146,6 +146,7 @@ pub fn run() {
             crate::settings_storage::delete_all_meetings,
             crate::settings_storage::move_notes_folder,
             crate::settings_system::about,
+            crate::settings_system::open_releases,
             crate::settings_system::open_logs_folder
         ])
         .setup(|app| {

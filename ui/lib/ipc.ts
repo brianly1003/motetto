@@ -198,6 +198,7 @@ export const storageSummary=()=>invoke<StorageSummary>('storage_summary');
 export const deleteAllMeetings=()=>invoke<void>('delete_all_meetings',{confirm:true});
 export const moveNotesFolder=()=>invoke<string|null>('move_notes_folder');
 export const about=()=>invoke<{version:string;licences:string;platform:string}>('about');
+export const openReleases=()=>invoke<void>('open_releases');
 export const openLogsFolder=()=>invoke<void>('open_logs_folder');
 export async function onSettingsTab(callback:(tab:string)=>void){
   const {listen}=await import('@tauri-apps/api/event');return listen<string>('motetto://settings-tab',event=>callback(event.payload));

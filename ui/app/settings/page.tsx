@@ -241,7 +241,7 @@ export default function SettingsPage(){
       </>}
       {tab==='About'&&<>
         <Row label="Version"><span className="mono">Motetto {info?.version??'…'}</span></Row>
-        <Row label="Updates" help="A public releases page has not been configured for this local build. Motetto never checks on its own."><button className="btn sm" disabled>Check for updates</button></Row>
+        <Row label="Updates" help="Opens the releases page in your browser. Motetto never checks on its own."><button className="btn sm" onClick={()=>void action(ipc.openReleases,'Opening the releases page')}>Check for updates</button></Row>
         <Row label="Built with" help="Model installers and bundled full licence texts are planned for distribution in M9."><span>{info?.licences??'…'}</span></Row>
         <Row label="Logs" help="Logs never contain transcript text."><button className="btn sm" onClick={()=>void action(ipc.openLogsFolder,'Logs folder opened')}>Show logs folder</button></Row>
       </>}
