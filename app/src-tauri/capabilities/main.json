@@ -5,7 +5,8 @@
     "main",
     "companion",
     "settings",
-    "prompter"
+    "prompter",
+    "onboarding"
   ],
   "permissions": [
     "core:event:allow-listen",
