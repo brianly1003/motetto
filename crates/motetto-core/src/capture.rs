@@ -176,6 +176,8 @@ fn record_tracks(
                 picture = Some(stream);
                 encoding = Some(video);
             }
+            // Video only: nothing else would be recorded, so fail now instead of at Stop.
+            Err(error) if !audio => return Err(error.into()),
             Err(error) => {
                 if let Some(outcome) = outcome.as_mut() {
                     outcome.error = Some(error);
@@ -240,7 +242,9 @@ fn record_tracks(
     }
     let mut reported = None;
     let mut video_done = false;
-    let mut result = wait_for_stop(&stop, &stopped, &AtomicBool::new(false), || {
+    // Video only: a finished (failed or lost) picture ends the recording like a stop.
+    let picture_ended = AtomicBool::new(false);
+    let mut result = wait_for_stop(&stop, &stopped, &picture_ended, || {
         for (path, wav) in &wavs {
             let mut wav = wav
                 .lock()
@@ -273,6 +277,7 @@ fn record_tracks(
                     video.moments_ms = moments;
                     video.error = if video.lost { None } else { error };
                     video_done = true;
+                    picture_ended.store(!audio, Ordering::Release);
                 }
             }
             if reported.as_ref() != Some(video) {
@@ -338,6 +343,13 @@ fn record_tracks(
         }
     }
     result?;
+    if let Some(error) = outcome
+        .as_ref()
+        .filter(|_| !audio)
+        .and_then(|v| v.error.clone())
+    {
+        return Err(error.into());
+    }
     if audio && files.is_empty() {
         return Err(
             "no audio captured - check Screen Recording / Microphone permission for your terminal"
@@ -539,6 +551,53 @@ mod tests {
             Err(e) => panic!("cannot run ffprobe: {e}"),
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn video_only_with_a_tiny_area_fails_at_once() {
+        // Without Screen Recording permission the call fails earlier, which is also immediate.
+        let display = SCShareableContent::get()
+            .ok()
+            .and_then(|c| c.displays().into_iter().next())
+            .map_or(0, |d| d.display_id());
+        let dir = std::env::temp_dir().join(format!("motetto-tiny-area-{}", std::process::id()));
+        let base = dir.join("part-0000").to_string_lossy().into_owned();
+        let screen = ScreenCapture {
+            target: ScreenTarget::Area {
+                display,
+                rect: video::AreaRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 20.0,
+                    height: 20.0,
+                },
+            },
+            preset: video::Preset::Smaller,
+            cursor: false,
+            path: format!("{base}.screen.mp4"),
+            scale: 1.0,
+            progress: None,
+        };
+        let silent = Tracks {
+            mic: false,
+            system: false,
+        };
+        // A backstop stop after 60 s; only an immediate error ends the call before it.
+        let stop = Stop::default();
+        let timer = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(60));
+            timer.store(true, Ordering::Relaxed);
+        });
+        let started = Instant::now();
+        let result = record_with_levels(&base, stop, None, None, Some(&screen), silent);
+        let Err(error) = result else {
+            panic!("a 20 by 20 point area was recorded");
+        };
+        let error = error.to_string();
+        assert!(display == 0 || error.contains("too small"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(40));
+        assert!(!std::path::Path::new(&screen.path).exists());
     }
 
     #[test]
