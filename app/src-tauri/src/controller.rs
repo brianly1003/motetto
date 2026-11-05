@@ -337,6 +337,22 @@ impl<H: Host> Engine<H> {
         if self.exiting {
             return Err("Motetto is shutting down".into());
         }
+        // A clip or a recording without a mic, started while a call is asked, is not that call:
+        // decline the question, then start with the setup as chosen (no mic means no Me track).
+        if let (Action::Start(Some(setup)), SessionState::Asking { call_id, .. }) =
+            (&action, &self.session.app.state)
+            && (setup.video_only() || setup.mic == MicChoice::Off)
+        {
+            let call_id = call_id.clone();
+            self.apply(
+                Command::AnswerAsk {
+                    call_id,
+                    record: false,
+                    screen: None,
+                },
+                now,
+            );
+        }
         // Record now while asking is the answer to the question (guardrail 2): record that call.
         // The asked call keeps its own mic rules; only the setup's picture carries over.
         let action = match (action, &self.session.app.state) {

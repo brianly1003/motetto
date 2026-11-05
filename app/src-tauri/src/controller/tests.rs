@@ -744,3 +744,27 @@ fn record_now_shortcut_opens_setup() {
     assert_eq!(e.session.app.state, SessionState::Idle);
     assert_eq!(&*e.host.log.lock().unwrap(), &["open_capture:Call"]);
 }
+#[test]
+fn a_clip_started_while_asking_declines_the_call_and_keeps_its_setup() {
+    let mut e = engine();
+    zoom_call(&mut e, 0);
+    assert!(matches!(e.session.app.state, SessionState::Asking { .. }));
+    let clip_setup = RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: true,
+        notes: false,
+        clicks: true,
+        screen: Some(ScreenPick {
+            choice: ScreenChoice::Display { id: 1 },
+            name: "Built-in Display".into(),
+        }),
+    };
+    e.action(Action::Start(Some(clip_setup.clone())), 1_000)
+        .unwrap();
+    assert_eq!(e.session.app.state, SessionState::Recording);
+    assert_eq!(e.session.app.setup, Some(clip_setup));
+    assert_eq!(
+        e.session.app.setup.as_ref().map(|s| &s.mic),
+        Some(&MicChoice::Off)
+    );
+}

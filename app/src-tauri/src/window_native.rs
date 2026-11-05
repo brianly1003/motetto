@@ -184,6 +184,22 @@ pub fn activate_app(pid: i32) {
 #[cfg(not(target_os = "macos"))]
 pub fn activate_app(_pid: i32) {}
 
+/// Brings Motetto forward, so a window it then focuses gets the keyboard even when another app
+/// was active (the tray and the global shortcut don't activate it).
+#[cfg(target_os = "macos")]
+pub fn activate_self(app: &tauri::AppHandle) {
+    let _ = app.run_on_main_thread(|| {
+        use objc2::{class, msg_send, runtime::AnyObject};
+        // SAFETY: on AppKit's main thread; the shared application exists for the app's lifetime.
+        unsafe {
+            let shared: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![shared, activateIgnoringOtherApps: true];
+        }
+    });
+}
+#[cfg(not(target_os = "macos"))]
+pub fn activate_self(_app: &tauri::AppHandle) {}
+
 /// Keep the logo a native template image while the recording dot and timer use recording red.
 #[cfg(target_os = "macos")]
 pub fn tray_title(tray: &tauri::tray::TrayIcon, title: String) -> tauri::Result<()> {

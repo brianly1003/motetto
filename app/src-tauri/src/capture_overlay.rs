@@ -167,13 +167,40 @@ fn displays(app: &tauri::AppHandle) -> Vec<Display> {
     }
 }
 
+/// Opening and closing one at a time, so a second open never races the first for a label.
+static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Esc closes the overlays from Rust, whichever display or app has the keyboard.
+const ESCAPE: &str = "Escape";
+
 /// Opens one overlay per display, replacing any open ones. `mode` opens on that mode instead of
 /// the remembered one. Display changes while it is open are not followed: reopening fixes them.
+/// Any failure closes every overlay already built, so none is left covering a display.
 pub fn open(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Result<(), String> {
     if mode.is_some_and(|m| !MODES.contains(&m)) {
         return Err("Choose audio only, the entire screen, a window or an area.".into());
     }
-    close(app);
+    let _one = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+    close_all(app);
+    let result = build(app, kind, mode);
+    if result.is_err() {
+        close_all(app);
+    }
+    result
+}
+
+fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+    // destroy() finishes on the main thread: wait (at most 1 s) until the old labels are free.
+    for _ in 0..100 {
+        if !app
+            .webview_windows()
+            .keys()
+            .any(|l| l.starts_with("capture-"))
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let displays = displays(app);
     if displays.is_empty() {
         return Err("No display found for the screen setup.".into());
@@ -183,6 +210,15 @@ pub fn open(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Re
         .iter()
         .position(|d| d.1 == 0.0 && d.2 == 0.0)
         .unwrap_or(0);
+    app.global_shortcut()
+        .on_shortcut(ESCAPE, |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || close(&app));
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    crate::window_native::activate_self(app);
     for (i, &(id, x, y, width, height)) in displays.iter().enumerate() {
         let mut url = format!("capture/?display={id}&kind={kind:?}");
         if let Some(mode) = mode {
@@ -218,6 +254,16 @@ pub fn open(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Re
 }
 
 pub fn close(app: &tauri::AppHandle) {
+    let _one = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+    close_all(app);
+}
+
+fn close_all(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let shortcuts = app.global_shortcut();
+    if shortcuts.is_registered(ESCAPE) {
+        let _ = shortcuts.unregister(ESCAPE);
+    }
     for (label, window) in app.webview_windows() {
         if label.starts_with("capture-") {
             let _ = window.destroy();
