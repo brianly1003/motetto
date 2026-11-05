@@ -53,6 +53,11 @@ pub struct MeetingSummary {
     /// Keep or Remove in Quick check (SPEC 7.13). Written with the notes.
     #[serde(default)]
     pub unconfirmed: Vec<String>,
+    /// Milliseconds before Stop the pointer left the recorded screen, for trim to suggest cutting;
+    /// None unless Stop was a mouse click and the pointer had left.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub reach_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -321,6 +326,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        reach_ms: None,
         has_video: false,
     }
 }
@@ -448,6 +454,7 @@ pub fn import(
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        reach_ms: None,
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -713,6 +720,7 @@ mod tests {
                     notes_language: None,
                     apps: vec![],
                     unconfirmed: vec![],
+                    reach_ms: None,
                     has_video: false,
                 },
             )
@@ -761,6 +769,7 @@ mod tests {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                reach_ms: None,
                 has_video: false,
             };
             save(&root, &summary).unwrap();

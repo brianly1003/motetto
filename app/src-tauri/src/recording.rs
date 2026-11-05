@@ -126,8 +126,9 @@ pub fn spawn(
                                 // Click dots for a recorded picture; Task 6 supplies the target for the reach.
                                 let clicks = screen.as_ref().and_then(|_| {
                                     let dir = std::path::Path::new(base).parent()?;
-                                    Some(crate::clicks::start(dir, offset_ms, None))
+                                    Some(crate::clicks::start(&app, dir, offset_ms, None))
                                 });
+                                let part_began = std::time::Instant::now();
                                 let result = motetto_core::capture::record_with_levels(
                                     base,
                                     stop.clone(),
@@ -141,6 +142,15 @@ pub fn spawn(
                                 )
                                 .map_err(|e| e.to_string());
                                 picture.take();
+                                if let Some(clicks) = &clicks {
+                                    let stop_ms =
+                                        offset_ms + part_began.elapsed().as_millis() as u64;
+                                    let _ = crate::bookmarks::set_reach(
+                                        &root,
+                                        &id,
+                                        clicks.reach(stop_ms),
+                                    );
+                                }
                                 drop(clicks);
                                 if let Some(progress) = progress {
                                     let _ = progress.join();
@@ -356,6 +366,7 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                reach_ms: None,
                 has_video: false,
             },
         )?;

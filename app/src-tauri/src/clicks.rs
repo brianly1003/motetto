@@ -66,7 +66,12 @@ pub struct Clicks;
 
 /// Click capture is macOS only for now; elsewhere the recording simply has no dots.
 #[cfg(not(target_os = "macos"))]
-pub fn start(_dir: &Path, _part_offset_ms: u64, _target: Option<TargetRect>) -> Clicks {
+pub fn start(
+    _app: &tauri::AppHandle,
+    _dir: &Path,
+    _part_offset_ms: u64,
+    _target: Option<TargetRect>,
+) -> Clicks {
     Clicks
 }
 
@@ -109,6 +114,13 @@ mod native {
         NSProcessInfo::processInfo().systemUptime()
     }
 
+    /// The monitor's token. AppKit's monitor calls are made on the main thread only, and the token
+    /// is only ever taken out and used there.
+    struct Token(Retained<AnyObject>);
+    // SAFETY: the token is created, read and removed only inside main-thread closures; other
+    // threads just move the box that holds it.
+    unsafe impl Send for Token {}
+
     #[derive(Default)]
     struct Shared {
         clicks: Vec<u64>,
@@ -117,7 +129,8 @@ mod native {
 
     /// Handle for one part's monitor; dropping it removes the monitor and flushes the clicks.
     pub struct Clicks {
-        monitor: Option<Retained<AnyObject>>,
+        app: tauri::AppHandle,
+        monitor: Arc<Mutex<Option<Token>>>,
         done: Arc<AtomicBool>,
         worker: Option<JoinHandle<()>>,
         shared: Arc<Mutex<Shared>>,
@@ -149,22 +162,34 @@ mod native {
 
     /// Watch left clicks anywhere (needs no permission for the app's own windows; others may need
     /// Input Monitoring, which leaves the dots out) and, with a target, sample the pointer.
-    pub fn start(dir: &Path, part_offset_ms: u64, target: Option<TargetRect>) -> Clicks {
+    pub fn start(
+        app: &tauri::AppHandle,
+        dir: &Path,
+        part_offset_ms: u64,
+        target: Option<TargetRect>,
+    ) -> Clicks {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let begun = uptime_s();
-        let handler_shared = shared.clone();
-        let handler = RcBlock::new(move |event: NonNull<NSEvent>| {
-            // SAFETY: AppKit passes a live NSEvent for the duration of this call.
-            let at = unsafe { event.as_ref() }.timestamp();
-            if let Ok(mut s) = handler_shared.lock() {
-                s.clicks.push(to_meeting_ms(part_offset_ms, begun, at));
+        let monitor = Arc::new(Mutex::new(None));
+        let (handler_shared, slot) = (shared.clone(), monitor.clone());
+        // AppKit wants its monitor calls on the main thread, which also delivers the handler.
+        let _ = app.run_on_main_thread(move || {
+            let handler = RcBlock::new(move |event: NonNull<NSEvent>| {
+                // SAFETY: AppKit passes a live NSEvent for the duration of this call.
+                let at = unsafe { event.as_ref() }.timestamp();
+                if let Ok(mut s) = handler_shared.lock() {
+                    s.clicks.push(to_meeting_ms(part_offset_ms, begun, at));
+                }
+            });
+            // AppKit copies the block; the token is removed in Drop.
+            let token = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
+                NSEventMask::LeftMouseDown,
+                &handler,
+            );
+            if let (Ok(mut slot), Some(token)) = (slot.lock(), token) {
+                *slot = Some(Token(token));
             }
         });
-        // AppKit copies the block; the returned token is removed in Drop.
-        let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
-            NSEventMask::LeftMouseDown,
-            &handler,
-        );
         let done = Arc::new(AtomicBool::new(false));
         let file = dir.join("screen-clicks.json");
         let worker = {
@@ -194,6 +219,7 @@ mod native {
             })
         };
         Clicks {
+            app: app.clone(),
             monitor,
             done,
             worker: Some(worker),
@@ -204,10 +230,17 @@ mod native {
 
     impl Drop for Clicks {
         fn drop(&mut self) {
-            if let Some(monitor) = self.monitor.take() {
-                // SAFETY: the token came from addGlobalMonitor and is removed exactly once.
-                unsafe { NSEvent::removeMonitor(&monitor) };
-            }
+            // Queued behind the install on the main thread; it never waits, so Drop cannot
+            // deadlock there. The token is taken out, so it is removed exactly once.
+            let slot = self.monitor.clone();
+            let _ = self.app.run_on_main_thread(move || {
+                if let Ok(mut slot) = slot.lock()
+                    && let Some(Token(monitor)) = slot.take()
+                {
+                    // SAFETY: the token came from addGlobalMonitor and is removed once, here.
+                    unsafe { NSEvent::removeMonitor(&monitor) };
+                }
+            });
             self.done.store(true, Ordering::Release);
             if let Some(worker) = self.worker.take() {
                 let _ = worker.join();
