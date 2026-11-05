@@ -98,6 +98,21 @@ pub fn set_reach(root: &Path, id: &str, reach_ms: u64) -> Result<(), String> {
     write(root, &value)
 }
 
+/// Changes the saved summary as a whole, marks and reach included (a trim moves them).
+pub fn update(
+    root: &Path,
+    id: &str,
+    change: impl FnOnce(&mut MeetingSummary),
+) -> Result<MeetingSummary, String> {
+    let _guard = WRITER
+        .lock()
+        .map_err(|_| "Meeting storage is unavailable")?;
+    let mut value = library::summary(root, id)?;
+    change(&mut value);
+    write(root, &value)?;
+    Ok(value)
+}
+
 pub const LOCKED: &str = "These notes are locked. Unlock them to edit.";
 
 /// Lock or unlock a meeting's notes for review (SPEC 7.11); the user's choice, kept like the title.

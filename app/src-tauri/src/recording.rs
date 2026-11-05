@@ -480,6 +480,7 @@ fn create(root: &Path, id: &str, setup: Option<&RecordSetup>) -> Result<PathBuf,
                     library::MeetingKind::Meeting
                 },
                 facts,
+                deleted_kind: Default::default(),
                 has_video: false,
             },
         )?;

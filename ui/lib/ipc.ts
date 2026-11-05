@@ -98,6 +98,10 @@ export const recordNow = () => /Mac/.test(navigator.platform) ? openCapture('Cal
 export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});
 export const deleteVideo = (id:string) => invoke<void>('delete_video',{id});
 export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});
+/** Trims a saved screen recording to fromMs..toMs; the full original goes to Recently deleted. */
+export const trimVideo = (id:string, fromMs:number, toMs:number) => invoke<MeetingSummary>('trim_video',{id, fromMs, toMs});
+/** Undo of a trim: the full original comes back from Recently deleted. */
+export const restoreTrim = (id:string) => invoke<MeetingSummary>('restore_trim',{id});
 export const dontAskForApp = (callId: string) => invoke<void>("dont_ask_for_app", { callId });
 export const undoDontAsk = (appId: string) => invoke<void>("undo_dont_ask", { appId });
 export const holdAsk = (hold: boolean) => invoke<void>("hold_ask", { hold });

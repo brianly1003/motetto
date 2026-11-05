@@ -64,6 +64,18 @@ pub struct MeetingSummary {
     /// What a screen recording recorded and how, for its page's fact chips.
     #[serde(default)]
     pub facts: Option<ScreenFacts>,
+    /// What a Recently deleted row holds: a whole meeting, or the full video a trim replaced
+    /// (its id is then `<id>-full`).
+    #[serde(default)]
+    pub deleted_kind: DeletedKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DeletedKind {
+    #[default]
+    Meeting,
+    TrimmedOriginal,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
@@ -368,6 +380,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         reach_ms: None,
         kind: Default::default(),
         facts: None,
+        deleted_kind: Default::default(),
         has_video: false,
     }
 }
@@ -498,6 +511,7 @@ pub fn import(
         reach_ms: None,
         kind: Default::default(),
         facts: None,
+        deleted_kind: Default::default(),
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -766,6 +780,7 @@ mod tests {
                     reach_ms: None,
                     kind: Default::default(),
                     facts: None,
+                    deleted_kind: Default::default(),
                     has_video: false,
                 },
             )
@@ -834,6 +849,7 @@ mod tests {
                 reach_ms: None,
                 kind: Default::default(),
                 facts: None,
+                deleted_kind: Default::default(),
                 has_video: false,
             };
             save(&root, &summary).unwrap();

@@ -22,6 +22,7 @@ pub mod slice;
 pub mod summarize;
 pub mod transcribe;
 pub mod translate;
+pub mod trim;
 pub mod verify;
 pub mod whisper;
 

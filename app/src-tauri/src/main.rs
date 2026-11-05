@@ -49,6 +49,7 @@ mod speech;
 mod transcript_edits;
 mod translations;
 mod tray;
+mod trim;
 mod window_native;
 
 fn main() {

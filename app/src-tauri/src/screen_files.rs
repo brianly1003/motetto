@@ -173,7 +173,7 @@ fn files(dir: &Path) -> Result<Vec<String>, String> {
     }
     Ok(names)
 }
-fn move_files(from: &Path, to: &Path, names: &[String]) -> Result<(), String> {
+pub(crate) fn move_files(from: &Path, to: &Path, names: &[String]) -> Result<(), String> {
     for name in names {
         if to.join(name).symlink_metadata().is_ok() {
             return Err("A video already exists at the destination".into());

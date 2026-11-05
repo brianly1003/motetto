@@ -113,6 +113,8 @@ pub fn run() {
             list_screen_sources,
             crate::meeting_actions::delete_video,
             crate::meeting_actions::restore_video,
+            crate::trim::trim_video,
+            crate::trim::restore_trim,
             dont_ask_for_app,
             undo_dont_ask,
             hold_ask,
