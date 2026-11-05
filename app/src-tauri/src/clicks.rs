@@ -48,6 +48,49 @@ fn contains(rect: &TargetRect, x: f64, y: f64) -> bool {
     x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
 }
 
+/// An area's rect, relative to its display, in global points: offset by the display's origin.
+#[cfg(any(target_os = "macos", test))]
+fn on_display(origin: (f64, f64), area: &motetto_core::video::AreaRect) -> TargetRect {
+    TargetRect {
+        x: origin.0 + area.x,
+        y: origin.1 + area.y,
+        width: area.width,
+        height: area.height,
+    }
+}
+
+/// What the pointer is tested against: a window's frame, an area of a display, or the whole
+/// display, in global points. None when the window or display is gone (no reach then).
+#[cfg(target_os = "macos")]
+pub fn target(target: &motetto_core::video::ScreenTarget) -> Option<TargetRect> {
+    use motetto_core::video::ScreenTarget;
+    let display = |id: u32| {
+        crate::window_native::displays()
+            .into_iter()
+            .find(|d| d.0 == id)
+    };
+    match target {
+        ScreenTarget::Window(id) => {
+            let (x, y, width, height) = motetto_core::capture::window_frame(*id)?;
+            Some(TargetRect {
+                x,
+                y,
+                width,
+                height,
+            })
+        }
+        ScreenTarget::Display(id) => display(*id).map(|(_, x, y, width, height)| TargetRect {
+            x,
+            y,
+            width,
+            height,
+        }),
+        ScreenTarget::Area { display: id, rect } => {
+            display(*id).map(|(_, x, y, ..)| on_display((x, y), rect))
+        }
+    }
+}
+
 /// The file's text after adding clicks; a missing or unreadable file starts a new list.
 #[cfg(any(target_os = "macos", test))]
 fn append_json(existing: Option<&str>, new: &[u64]) -> String {
@@ -287,6 +330,43 @@ mod tests {
         };
         assert!(contains(&rect, 100.0, 100.0));
         assert!(!contains(&rect, 100.0, 200.0));
+    }
+
+    #[test]
+    fn an_area_is_placed_on_its_display() {
+        let area = motetto_core::video::AreaRect {
+            x: 10.0,
+            y: 20.0,
+            width: 300.0,
+            height: 200.0,
+        };
+        assert_eq!(
+            on_display((-1440.0, 0.0), &area),
+            TargetRect {
+                x: -1430.0,
+                y: 20.0,
+                width: 300.0,
+                height: 200.0,
+            }
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_display_target_is_its_whole_frame() {
+        use motetto_core::video::ScreenTarget;
+        for (id, x, y, width, height) in crate::window_native::displays() {
+            assert_eq!(
+                target(&ScreenTarget::Display(id)),
+                Some(TargetRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                })
+            );
+        }
+        assert_eq!(target(&ScreenTarget::Window(0)), None);
     }
 
     #[test]

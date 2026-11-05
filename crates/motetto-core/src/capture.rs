@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 mod screen;
 mod track;
 use screen::picture_filter;
-pub use screen::{screen_windows, window_display};
+pub use screen::{screen_windows, window_display, window_frame};
 use track::{Track, Wav};
 
 fn wait_for_stop(
@@ -143,7 +143,7 @@ fn record_tracks(
                     width,
                     height,
                     screen.preset,
-                    !audio,
+                    tracks,
                 )?;
                 let video = Arc::new(Encoding::new(writer));
                 let config = SCStreamConfiguration::new()
@@ -155,10 +155,14 @@ fn record_tracks(
                     .with_pixel_format(PixelFormat::BGRA)
                     .with_preserves_aspect_ratio(true)
                     .map_err(|e| e.to_string())?;
-                let config = match area {
+                let mut config = match area {
                     Some(rect) => config.with_source_rect(rect),
                     None => config,
                 };
+                // Drawn click rings need macOS 15; older systems record without them.
+                if screen.clicks {
+                    let _ = config.set_shows_mouse_clicks(true);
+                }
                 let mut stream =
                     SCStream::new_with_delegate(&filter, &config, PictureDelegate(video.clone()))
                         .map_err(|e| e.to_string())?;
@@ -386,7 +390,14 @@ mod tests {
         let base = dir.join("rehearsal").to_string_lossy().into_owned();
         let stop = Stop::default();
         let timer = stop.clone();
+        // Listing shareable content takes 6-14 s on some Macs: a fixed 2 s timer stopped before
+        // the stream began. Two seconds from the first mic buffer (its WAV appearing) instead.
+        let first = format!("{base}.mic.wav");
         std::thread::spawn(move || {
+            let waited = Instant::now();
+            while !std::path::Path::new(&first).exists() && waited.elapsed().as_secs() < 60 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
             std::thread::sleep(Duration::from_secs(2));
             timer.store(true, Ordering::SeqCst);
         });
@@ -421,6 +432,7 @@ mod tests {
             target: ScreenTarget::Display(display.display_id()),
             preset: video::Preset::Smaller,
             cursor: true,
+            clicks: false,
             path: format!("{base}.screen.mp4"),
             scale: 1.0,
             progress: None,
@@ -504,6 +516,7 @@ mod tests {
             },
             preset: video::Preset::Smaller,
             cursor: true,
+            clicks: false,
             path: format!("{base}.screen.mp4"),
             scale: 1.0,
             progress: None,
@@ -554,6 +567,68 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs Screen Recording and Microphone permission; records an area and the mic"]
+    fn mic_without_app_sounds_gives_the_video_one_audio_track() {
+        let display = SCShareableContent::get()
+            .unwrap()
+            .displays()
+            .into_iter()
+            .next()
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!("motetto-mic-area-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("part-0000").to_string_lossy().into_owned();
+        let screen = ScreenCapture {
+            target: ScreenTarget::Area {
+                display: display.display_id(),
+                rect: video::AreaRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 400.0,
+                    height: 300.0,
+                },
+            },
+            preset: video::Preset::Smaller,
+            cursor: true,
+            clicks: true,
+            path: format!("{base}.screen.mp4"),
+            scale: 1.0,
+            progress: None,
+        };
+        let stop = Stop::default();
+        let timer = stop.clone();
+        let first = format!("{base}.mic.wav");
+        std::thread::spawn(move || {
+            let waited = Instant::now();
+            while !std::path::Path::new(&first).exists() && waited.elapsed().as_secs() < 60 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            std::thread::sleep(Duration::from_secs(3));
+            timer.store(true, Ordering::Relaxed);
+        });
+        let mic_only = Tracks {
+            mic: true,
+            system: false,
+        };
+        let captured =
+            record_with_levels(&base, stop, None, None, Some(&screen), mic_only).unwrap();
+        assert_eq!(captured.files, [format!("{base}.mic.wav")]);
+        assert_eq!(captured.video.unwrap().error, None);
+        let probe = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-show_entries", "stream=codec_name"])
+            .args(["-of", "csv=p=0", &screen.path])
+            .output();
+        match probe {
+            Ok(output) => {
+                let codecs = String::from_utf8(output.stdout).unwrap();
+                assert_eq!(codecs.lines().collect::<Vec<_>>(), ["h264", "aac"]);
+            }
+            Err(e) => eprintln!("ffprobe unavailable ({e}); track check skipped"),
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn video_only_with_a_tiny_area_fails_at_once() {
         // Without Screen Recording permission the call fails earlier, which is also immediate.
         let display = SCShareableContent::get()
@@ -574,6 +649,7 @@ mod tests {
             },
             preset: video::Preset::Smaller,
             cursor: false,
+            clicks: false,
             path: format!("{base}.screen.mp4"),
             scale: 1.0,
             progress: None,

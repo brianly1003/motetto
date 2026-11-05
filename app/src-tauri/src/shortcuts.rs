@@ -223,7 +223,9 @@ fn handle(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
 /// The record key: Stop, Resume, or open the screen setup when nothing is recording.
 pub fn record_key(state: &SessionState) -> Option<Action> {
     Some(match state {
-        SessionState::Recording | SessionState::Paused => Action::Stop,
+        SessionState::Recording | SessionState::Paused => {
+            Action::Stop(crate::controller::StopSource::Keyboard)
+        }
         SessionState::Stopped { .. } => Action::Resume,
         SessionState::Idle => Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
         _ => return None,

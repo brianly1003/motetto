@@ -58,6 +58,45 @@ pub struct MeetingSummary {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub reach_ms: Option<u64>,
+    /// A screen recording saved as just the video, or a meeting (notes make it one).
+    #[serde(default)]
+    pub kind: MeetingKind,
+    /// What a screen recording recorded and how, for its page's fact chips.
+    #[serde(default)]
+    pub facts: Option<ScreenFacts>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum MeetingKind {
+    #[default]
+    Meeting,
+    Screen,
+}
+
+/// A kind this version doesn't know (written by a newer one) reads as a meeting.
+impl<'de> Deserialize<'de> for MeetingKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("screen") => Self::Screen,
+            _ => Self::Meeting,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ScreenFacts {
+    /// The window's app, the area or the display, as the setup named it.
+    pub source: String,
+    /// "window", "area" or "display".
+    pub what: String,
+    pub mic_off: bool,
+    pub app_sounds: bool,
+    pub clicks: bool,
+    /// The video's size in pixels; 0 until the first picture part is saved.
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -327,6 +366,8 @@ fn unreadable(id: &str) -> MeetingSummary {
         apps: vec![],
         unconfirmed: vec![],
         reach_ms: None,
+        kind: Default::default(),
+        facts: None,
         has_video: false,
     }
 }
@@ -455,6 +496,8 @@ pub fn import(
         apps: vec![],
         unconfirmed: vec![],
         reach_ms: None,
+        kind: Default::default(),
+        facts: None,
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -721,6 +764,8 @@ mod tests {
                     apps: vec![],
                     unconfirmed: vec![],
                     reach_ms: None,
+                    kind: Default::default(),
+                    facts: None,
                     has_video: false,
                 },
             )
@@ -733,6 +778,23 @@ mod tests {
         assert_eq!(meeting.notes_md, "### Action items");
         assert_eq!(meeting.transcript, "[00:00] Hello");
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn unknown_kind_reads_as_meeting() {
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready","kind":"podcast"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(summary.kind, MeetingKind::Meeting);
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready","kind":"screen"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(summary.kind, MeetingKind::Screen);
+        // Saved before kinds existed.
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!((summary.kind, summary.facts), (MeetingKind::Meeting, None));
+        assert_eq!(
+            serde_json::to_value(MeetingKind::Screen).unwrap(),
+            serde_json::json!("screen")
+        );
     }
     #[test]
     fn list_skips_other_folders_and_flags_unreadable_meetings() {
@@ -770,6 +832,8 @@ mod tests {
                 apps: vec![],
                 unconfirmed: vec![],
                 reach_ms: None,
+                kind: Default::default(),
+                facts: None,
                 has_video: false,
             };
             save(&root, &summary).unwrap();

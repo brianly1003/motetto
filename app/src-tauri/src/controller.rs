@@ -16,7 +16,7 @@ pub enum Action {
     Start(Option<RecordSetup>),
     /// Record now from the tray or the shortcut: open the setup bar, which starts later.
     OpenCapture(crate::capture_overlay::CaptureKind),
-    Stop,
+    Stop(StopSource),
     StopMeeting(String),
     Pause,
     /// Another mic was chosen: a new part when recording, nothing otherwise.
@@ -61,6 +61,13 @@ pub enum Action {
         mode: Mode,
     },
 }
+/// What pressed Stop: a mouse click (the Pill, a page or the tray menu) or a key. Only a click
+/// suggests trimming the reach for Stop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopSource {
+    Mouse,
+    Keyboard,
+}
 pub enum Message {
     ScreenSnapshot(mpsc::Sender<Option<(AppState, Stop)>>),
     ScreenWatch {
@@ -94,6 +101,14 @@ pub enum Job {
         stop: Stop,
         screen: Option<ScreenPick>,
         while_sharing: bool,
+        /// The choices made before recording; None records as before (both tracks, notes).
+        setup: Option<RecordSetup>,
+        /// Set when this part ends with a Stop clicked with the mouse.
+        mouse_stop: Arc<AtomicBool>,
+    },
+    /// A video-only recording ended: it is ready as it is, with no transcript or notes.
+    SaveClip {
+        id: String,
     },
     Finish {
         id: String,
@@ -286,6 +301,8 @@ struct Engine<H> {
     busy: Arc<AtomicBool>,
     shared: Arc<Mutex<AppState>>,
     stop: Option<Stop>,
+    /// The current part's "stopped by a mouse click" flag (`Job::Capture::mouse_stop`).
+    mouse_stop: Option<Arc<AtomicBool>>,
     owns_busy: bool,
     capture_failed: bool,
     exiting: bool,
@@ -313,6 +330,7 @@ impl<H: Host> Engine<H> {
             busy,
             shared,
             stop: None,
+            mouse_stop: None,
             owns_busy: false,
             capture_failed: false,
             exiting: false,
@@ -471,9 +489,13 @@ impl<H: Host> Engine<H> {
                 if self.session.app.meeting_id.as_ref() != Some(&id) {
                     return Ok(());
                 }
+                self.stopped_by(StopSource::Keyboard);
                 Command::StopRecordingInMain
             }
-            Action::Stop => Command::StopRecordingInMain,
+            Action::Stop(source) => {
+                self.stopped_by(source);
+                Command::StopRecordingInMain
+            }
             Action::Keep => Command::KeepRecording,
             Action::SwitchMic => {
                 if self.session.app.state != SessionState::Recording {
@@ -528,6 +550,12 @@ impl<H: Host> Engine<H> {
             self.host.show_main();
         }
         Ok(())
+    }
+    /// Tell the worker how the running part is being stopped, before the stop itself.
+    fn stopped_by(&self, source: StopSource) {
+        if let Some(flag) = &self.mouse_stop {
+            flag.store(source == StopSource::Mouse, Ordering::SeqCst);
+        }
     }
     /// Take the one-meeting reservation and fresh readiness before a recording can start.
     fn reserve(&mut self, now: u64) -> Result<(), String> {
@@ -687,6 +715,8 @@ impl<H: Host> Engine<H> {
                 Effect::StartCapture { meeting_id, .. } => {
                     let stop = Stop::default();
                     self.stop = Some(stop.clone());
+                    let mouse_stop = Arc::new(AtomicBool::new(false));
+                    self.mouse_stop = Some(mouse_stop.clone());
                     self.host.job(Job::Capture {
                         id: meeting_id,
                         offset_ms: self.session.app.elapsed_ms,
@@ -704,6 +734,8 @@ impl<H: Host> Engine<H> {
                             .screen
                             .as_ref()
                             .is_some_and(|s| s.while_sharing.is_some()),
+                        setup: self.session.app.setup.clone(),
+                        mouse_stop,
                     })
                 }
                 Effect::StopCapture => {
@@ -714,6 +746,7 @@ impl<H: Host> Engine<H> {
                     id: meeting_id,
                     apps: self.session.app_names(),
                 }),
+                Effect::SaveClip { meeting_id } => self.host.job(Job::SaveClip { id: meeting_id }),
                 Effect::Discard { meeting_id } => self.host.job(Job::Discard { id: meeting_id }),
                 Effect::Trash { meeting_id } => self.host.job(Job::Trash { id: meeting_id }),
                 Effect::NotifyShort { seconds } => {

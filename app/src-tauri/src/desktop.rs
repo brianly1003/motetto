@@ -308,7 +308,10 @@ pub fn run() {
                     ),
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
-                    "stop" => dispatch(app.clone(), Action::Stop),
+                    "stop" => dispatch(
+                        app.clone(),
+                        Action::Stop(crate::controller::StopSource::Mouse),
+                    ),
                     "screen" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || {
@@ -491,7 +494,8 @@ async fn start_recording(app: tauri::AppHandle, notes_only: Option<bool>) -> Res
 }
 #[tauri::command]
 async fn stop_recording(app: tauri::AppHandle) -> Result<(), String> {
-    act(app, Action::Stop).await
+    // The Pill's and the meeting page's Stop buttons.
+    act(app, Action::Stop(crate::controller::StopSource::Mouse)).await
 }
 #[tauri::command]
 async fn pause_recording(app: tauri::AppHandle) -> Result<(), String> {

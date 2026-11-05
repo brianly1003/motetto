@@ -122,6 +122,7 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
             target,
             preset: video::Preset::parse(&settings.screen_preset),
             cursor: settings.screen_cursor,
+            clicks: false,
             path: path.into(),
             scale,
             progress: None,

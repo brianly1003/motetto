@@ -60,6 +60,7 @@ impl Host for Fake {
                 self.stops.lock().unwrap().push(stop);
                 format!("capture:{offset_ms}")
             }
+            Job::SaveClip { id } => format!("save-clip:{id}"),
             Job::Finish { .. } => "finish".into(),
             Job::Discard { .. } => "discard".into(),
             Job::Trash { id } => format!("trash:{id}"),
@@ -133,7 +134,7 @@ fn publishes_and_announces_before_capture_and_rejects_overlap() {
 fn resume_has_fresh_stop_and_excludes_pause_from_offset() {
     let mut e = engine();
     e.action(Action::Start(None), 0).unwrap();
-    e.action(Action::Stop, 25_000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 25_000).unwrap();
     assert!(e.host.stops.lock().unwrap()[0].load(Ordering::SeqCst));
     e.action(Action::Resume, 29_000).unwrap();
     let stops = e.host.stops.lock().unwrap();
@@ -153,7 +154,7 @@ fn resume_has_fresh_stop_and_excludes_pause_from_offset() {
 fn deadline_wins_over_resume_and_processing_only_runs_once() {
     let mut e = engine();
     e.action(Action::Start(None), 0).unwrap();
-    e.action(Action::Stop, 25_000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 25_000).unwrap();
     e.action(Action::Resume, 35_000).unwrap();
     e.apply(Command::Tick, 36_000);
     assert!(matches!(
@@ -175,7 +176,7 @@ fn deadline_wins_over_resume_and_processing_only_runs_once() {
 fn short_recording_discards_after_grace_and_releases_import_gate() {
     let mut e = engine();
     e.action(Action::Start(None), 0).unwrap();
-    e.action(Action::Stop, 2_000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 2_000).unwrap();
     e.apply(Command::Tick, 11_999);
     assert!(e.busy.load(Ordering::SeqCst));
     e.apply(Command::Tick, 12_000);
@@ -196,7 +197,7 @@ fn discard_in_the_pill_trashes_without_notes_and_releases_the_gate() {
             .iter()
             .any(|l| l.starts_with("trash:"))
     );
-    e.action(Action::Stop, 30_000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 30_000).unwrap();
     e.action(Action::Discard, 31_000).unwrap();
     let id = e.session.app.discarded.clone().unwrap().meeting_id;
     assert!(e.host.log.lock().unwrap().contains(&format!("trash:{id}")));
@@ -317,7 +318,7 @@ fn bookmarks_use_recording_time_and_reject_stopped_sessions() {
     e.action(Action::Start(None), 0).unwrap();
     e.apply(Command::Tick, 25_000);
     assert_eq!(e.mark().unwrap(), 25_000);
-    e.action(Action::Stop, 25_000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 25_000).unwrap();
     assert!(e.mark().is_err());
     e.action(Action::Resume, 29_000).unwrap();
     e.apply(Command::Tick, 30_000);
@@ -574,7 +575,7 @@ fn saved_preferences_set_timers_discard_and_initial_size() {
     e.action(Action::Pause, 200).unwrap();
     e.action(Action::Resume, 300).unwrap();
     assert_eq!(e.session.app.companion.size, CompanionSize::Sidecar);
-    e.action(Action::Stop, 1000).unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 1000).unwrap();
     e.apply(Command::Tick, 11000);
     assert!(e.host.log.lock().unwrap().contains(&"finish".into()));
     assert!(!e.host.log.lock().unwrap().contains(&"discard".into()));
@@ -584,14 +585,14 @@ fn saved_preferences_set_timers_discard_and_initial_size() {
 fn explicit_stop_restores_main_after_stopping_but_automatic_stop_does_not() {
     for paused in [false, true] {
         let mut e = engine();
-        e.action(Action::Stop, 0).unwrap();
+        e.action(Action::Stop(StopSource::Mouse), 0).unwrap();
         assert!(!e.host.log.lock().unwrap().iter().any(|s| s == "show-main"));
         e.action(Action::Start(None), 0).unwrap();
         if paused {
             e.action(Action::Pause, 25_000).unwrap();
         }
         e.host.log.lock().unwrap().clear();
-        e.action(Action::Stop, 26_000).unwrap();
+        e.action(Action::Stop(StopSource::Mouse), 26_000).unwrap();
         assert!(matches!(e.session.app.state, SessionState::Stopped { .. }));
         assert!(e.host.stops.lock().unwrap()[0].load(Ordering::SeqCst));
         assert!(!e.session.app.companion.visible);
@@ -736,7 +737,7 @@ fn record_now_shortcut_opens_setup() {
     ));
     assert!(matches!(
         crate::shortcuts::record_key(&SessionState::Recording),
-        Some(Action::Stop)
+        Some(Action::Stop(StopSource::Keyboard))
     ));
     // The controller opens the setup instead of recording; nothing starts until start_capture.
     let mut e = engine();
@@ -767,4 +768,34 @@ fn a_clip_started_while_asking_declines_the_call_and_keeps_its_setup() {
         e.session.app.setup.as_ref().map(|s| &s.mic),
         Some(&MicChoice::Off)
     );
+}
+#[test]
+fn a_stopped_clip_is_saved_and_the_worker_knows_how_it_was_stopped() {
+    let clip = RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: false,
+        notes: false,
+        clicks: true,
+        screen: Some(ScreenPick {
+            choice: ScreenChoice::Display { id: 1 },
+            name: "Built-in Display".into(),
+        }),
+    };
+    let mut e = engine();
+    e.action(Action::Start(Some(clip.clone())), 0).unwrap();
+    let mouse = e.mouse_stop.clone().unwrap();
+    e.action(Action::Stop(StopSource::Mouse), 30_000).unwrap();
+    assert!(mouse.load(Ordering::SeqCst));
+    e.apply(Command::Tick, 60_000);
+    assert_eq!(e.session.app.state, SessionState::Idle);
+    let log = e.host.log.lock().unwrap().clone();
+    assert!(log.iter().any(|l| l.starts_with("save-clip:")), "{log:?}");
+    assert!(!log.iter().any(|l| l == "finish"));
+    // A key press leaves the flag down: no reach to suggest.
+    let mut e = engine();
+    e.action(Action::Start(Some(clip)), 0).unwrap();
+    let mouse = e.mouse_stop.clone().unwrap();
+    e.action(Action::Stop(StopSource::Keyboard), 30_000)
+        .unwrap();
+    assert!(!mouse.load(Ordering::SeqCst));
 }

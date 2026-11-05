@@ -28,6 +28,7 @@ const PROCESS_RUNNING_OUTPUT: u32 = fourcc(b"piro");
 
 const ON_SCREEN_ONLY: u32 = 1 << 0; // kCGWindowListOptionOnScreenOnly
 const EXCLUDE_DESKTOP: u32 = 1 << 4; // kCGWindowListExcludeDesktopElements
+const INCLUDING_WINDOW: u32 = 1 << 3; // kCGWindowListOptionIncludingWindow
 
 #[repr(C)]
 struct PropertyAddress {
@@ -61,6 +62,7 @@ unsafe extern "C" {
     static kCGWindowOwnerPID: CFStringRef;
     static kCGWindowName: CFStringRef;
     static kCGWindowNumber: CFStringRef;
+    static kCGWindowBounds: CFStringRef;
 }
 
 fn address(selector: u32) -> PropertyAddress {
@@ -255,6 +257,48 @@ pub(crate) fn window_order() -> Result<Vec<u32>, String> {
     })
 }
 
+/// A window's frame as (x, y, width, height) in global points, top-left origin; None when the
+/// Window Server doesn't know the window.
+pub(crate) fn window_bounds(id: u32) -> Option<(f64, f64, f64, f64)> {
+    autoreleasepool(|_| {
+        // SAFETY: plain C call with a valid option and window id; the result is a +1 CFArrayRef
+        // or NULL.
+        let raw = unsafe { CGWindowListCopyWindowInfo(INCLUDING_WINDOW, id) };
+        if raw.is_null() {
+            return None;
+        }
+        // SAFETY: `raw` is a non-null CFArray of CFDictionary we own (Copy rule); the wrapper
+        // releases it on drop.
+        let windows: CFArray<CFDictionary<CFString, CFType>> =
+            unsafe { CFArray::wrap_under_create_rule(raw.cast()) };
+        // SAFETY: the key constants are immutable CFStrings that live for the whole process.
+        let (number_key, bounds_key) = unsafe {
+            (
+                CFString::wrap_under_get_rule(kCGWindowNumber),
+                CFString::wrap_under_get_rule(kCGWindowBounds),
+            )
+        };
+        let window = windows.iter().find(|w| {
+            w.find(&number_key)
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_i64())
+                == Some(i64::from(id))
+        })?;
+        // The bounds are a dictionary of X, Y, Width and Height numbers.
+        let bounds = window.find(&bounds_key)?.downcast::<CFDictionary>()?;
+        // SAFETY: the dictionary's keys are CFStrings and its values CFNumbers (CGWindow.h).
+        let bounds: CFDictionary<CFString, CFType> =
+            unsafe { CFDictionary::wrap_under_get_rule(bounds.as_concrete_TypeRef()) };
+        let get = |key: &str| {
+            bounds
+                .find(CFString::new(key))
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_f64())
+        };
+        Some((get("X")?, get("Y")?, get("Width")?, get("Height")?))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +307,16 @@ mod tests {
     fn selectors_are_big_endian_fourcc() {
         assert_eq!(SCOPE_GLOBAL, 0x676c_6f62);
         assert_eq!(PROCESS_OBJECT_LIST, 0x7072_7323);
+    }
+
+    #[test]
+    fn every_listed_window_has_bounds() {
+        // Window lists need no permission; a Mac without windows passes vacuously.
+        for id in window_order().unwrap_or_default().into_iter().take(5) {
+            let (_, _, width, height) = window_bounds(id).expect("listed window has bounds");
+            assert!(width >= 0.0 && height >= 0.0);
+        }
+        assert_eq!(window_bounds(0), None);
     }
 
     #[test]

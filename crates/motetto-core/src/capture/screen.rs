@@ -129,3 +129,9 @@ pub fn window_display(id: u32) -> Option<u32> {
         })
         .map(|d| d.display_id())
 }
+
+/// A window's frame as (x, y, width, height) in global points, top-left origin, from the Window
+/// Server: quick, unlike listing shareable content.
+pub fn window_frame(id: u32) -> Option<(f64, f64, f64, f64)> {
+    crate::platform::macos_calls::window_bounds(id)
+}

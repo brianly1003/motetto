@@ -241,6 +241,8 @@ pub struct ScreenCapture {
     pub target: ScreenTarget,
     pub preset: Preset,
     pub cursor: bool,
+    /// Draw a ring where the mouse clicks (macOS 15 and later).
+    pub clicks: bool,
     pub path: String,
     pub scale: f64,
     pub progress: Option<std::sync::mpsc::SyncSender<VideoOutcome>>,

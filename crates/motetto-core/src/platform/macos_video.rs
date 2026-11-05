@@ -24,8 +24,11 @@ pub(crate) enum Input {
 
 struct State {
     writer: Retained<AVAssetWriter>,
-    /// The video input, then Them and Me unless the picture has no audio.
+    /// The video input, then an AAC input per recorded track (Them, then Me).
     inputs: Vec<Retained<AVAssetWriterInput>>,
+    /// Where Them's and Me's samples go in `inputs`; None for a track that isn't recorded.
+    them: Option<usize>,
+    me: Option<usize>,
     origin: Option<f64>,
     /// No audio: the first frame sets the origin instead of the audio clock.
     origin_from_frames: bool,
@@ -35,7 +38,7 @@ struct State {
 // SAFETY: every access to the retained writer and inputs is serialized by Writer's mutex.
 unsafe impl Send for State {}
 
-/// An MP4 writer with a video input and separate Them/You AAC inputs, or video alone.
+/// An MP4 writer with a video input and an AAC input for each recorded track, or video alone.
 pub(crate) struct Writer(Mutex<State>);
 
 fn any<T: Message>(value: Retained<T>) -> Retained<AnyObject> {
@@ -56,8 +59,9 @@ impl Writer {
         width: u32,
         height: u32,
         preset: Preset,
-        origin_from_frames: bool,
+        tracks: crate::capture::Tracks,
     ) -> Result<Self, String> {
+        let origin_from_frames = !tracks.mic && !tracks.system;
         match path.symlink_metadata() {
             Ok(_) => return Err("a screen recording already exists at this path".into()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -147,11 +151,15 @@ impl Writer {
                     Some(&audio_settings),
                 )
             };
-            let inputs = if origin_from_frames {
-                vec![video]
-            } else {
-                vec![video, audio(), audio()]
+            let mut inputs = vec![video];
+            let mut add = |on: bool| {
+                on.then(|| {
+                    inputs.push(audio());
+                    inputs.len() - 1
+                })
             };
+            let them = add(tracks.system);
+            let me = add(tracks.mic);
             for input in &inputs {
                 input.setExpectsMediaDataInRealTime(true);
                 if !writer.canAddInput(input) {
@@ -162,6 +170,8 @@ impl Writer {
             Ok(Self(Mutex::new(State {
                 writer,
                 inputs,
+                them,
+                me,
                 origin: None,
                 origin_from_frames,
                 finished: false,
@@ -241,11 +251,13 @@ impl Writer {
                 sample
             };
             let index = match input {
-                Input::Video => 0,
-                Input::Them => 1,
-                Input::Me => 2,
+                Input::Video => Some(0),
+                Input::Them => s.them,
+                Input::Me => s.me,
             };
-            let target = s.inputs.get(index).ok_or("the video has no audio track")?;
+            let target = index
+                .and_then(|i| s.inputs.get(i))
+                .ok_or("the video has no such audio track")?;
             if !target.isReadyForMoreMediaData() {
                 return Ok(None);
             }
@@ -467,6 +479,10 @@ impl SCStreamOutputTrait for Picture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const BOTH: crate::capture::Tracks = crate::capture::Tracks {
+        mic: true,
+        system: true,
+    };
 
     #[test]
     fn encoder_error_keeps_the_first_failure_through_finalization() {
@@ -479,7 +495,7 @@ mod tests {
                 .as_nanos()
         ));
         let encoding =
-            Encoding::new(Writer::create(&path, 320, 240, Preset::Smaller, false).unwrap());
+            Encoding::new(Writer::create(&path, 320, 240, Preset::Smaller, BOTH).unwrap());
         encoding.fail("disk full".into());
         encoding.fail("second failure".into());
         assert!(encoding.failed());
@@ -490,11 +506,42 @@ mod tests {
     }
 
     #[test]
+    fn only_recorded_tracks_get_an_audio_input() {
+        let path = std::env::temp_dir().join(format!(
+            "motetto-tracks-{}-{}.mp4",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mic_only = crate::capture::Tracks {
+            mic: true,
+            system: false,
+        };
+        let writer = Writer::create(&path, 320, 240, Preset::Smaller, mic_only).unwrap();
+        let s = writer.0.lock().unwrap();
+        assert_eq!((s.inputs.len(), s.them, s.me), (2, None, Some(1)));
+        assert!(!s.origin_from_frames);
+        drop(s);
+        let both = Writer::create(
+            &path.with_extension("both.mp4"),
+            320,
+            240,
+            Preset::Smaller,
+            BOTH,
+        )
+        .unwrap();
+        let s = both.0.lock().unwrap();
+        assert_eq!((s.inputs.len(), s.them, s.me), (3, Some(1), Some(2)));
+    }
+
+    #[test]
     fn an_existing_video_is_never_overwritten() {
         let path =
             std::env::temp_dir().join(format!("motetto-existing-video-{}.mp4", std::process::id()));
         std::fs::write(&path, b"existing video").unwrap();
-        assert!(Writer::create(&path, 320, 240, Preset::Sharp, false).is_err());
+        assert!(Writer::create(&path, 320, 240, Preset::Sharp, BOTH).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"existing video");
         std::fs::remove_file(path).unwrap();
     }
