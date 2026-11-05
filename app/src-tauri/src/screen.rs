@@ -198,12 +198,14 @@ fn watch_decision(
     if state.current().is_some() && free < 2_000_000_000 {
         return Some(Action::ScreenDiskLow);
     }
+    // A picked window is watched for loss like the call window, but is never re-picked by a rule.
+    let picked = matches!(state.pick.choice, ScreenChoice::Window { .. });
     if state.while_sharing.is_some()
-        || !matches!(state.pick.choice, ScreenChoice::CallWindow { .. })
+        || !(picked || matches!(state.pick.choice, ScreenChoice::CallWindow { .. }))
     {
         return None;
     }
-    if state.waiting {
+    if state.waiting && !picked {
         return found.map(|_| Action::ScreenFound);
     }
     // A minimized/covered window still exists; its last frame remains the picture.
@@ -309,6 +311,21 @@ mod tests {
             watch_decision(&state, None, false, 1, 0),
             Some(Action::ScreenDiskLow)
         ));
+    }
+    #[test]
+    fn a_picked_window_is_lost_when_gone_but_never_re_picked() {
+        let mut state = window();
+        state.pick.choice = ScreenChoice::Window {
+            window_id: 7,
+            app: "Notes".into(),
+        };
+        assert!(watch_decision(&state, None, true, 7, u64::MAX).is_none());
+        assert!(matches!(
+            watch_decision(&state, None, false, 7, u64::MAX),
+            Some(Action::ScreenLost)
+        ));
+        state.waiting = true;
+        assert!(watch_decision(&state, Some(2), false, 0, u64::MAX).is_none());
     }
     #[test]
     fn export_bindings() {

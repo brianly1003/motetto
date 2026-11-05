@@ -53,14 +53,35 @@ pub fn fit_size(width: f64, height: f64, preset: Preset) -> (u32, u32) {
     )
 }
 
+#[derive(Debug, Clone)]
 pub struct WindowInfo {
     pub id: u32,
     pub bundle_id: String,
     pub title: String,
+    pub x: f64,
+    pub y: f64,
     pub width: f64,
     pub height: f64,
+    pub app: String,
+    /// Front-to-back order index; 0 is the front-most window.
+    pub layer: i64,
     pub on_screen: bool,
     pub own: bool,
+}
+
+/// Windows a person can point at: on screen, not ours, at least 200 by 150, in the order given.
+pub fn pickable(all: &[WindowInfo]) -> Vec<WindowInfo> {
+    all.iter()
+        .filter(|w| {
+            w.on_screen
+                && !w.own
+                && w.width.is_finite()
+                && w.height.is_finite()
+                && w.width >= 200.0
+                && w.height >= 150.0
+        })
+        .cloned()
+        .collect()
 }
 
 pub fn pick_window(windows: &[WindowInfo], rule: &AppRule, rules: &[AppRule]) -> Option<u32> {
@@ -349,11 +370,37 @@ mod tests {
             id,
             bundle_id: bundle.into(),
             title: title.into(),
+            x: 0.0,
+            y: 0.0,
             width,
             height,
+            app: String::new(),
+            layer: 0,
             on_screen: true,
             own: false,
         }
+    }
+
+    #[test]
+    fn pickable_drops_own_small_and_offscreen() {
+        let mut own = window(1, "com.motetto.app", "Motetto", 800.0, 600.0);
+        own.own = true;
+        let small = window(2, "com.example.a", "Small", 150.0, 100.0);
+        let mut hidden = window(3, "com.example.b", "Hidden", 800.0, 600.0);
+        hidden.on_screen = false;
+        let good_a = window(4, "com.example.c", "A", 800.0, 600.0);
+        let good_b = window(5, "com.example.d", "B", 200.0, 150.0);
+        let ids: Vec<u32> = pickable(&[own, small, hidden, good_a, good_b])
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        assert_eq!(ids, [4, 5]);
+    }
+
+    #[test]
+    fn pickable_lists_any_app() {
+        let notes = window(1, "com.example.notes", "Notes", 800.0, 600.0);
+        assert_eq!(pickable(&[notes]).len(), 1);
     }
 
     #[test]

@@ -65,8 +65,11 @@ pub(super) fn picture_filter(
 }
 
 /// Available windows, including off-screen windows so a watcher can distinguish hiding from loss.
+/// `layer` is the front-to-back index; windows the Window Server does not list keep ScreenCaptureKit's
+/// order after the listed ones.
 pub fn screen_windows() -> Result<Vec<video::WindowInfo>, Box<dyn Error>> {
-    Ok(SCShareableContent::get()?
+    let order = crate::platform::macos_calls::window_order().unwrap_or_default();
+    let mut windows: Vec<_> = SCShareableContent::get()?
         .windows()
         .into_iter()
         .map(|w| {
@@ -79,13 +82,27 @@ pub fn screen_windows() -> Result<Vec<video::WindowInfo>, Box<dyn Error>> {
                     .map(|a| a.bundle_identifier())
                     .unwrap_or_default(),
                 title: w.title().unwrap_or_default(),
+                x: frame.origin.x,
+                y: frame.origin.y,
                 width: frame.size.width,
                 height: frame.size.height,
+                app: app
+                    .as_ref()
+                    .map(|a| a.application_name())
+                    .unwrap_or_default(),
+                layer: 0,
                 on_screen: w.is_on_screen(),
                 own: app.is_some_and(|a| a.process_id() as u32 == std::process::id()),
             }
         })
-        .collect())
+        .collect();
+    // Stable sort: listed windows by their index, unlisted ones after them in the original order.
+    let rank = |id: u32| order.iter().position(|o| *o == id).unwrap_or(order.len());
+    windows.sort_by_key(|w| rank(w.id));
+    for (i, w) in windows.iter_mut().enumerate() {
+        w.layer = i as i64;
+    }
+    Ok(windows)
 }
 
 /// The display containing a window's centre, for converting its point-sized frame to pixels.

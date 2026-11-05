@@ -60,6 +60,7 @@ unsafe extern "C" {
     fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> *const c_void;
     static kCGWindowOwnerPID: CFStringRef;
     static kCGWindowName: CFStringRef;
+    static kCGWindowNumber: CFStringRef;
 }
 
 fn address(selector: u32) -> PropertyAddress {
@@ -226,6 +227,32 @@ fn titles_in_pool(bundle_ids: &[String]) -> Result<Vec<(String, String)>, String
         }
     }
     Ok(titles)
+}
+
+/// Window ids of the on-screen windows, front to back (the Window Server's own order).
+pub(crate) fn window_order() -> Result<Vec<u32>, String> {
+    autoreleasepool(|_| {
+        // SAFETY: plain C call with valid option flags; the result is a +1 CFArrayRef or NULL.
+        let raw = unsafe { CGWindowListCopyWindowInfo(ON_SCREEN_ONLY | EXCLUDE_DESKTOP, 0) };
+        if raw.is_null() {
+            return Err("CGWindowListCopyWindowInfo returned no window list".into());
+        }
+        // SAFETY: `raw` is a non-null CFArray of CFDictionary we own (Copy rule); the wrapper
+        // releases it on drop.
+        let windows: CFArray<CFDictionary<CFString, CFType>> =
+            unsafe { CFArray::wrap_under_create_rule(raw.cast()) };
+        // SAFETY: the key constant is an immutable CFString that lives for the whole process.
+        let number_key = unsafe { CFString::wrap_under_get_rule(kCGWindowNumber) };
+        Ok(windows
+            .iter()
+            .filter_map(|w| {
+                w.find(&number_key)
+                    .and_then(|v| v.downcast::<CFNumber>())
+                    .and_then(|n| n.to_i32())
+                    .and_then(|n| u32::try_from(n).ok())
+            })
+            .collect())
+    })
 }
 
 #[cfg(test)]
