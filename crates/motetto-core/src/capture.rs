@@ -486,6 +486,65 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs Screen Recording permission; records a still area of the main display for four seconds"]
+    fn a_still_area_lasts_until_stop() {
+        let display = SCShareableContent::get()
+            .unwrap()
+            .displays()
+            .into_iter()
+            .next()
+            .unwrap();
+        // The display's bottom-right corner: wallpaper or the Dock, which stand still.
+        let (right, bottom) = (f64::from(display.width()), f64::from(display.height()));
+        let dir = std::env::temp_dir().join(format!("motetto-still-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let base = dir.join("part-0000").to_string_lossy().into_owned();
+        let screen = ScreenCapture {
+            target: ScreenTarget::Area {
+                display: display.display_id(),
+                rect: video::AreaRect {
+                    x: right - 400.0,
+                    y: bottom - 300.0,
+                    width: 400.0,
+                    height: 300.0,
+                },
+            },
+            preset: video::Preset::Smaller,
+            cursor: false,
+            clicks: false,
+            path: format!("{base}.screen.mp4"),
+            scale: 1.0,
+            progress: None,
+        };
+        let stop = Stop::default();
+        let timer = stop.clone();
+        // Starting the stream can take seconds; the four count from the first frame written.
+        let written = std::path::PathBuf::from(&screen.path);
+        let thread = std::thread::spawn(move || {
+            let waiting = std::time::Instant::now();
+            while !std::fs::metadata(&written).is_ok_and(|m| m.len() > 0)
+                && waiting.elapsed() < Duration::from_secs(60)
+            {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            std::thread::sleep(Duration::from_secs(4));
+            timer.store(true, Ordering::Relaxed);
+        });
+        let silent = Tracks {
+            mic: false,
+            system: false,
+        };
+        let result = record_with_levels(&base, stop, None, None, Some(&screen), silent);
+        thread.join().unwrap();
+        assert_eq!(result.unwrap().video.unwrap().error, None);
+        let length = crate::trim::duration_ms(std::path::Path::new(&screen.path)).unwrap();
+        eprintln!("still area: {length} ms");
+        assert!(length >= 3500, "{length} ms");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     #[ignore = "needs Screen Recording permission; records an area of the main display for three seconds"]
     fn silent_area_plays() {
         let display = SCShareableContent::get()

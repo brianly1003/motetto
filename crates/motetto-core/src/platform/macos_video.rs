@@ -294,6 +294,13 @@ impl Writer {
             if s.writer.status() != AVAssetWriterStatus::Writing {
                 return Err(format!("video encoder failed: {:?}", s.writer.error()));
             }
+            // ScreenCaptureKit sends no frames while the picture stands still, so a picture-only
+            // part would end at its last change; the session ends at Stop instead, on the host
+            // clock the frames' timestamps use, and the last frame stays up until then.
+            if s.origin_from_frames {
+                s.writer
+                    .endSessionAtSourceTime(objc2_core_media::CMClock::host_time_clock().time());
+            }
             for input in &s.inputs {
                 input.markAsFinished();
             }
