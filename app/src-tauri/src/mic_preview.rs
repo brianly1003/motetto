@@ -11,7 +11,31 @@ use std::sync::{
 static LEVEL: std::sync::LazyLock<Arc<AtomicU32>> = std::sync::LazyLock::new(Arc::default);
 /// The running preview: its stop signal and thread.
 type Running = (mpsc::Sender<()>, std::thread::JoinHandle<()>);
-static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+/// Whether the setup is open, and the running preview. One lock, so a start and a stop never
+/// overlap, and a start that arrives after the overlays closed is refused.
+struct Preview {
+    open: bool,
+    running: Option<Running>,
+}
+static PREVIEW: Mutex<Preview> = Mutex::new(Preview {
+    open: false,
+    running: None,
+});
+
+#[derive(Debug, PartialEq, Eq)]
+enum Start {
+    /// The setup is closed (or closing): the mic stays untouched.
+    Refuse,
+    Already,
+    Go,
+}
+fn decide(open: bool, running: bool) -> Start {
+    match (open, running) {
+        (false, _) => Start::Refuse,
+        (true, true) => Start::Already,
+        (true, false) => Start::Go,
+    }
+}
 
 /// Root mean square of the samples, the scale the recording meters use.
 pub fn rms(samples: &[f32]) -> f32 {
@@ -22,9 +46,11 @@ pub fn rms(samples: &[f32]) -> f32 {
 }
 
 fn start() -> Result<(), String> {
-    let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
-    if running.is_some() {
-        return Ok(());
+    let mut preview = PREVIEW.lock().unwrap_or_else(|e| e.into_inner());
+    match decide(preview.open, preview.running.is_some()) {
+        Start::Refuse => return Err("The screen setup is closed.".into()),
+        Start::Already => return Ok(()),
+        Start::Go => {}
     }
     #[cfg(target_os = "macos")]
     {
@@ -39,7 +65,7 @@ fn start() -> Result<(), String> {
             .recv()
             .unwrap_or_else(|_| Err("The mic preview stopped.".into()));
         if result.is_ok() {
-            *running = Some((stop, thread));
+            preview.running = Some((stop, thread));
         } else {
             let _ = thread.join();
         }
@@ -47,19 +73,31 @@ fn start() -> Result<(), String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = &mut running;
+        let _ = &mut preview;
         Err("No mic preview on this system.".into())
     }
 }
 
-/// Stops the preview and waits for the engine to let go of the mic.
-pub fn stop() {
-    let running = RUNNING.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some((stop, thread)) = running {
+fn stop_locked(preview: &mut Preview) {
+    if let Some((stop, thread)) = preview.running.take() {
         drop(stop);
         let _ = thread.join();
     }
     LEVEL.store(0, Ordering::Relaxed);
+}
+
+/// Stops the preview and waits for the engine to let go of the mic.
+pub fn stop() {
+    stop_locked(&mut PREVIEW.lock().unwrap_or_else(|e| e.into_inner()));
+}
+
+/// The overlays opened (true) or closed (false); closing stops the preview for good.
+pub fn set_open(open: bool) {
+    let mut preview = PREVIEW.lock().unwrap_or_else(|e| e.into_inner());
+    preview.open = open;
+    if !open {
+        stop_locked(&mut preview);
+    }
 }
 
 /// On while the setup is open with the system default mic; off for None or another device.
@@ -85,6 +123,14 @@ pub fn capture_level() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_start_after_the_setup_closed_is_refused() {
+        assert_eq!(decide(false, false), Start::Refuse);
+        assert_eq!(decide(false, true), Start::Refuse);
+        assert_eq!(decide(true, true), Start::Already);
+        assert_eq!(decide(true, false), Start::Go);
+    }
 
     #[test]
     fn rms_of_silence_and_a_square_wave() {

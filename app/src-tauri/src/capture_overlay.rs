@@ -348,6 +348,7 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
             let _ = window.set_focus();
         }
     }
+    crate::mic_preview::set_open(true);
     watch(app);
     Ok(())
 }
@@ -361,8 +362,8 @@ fn close_all(app: &tauri::AppHandle) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     WATCHER.fetch_add(1, Ordering::SeqCst);
     CONTROLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    // The mic is free again before a recording starts.
-    crate::mic_preview::stop();
+    // The mic is free again before a recording starts, and a late preview start is refused.
+    crate::mic_preview::set_open(false);
     let shortcuts = app.global_shortcut();
     if shortcuts.is_registered(ESCAPE) {
         let _ = shortcuts.unregister(ESCAPE);

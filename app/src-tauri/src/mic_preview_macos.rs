@@ -38,28 +38,43 @@ pub fn run(
     );
     // SAFETY: the engine and its input node are made and used only on this thread; the tap is
     // installed before the engine starts and removed before it stops, and the block outlives it.
-    let engine = unsafe {
+    // With no input device AVAudioEngine throws instead of failing: caught, and the meter hides.
+    let made = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
         let engine = AVAudioEngine::new();
         let input = engine.inputNode();
         let format = input.outputFormatForBus(0);
+        if format.channelCount() == 0 || format.sampleRate() <= 0.0 {
+            return Err("No microphone to listen to.".to_string());
+        }
         let block: *const _ = &*tap;
         input.installTapOnBus_bufferSize_format_block(0, 1024, Some(&format), block as *mut _);
         engine.prepare();
         match engine.startAndReturnError() {
-            Ok(()) => engine,
+            Ok(()) => Ok(engine),
             Err(error) => {
                 input.removeTapOnBus(0);
-                let _ = started.send(Err(error.localizedDescription().to_string()));
-                return;
+                Err(error.localizedDescription().to_string())
             }
+        }
+    }));
+    let engine = match made {
+        Ok(Ok(engine)) => engine,
+        Ok(Err(error)) => {
+            let _ = started.send(Err(error));
+            return;
+        }
+        Err(_) => {
+            let _ = started.send(Err("The microphone can't be listened to.".into()));
+            return;
         }
     };
     let _ = started.send(Ok(()));
     let _ = stop.recv();
-    // SAFETY: the same thread that started the engine removes its tap and stops it.
-    unsafe {
+    // SAFETY: the same thread that started the engine removes its tap and stops it; a throw
+    // here (the device vanished) is caught so the thread still ends.
+    let _ = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
         engine.inputNode().removeTapOnBus(0);
         engine.stop();
-    }
+    }));
     level.store(0, Ordering::Relaxed);
 }
