@@ -24,15 +24,18 @@ pub(crate) enum Input {
 
 struct State {
     writer: Retained<AVAssetWriter>,
-    inputs: [Retained<AVAssetWriterInput>; 3],
+    /// The video input, then Them and Me unless the picture has no audio.
+    inputs: Vec<Retained<AVAssetWriterInput>>,
     origin: Option<f64>,
+    /// No audio: the first frame sets the origin instead of the audio clock.
+    origin_from_frames: bool,
     finished: bool,
 }
 
 // SAFETY: every access to the retained writer and inputs is serialized by Writer's mutex.
 unsafe impl Send for State {}
 
-/// An MP4 writer with a video input and separate Them/You AAC inputs.
+/// An MP4 writer with a video input and separate Them/You AAC inputs, or video alone.
 pub(crate) struct Writer(Mutex<State>);
 
 fn any<T: Message>(value: Retained<T>) -> Retained<AnyObject> {
@@ -53,6 +56,7 @@ impl Writer {
         width: u32,
         height: u32,
         preset: Preset,
+        origin_from_frames: bool,
     ) -> Result<Self, String> {
         match path.symlink_metadata() {
             Ok(_) => return Err("a screen recording already exists at this path".into()),
@@ -143,7 +147,11 @@ impl Writer {
                     Some(&audio_settings),
                 )
             };
-            let inputs = [video, audio(), audio()];
+            let inputs = if origin_from_frames {
+                vec![video]
+            } else {
+                vec![video, audio(), audio()]
+            };
             for input in &inputs {
                 input.setExpectsMediaDataInRealTime(true);
                 if !writer.canAddInput(input) {
@@ -155,12 +163,14 @@ impl Writer {
                 writer,
                 inputs,
                 origin: None,
+                origin_from_frames,
                 finished: false,
             })))
         }
     }
 
-    /// Append on the shared audio host clock used by picture-part WAVs.
+    /// Append on the shared audio host clock used by picture-part WAVs, or on the first
+    /// frame's host time when the picture has no audio.
     pub(crate) fn append(
         &self,
         input: Input,
@@ -181,7 +191,7 @@ impl Writer {
             }
             let seconds = time.value as f64 / f64::from(time.timescale);
             if s.origin.is_none() {
-                if matches!(input, Input::Video) {
+                if matches!(input, Input::Video) && !s.origin_from_frames {
                     return Ok(None);
                 }
                 if !s.writer.startWriting() {
@@ -235,7 +245,7 @@ impl Writer {
                 Input::Them => 1,
                 Input::Me => 2,
             };
-            let target = &s.inputs[index];
+            let target = s.inputs.get(index).ok_or("the video has no audio track")?;
             if !target.isReadyForMoreMediaData() {
                 return Ok(None);
             }
@@ -263,7 +273,11 @@ impl Writer {
         unsafe {
             if s.origin.is_none() {
                 s.writer.cancelWriting();
-                return Err("no audio reached the video encoder".into());
+                return Err(if s.origin_from_frames {
+                    "no picture reached the video encoder".into()
+                } else {
+                    "no audio reached the video encoder".into()
+                });
             }
             if s.writer.status() != AVAssetWriterStatus::Writing {
                 return Err(format!("video encoder failed: {:?}", s.writer.error()));
@@ -464,7 +478,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let encoding = Encoding::new(Writer::create(&path, 320, 240, Preset::Smaller).unwrap());
+        let encoding =
+            Encoding::new(Writer::create(&path, 320, 240, Preset::Smaller, false).unwrap());
         encoding.fail("disk full".into());
         encoding.fail("second failure".into());
         assert!(encoding.failed());
@@ -479,7 +494,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("motetto-existing-video-{}.mp4", std::process::id()));
         std::fs::write(&path, b"existing video").unwrap();
-        assert!(Writer::create(&path, 320, 240, Preset::Sharp).is_err());
+        assert!(Writer::create(&path, 320, 240, Preset::Sharp, false).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"existing video");
         std::fs::remove_file(path).unwrap();
     }

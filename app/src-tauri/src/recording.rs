@@ -129,6 +129,10 @@ pub fn spawn(
                                     Some(app.state::<crate::live::State>().meters.clone()),
                                     mic.as_deref(),
                                     picture.as_ref(),
+                                    motetto_core::capture::Tracks {
+                                        mic: true,
+                                        system: true,
+                                    },
                                 )
                                 .map_err(|e| e.to_string());
                                 picture.take();

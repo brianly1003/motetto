@@ -156,10 +156,64 @@ impl Moments {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A rectangle in points, relative to its display's origin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AreaRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScreenTarget {
     Window(u32),
     Display(u32),
+    Area { display: u32, rect: AreaRect },
+}
+
+/// Clamp an area to its display (points) and size its picture: the clamped rect, then the
+/// output pixels, never upscaled past `rect * scale`. Areas under 32 by 32 points are refused.
+pub fn area_rect(
+    rect: AreaRect,
+    display_w: f64,
+    display_h: f64,
+    scale: f64,
+    preset: Preset,
+) -> Result<(AreaRect, u32, u32), String> {
+    if ![
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        display_w,
+        display_h,
+        scale,
+    ]
+    .iter()
+    .all(|v| v.is_finite())
+        || scale <= 0.0
+    {
+        return Err("the area isn't a valid rectangle".into());
+    }
+    let x = rect.x.clamp(0.0, display_w.max(0.0));
+    let y = rect.y.clamp(0.0, display_h.max(0.0));
+    let width = (rect.x + rect.width).min(display_w) - x;
+    let height = (rect.y + rect.height).min(display_h) - y;
+    if width < 32.0 || height < 32.0 {
+        return Err("the area is too small; pick at least 32 by 32 points".into());
+    }
+    let (out_w, out_h) = fit_size(width * scale, height * scale, preset);
+    Ok((
+        AreaRect {
+            x,
+            y,
+            width,
+            height,
+        },
+        out_w,
+        out_h,
+    ))
 }
 
 pub struct ScreenCapture {
@@ -230,6 +284,64 @@ mod tests {
         }
         assert_eq!(Preset::parse("other"), Preset::Sharp);
         assert_eq!(Preset::parse("smaller").video_bps(), 200_000);
+    }
+
+    fn area(x: f64, y: f64, width: f64, height: f64) -> AreaRect {
+        AreaRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn area_inside_keeps_rect() {
+        let rect = area(100.0, 100.0, 800.0, 500.0);
+        assert_eq!(
+            area_rect(rect, 1512.0, 982.0, 2.0, Preset::Sharp),
+            Ok((rect, 1600, 1000))
+        );
+    }
+
+    #[test]
+    fn area_past_edge_is_clamped() {
+        let (rect, _, _) = area_rect(
+            area(1400.0, 900.0, 400.0, 300.0),
+            1512.0,
+            982.0,
+            2.0,
+            Preset::Sharp,
+        )
+        .unwrap();
+        assert_eq!((rect.width, rect.height), (112.0, 82.0));
+    }
+
+    #[test]
+    fn tiny_area_is_refused() {
+        assert!(
+            area_rect(
+                area(0.0, 0.0, 20.0, 20.0),
+                1512.0,
+                982.0,
+                2.0,
+                Preset::Sharp
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn area_never_upscales_and_is_even() {
+        let (_, width, height) = area_rect(
+            area(0.0, 0.0, 301.0, 201.0),
+            1512.0,
+            982.0,
+            1.0,
+            Preset::Sharp,
+        )
+        .unwrap();
+        assert_eq!((width, height), (300, 200));
     }
 
     fn window(id: u32, bundle: &str, title: &str, width: f64, height: f64) -> WindowInfo {

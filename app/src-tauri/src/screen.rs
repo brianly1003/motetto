@@ -89,15 +89,31 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
                 };
                 ScreenTarget::Window(id)
             }
-            // Picked windows and areas are captured by a later change.
-            ScreenChoice::Window { .. } | ScreenChoice::Area { .. } => return Resolved::NoWindow,
+            ScreenChoice::Window { window_id, .. } => ScreenTarget::Window(*window_id),
+            ScreenChoice::Area {
+                display,
+                x,
+                y,
+                width,
+                height,
+            } => ScreenTarget::Area {
+                display: *display,
+                rect: video::AreaRect {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                },
+            },
         };
         // Unknown backing scales use 1x; source enumeration populates the native display cache.
         let scale = DISPLAYS
             .lock()
             .ok()
             .and_then(|d| match target {
-                ScreenTarget::Display(id) => d.iter().find(|d| d.0 == id).map(|d| d.2),
+                ScreenTarget::Display(id) | ScreenTarget::Area { display: id, .. } => {
+                    d.iter().find(|d| d.0 == id).map(|d| d.2)
+                }
                 ScreenTarget::Window(id) => motetto_core::capture::window_display(id)
                     .and_then(|id| d.iter().find(|d| d.0 == id).map(|d| d.2)),
             })
