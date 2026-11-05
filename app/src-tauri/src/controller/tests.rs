@@ -799,3 +799,23 @@ fn a_stopped_clip_is_saved_and_the_worker_knows_how_it_was_stopped() {
         .unwrap();
     assert!(!mouse.load(Ordering::SeqCst));
 }
+#[test]
+fn none_and_back_to_a_device_restart_the_part() {
+    let mut e = engine();
+    e.action(Action::Start(None), 0).unwrap();
+    // Outside a recording the setup bar owns the choice.
+    let mut idle = engine();
+    assert!(idle.action(Action::SetMic(MicChoice::Off), 0).is_err());
+    e.action(Action::SetMic(MicChoice::Off), 1_000).unwrap();
+    assert_eq!(
+        e.session.app.setup.as_ref().map(|s| &s.mic),
+        Some(&MicChoice::Off)
+    );
+    // A device picked from the call's mic menu brings the mic back, as Settings chose it.
+    e.action(Action::SwitchMic, 2_000).unwrap();
+    assert_eq!(
+        e.session.app.setup.as_ref().map(|s| &s.mic),
+        Some(&MicChoice::Default)
+    );
+    assert_eq!(e.session.app.state, SessionState::Recording);
+}

@@ -106,6 +106,9 @@ pub struct ScreenFacts {
     pub mic_off: bool,
     pub app_sounds: bool,
     pub clicks: bool,
+    /// Frames a second the picture was recorded at; 0 when not known.
+    #[serde(default)]
+    pub fps: u32,
     /// The video's size in pixels; 0 until the first picture part is saved.
     pub width: u32,
     pub height: u32,

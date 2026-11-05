@@ -10,6 +10,10 @@ source: string,
  */
 what: string, mic_off: boolean, app_sounds: boolean, clicks: boolean, 
 /**
+ * Frames a second the picture was recorded at; 0 when not known.
+ */
+fps: number, 
+/**
  * The video's size in pixels; 0 until the first picture part is saved.
  */
 width: number, height: number, };

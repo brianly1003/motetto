@@ -3,4 +3,8 @@ import type { AudioTrack } from "./AudioTrack";
 import type { Moment } from "./Moment";
 import type { VideoPart } from "./VideoPart";
 
-export type MeetingMedia = { tracks: Array<AudioTrack>, videos: Array<VideoPart>, moments: Array<Moment>, duration_ms: number, folder: string, };
+export type MeetingMedia = { tracks: Array<AudioTrack>, videos: Array<VideoPart>, moments: Array<Moment>, 
+/**
+ * Mouse clicks while a screen recording ran, in meeting time (the scrubber's dots).
+ */
+clicks: Array<number>, duration_ms: number, folder: string, };

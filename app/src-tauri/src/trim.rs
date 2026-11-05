@@ -43,8 +43,8 @@ const SUMMARY: &str = "meeting.json";
 const END_SLACK_MS: u64 = 250;
 
 #[derive(Serialize, Deserialize)]
-struct Click {
-    ms: u64,
+pub(crate) struct Click {
+    pub(crate) ms: u64,
 }
 
 /// Joins (file, from_ms, to_ms) pieces into one video at the path.
@@ -55,7 +55,7 @@ pub(crate) struct Media {
     pub(crate) length: fn(&Path) -> Result<u64, String>,
     pub(crate) export: Export,
 }
-const NATIVE: Media = Media {
+pub(crate) const NATIVE: Media = Media {
     length: cut::duration_ms,
     export: cut::export,
 };
@@ -282,6 +282,19 @@ fn build(
     Ok(names)
 }
 
+/// The recording's video parts in timeline order.
+pub(crate) fn videos(dir: &Path) -> Vec<(ScreenPart, PathBuf)> {
+    let mut videos: Vec<(ScreenPart, PathBuf)> =
+        screen_files::read::<Vec<ScreenPart>>(dir, "screen.json")
+            .into_iter()
+            .filter(|part| screen_files::video_name(&part.file))
+            .filter_map(|part| Some((safe_file(dir, &part.file)?, part)))
+            .map(|(path, part)| (part, path))
+            .collect();
+    videos.sort_by_key(|(part, _)| part.offset_ms);
+    videos
+}
+
 pub(crate) fn trim(
     root: &Path,
     id: &str,
@@ -308,14 +321,7 @@ fn trim_with(
     }
     recover(root, id, &dir)?;
     let full = original(root, id)?;
-    let mut videos: Vec<(ScreenPart, PathBuf)> =
-        screen_files::read::<Vec<ScreenPart>>(&dir, "screen.json")
-            .into_iter()
-            .filter(|part| screen_files::video_name(&part.file))
-            .filter_map(|part| Some((safe_file(&dir, &part.file)?, part)))
-            .map(|(path, part)| (part, path))
-            .collect();
-    videos.sort_by_key(|(part, _)| part.offset_ms);
+    let videos = videos(&dir);
     if videos.is_empty() {
         return Err("This recording has no video to trim".into());
     }

@@ -50,6 +50,7 @@ mod transcript_edits;
 mod translations;
 mod tray;
 mod trim;
+mod video_export;
 mod window_native;
 
 fn main() {

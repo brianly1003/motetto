@@ -73,7 +73,7 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
       <time className="t">{elapsedLabel(state.elapsed_ms)}</time>
       <span className="tip">{stopped ? <>The notes start in {remaining ?? "…"} s</> : paused ? "Not recording. Resume when you're ready." : marked !== null ? `${s.marked} ${elapsedLabel(marked)}.` : `Both sides · ${count} line${count === 1 ? "" : "s"}`}</span>
       <span className="sp"/>
-      {!stopped && <MicChip report={mic.report} open={!!micMenu} onToggle={button => { if (micMenu) setMicMenu(null); else openMicMenu(button); }}/>}
+      {!stopped && <MicChip report={mic.report} off={state.setup?.mic.kind === "Off"} open={!!micMenu} onToggle={button => { if (micMenu) setMicMenu(null); else openMicMenu(button); }}/>}
       {!stopped&&<ScreenControl state={state} chip onToast={onToast}/>}
       {stopped || paused
         ? <><button className="doc-action primary" disabled={pending || (stopped && remaining === 0)} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
@@ -84,7 +84,7 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
           <button className="doc-action danger" disabled={pending} onClick={() => act(async () => { await flush.current(); await ipc.stopRecording(); })}>{s.pillStop}</button></>}
     </div>
     {!stopped && !micHidden && <MicNote report={mic.report} done={toast} onHide={() => setMicHidden(true)} className="micnote recnote"/>}
-    {micMenu && mic.report && <MicMenu report={mic.report} recording done={toast} onClose={() => setMicMenu(null)} style={{ position: "fixed", left: micMenu.left, top: micMenu.top, right: "auto" }}/>}
+    {micMenu && mic.report && <MicMenu report={mic.report} recording off={state.setup?.mic.kind === "Off"} done={toast} onClose={() => setMicMenu(null)} style={{ position: "fixed", left: micMenu.left, top: micMenu.top, right: "auto" }}/>}
     <div className="tabs" role="tablist" aria-label={s.meetingViews}>
       {(["notes", "live"] as const).map(key => <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => { void flush.current(); setTab(key); }}>{key === "notes" ? "My notes" : "Live transcript"}</button>)}
     </div>

@@ -42,6 +42,9 @@ pub struct MeetingMedia {
     pub tracks: Vec<AudioTrack>,
     pub videos: Vec<VideoPart>,
     pub moments: Vec<crate::screen::Moment>,
+    /// Mouse clicks while a screen recording ran, in meeting time (the scrubber's dots).
+    #[ts(type = "Array<number>")]
+    pub clicks: Vec<u64>,
     #[ts(type = "number")]
     pub duration_ms: u64,
     pub folder: String,
@@ -123,14 +126,16 @@ pub fn has_video(dir: &Path) -> bool {
     let Ok(tracks) = audio(dir) else {
         return false;
     };
+    // A screen recording without a mic or app sounds has a picture and no audio at all.
     video_parts(dir).into_iter().any(|(part, path)| {
         fs::metadata(path).is_ok_and(|m| m.len() > 0)
-            && tracks.iter().any(|(path, offset)| {
-                *offset == part.offset_ms
-                    && path.file_name().is_some_and(|name| {
-                        name.to_string_lossy().split('.').next() == part.file.split('.').next()
-                    })
-            })
+            && (tracks.is_empty()
+                || tracks.iter().any(|(path, offset)| {
+                    *offset == part.offset_ms
+                        && path.file_name().is_some_and(|name| {
+                            name.to_string_lossy().split('.').next() == part.file.split('.').next()
+                        })
+                }))
     })
 }
 
@@ -196,22 +201,22 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
             waveform,
         });
     }
-    let duration_ms = tracks
-        .iter()
-        .map(|t| t.offset_ms.saturating_add(t.duration_ms))
-        .max()
-        .unwrap_or(0);
     let mut videos = vec![];
     for (part, path) in video_parts(&dir) {
-        let Some(duration_ms) = tracks
+        let heard = tracks
             .iter()
             .filter(|t| {
                 t.offset_ms == part.offset_ms
                     && t.name.split('.').next() == part.file.split('.').next()
             })
             .map(|t| t.duration_ms)
-            .max()
-        else {
+            .max();
+        // Without any audio (no mic, no app sounds) the video's own length places it.
+        let length = match heard {
+            None if tracks.is_empty() => motetto_core::trim::duration_ms(&path).ok(),
+            heard => heard,
+        };
+        let Some(duration_ms) = length else {
             continue;
         };
         let bytes = fs::metadata(&path).map_err(|e| e.to_string())?.len();
@@ -231,19 +236,34 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
         });
     }
     videos.sort_by_key(|v| v.offset_ms);
-    let moments: Vec<crate::screen::Moment> =
-        crate::screen_files::read(&dir, "screen-moments.json");
-    let moments = moments
-        .into_iter()
-        .filter(|m| {
+    let duration_ms = tracks
+        .iter()
+        .map(|t| t.offset_ms.saturating_add(t.duration_ms))
+        .chain(
             videos
                 .iter()
-                .any(|v| m.ms >= v.offset_ms && m.ms < v.offset_ms.saturating_add(v.duration_ms))
-        })
+                .map(|v| v.offset_ms.saturating_add(v.duration_ms)),
+        )
+        .max()
+        .unwrap_or(0);
+    let shown = |ms: u64| {
+        videos
+            .iter()
+            .any(|v| ms >= v.offset_ms && ms < v.offset_ms.saturating_add(v.duration_ms))
+    };
+    let moments: Vec<crate::screen::Moment> =
+        crate::screen_files::read(&dir, "screen-moments.json");
+    let moments = moments.into_iter().filter(|m| shown(m.ms)).collect();
+    let clicks: Vec<crate::trim::Click> = crate::screen_files::read(&dir, "screen-clicks.json");
+    let clicks = clicks
+        .into_iter()
+        .map(|c| c.ms)
+        .filter(|ms| shown(*ms))
         .collect();
     Ok(MeetingMedia {
         videos,
         moments,
+        clicks,
         tracks,
         duration_ms,
         folder: dir.to_string_lossy().into_owned(),
@@ -353,6 +373,14 @@ mod tests {
         assert_eq!(with_video.videos.len(), 1);
         assert_eq!(with_video.videos[0].offset_ms, 500);
         assert_eq!(with_video.videos[0].duration_ms, 1000);
+        assert!(with_video.clicks.is_empty());
+        // Clicks become dots only where there is a picture.
+        fs::write(
+            root.join("1/screen-clicks.json"),
+            r#"[{"ms":600},{"ms":5000}]"#,
+        )
+        .unwrap();
+        assert_eq!(read(&root, "1").unwrap().clicks, vec![600]);
         fs::remove_file(root.join("1").join(video)).unwrap();
         assert!(read(&root, "1").unwrap().videos.is_empty());
         assert!(!library::read(&root, "1").unwrap().has_video);

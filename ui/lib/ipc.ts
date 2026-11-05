@@ -102,6 +102,8 @@ export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});
 export const trimVideo = (id:string, fromMs:number, toMs:number) => invoke<MeetingSummary>('trim_video',{id, fromMs, toMs});
 /** Undo of a trim: the full original comes back from Recently deleted. */
 export const restoreTrim = (id:string) => invoke<MeetingSummary>('restore_trim',{id});
+/** Export MP4…: the save panel, then the whole video; false when the panel was cancelled. */
+export const exportVideo = (id:string) => invoke<boolean>('export_video',{id});
 export const dontAskForApp = (callId: string) => invoke<void>("dont_ask_for_app", { callId });
 export const undoDontAsk = (appId: string) => invoke<void>("undo_dont_ask", { appId });
 export const holdAsk = (hold: boolean) => invoke<void>("hold_ask", { hold });
@@ -120,6 +122,9 @@ import type { MicReport } from "./bindings/MicReport";
 import type { PermissionKind } from "./bindings/PermissionKind";
 export const microphones = () => invoke<MicReport>("microphones");
 export const setMicrophone = (id: string | null) => invoke<MicReport>("set_microphone", { id });
+import type { MicChoice } from "./bindings/MicChoice";
+/** During a recording only: its mic, None included; the next part records with it. */
+export const setMicChoice = (choice: MicChoice) => invoke<MicReport>("set_mic_choice", { choice });
 export const setMicVolume = (id: string, volume: number) => invoke<MicReport>("set_mic_volume", { id, volume });
 export const openSoundSettings = () => invoke<void>("open_sound_settings");
 export const openPermissionSettings = (kind: PermissionKind) => invoke<void>("open_permission_settings", { kind });
@@ -202,7 +207,7 @@ import type { MeetingMedia } from './bindings/MeetingMedia';
 export async function meetingMedia(id: string): Promise<MeetingMedia> {
   const media = await invoke<MeetingMedia>('meeting_media', {id});
   const {convertFileSrc} = await import('@tauri-apps/api/core');
-  return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
+  return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[],clicks:media.clicks??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
 }
 /** macOS plays meeting audio natively (WebKit's WAV playback can freeze the window); false
  *  where the page plays it with audio elements (Windows, fixtures). */

@@ -36,7 +36,7 @@ export const strings = {
   pillQuitQuestion: "Quit while recording?",
   pillStop: "Stop", pillStopped: "Stopped · notes start in", pillStoppedShort: "Stopped · notes in", pillPaused: "Paused · not recording", pillDiscard: "Discard", pillDiscardTitle: "No notes. The recording goes to Recently deleted for 30 days.", pillDiscarded: "Recording discarded. It's in Recently deleted.", pillEnding: "Call over? Stopping in", pillEndingTitle: "{App} stopped using the microphone. Motetto stops then, unless you keep recording.", pillEndingQuiet: "No one is using the microphone. Motetto stops then, unless you keep recording.",
   pause: "Pause", pauseRecording: "Pause recording", pauseTitle: "Pause. Nothing is recorded until you resume.",
-  paused: "Paused", pausedFor: "Paused for", chipRecording: "Recording", chipStopped: "Stopped", seconds: "s", recordingShort: "Recording",
+  paused: "Paused", pausedFor: "Paused for", chipRecording: "Recording", videoOnly: "Video only", fullVideoOf: "Full video of {title}", micNoneRecording: "Your mic is off. Only the other side is recorded now.", chipStopped: "Stopped", seconds: "s", recordingShort: "Recording",
   permissionBody: "Allow notifications for recording reminders and completed notes. Recording controls stay visible even with Focus on.",
   allowNotifications: "Allow notifications", notificationsDenied: "Notifications are off. Turn them on in System Settings > Notifications > Motetto.",
 

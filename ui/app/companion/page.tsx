@@ -14,6 +14,7 @@ import { JumpToNow, useFollow } from "@/components/JumpToNow";
 import { gapLabel, transcriptLines } from "@/lib/transcript";
 import "../../styles/companion.css";
 import { KbdGroup } from "@/components/ui/Kbd";
+import { FilmIcon } from "@/components/ScreenRecordingPage";
 
 export default function Companion() {
   const { state, notice, setNotice, pending, act, gaps } = useSession();
@@ -118,6 +119,8 @@ export default function Companion() {
   const stopped = state?.state.type === "Stopped";
   // Paused keeps an open Sidecar for notes; Dot, Tucked and Pill show the paused bar (Rust sizes it).
   const paused = state?.state.type === "Paused";
+  // A screen recording kept as just the video (mockup .pillvo): no Duet, no captions.
+  const videoOnly = !!state?.setup?.screen && !state.setup.notes;
   // The call's app let go of the mic: the idle stop counts down on the recording clock.
   const endingIn = state?.state.type === "Recording" && state.stops_at_ms != null ? Math.max(0, Math.ceil((state.stops_at_ms - state.elapsed_ms) / 1000)) : null;
   useEffect(() => {
@@ -154,7 +157,7 @@ export default function Companion() {
   const gapsBefore = (index: number) => gaps.filter(gap => lines.findIndex(line => line.ms !== null && line.ms >= gap.at_ms) === index);
   const gapRows = (index: number) => gapsBefore(index).map(gap => <div className="line gap" key={`gap-${gap.at_ms}`}><span className="ts">{elapsedLabel(gap.at_ms)}</span><span className="who"/><span className="tx">{s.pausedFor} {gapLabel(gap.ms)}</span></div>);
   const latest = lines.at(-1);
-  return <><main className="pill" data-screen={state.screen&&!state.screen.waiting&&state.state.type==="Recording"?"on":undefined} data-size={dot ? "dot" : tucked ? "tucked" : sidecar ? "sidecar" : "pill"} data-peek={state.companion.peeking} data-leaving={leaving || undefined} data-asking={prompting || undefined} role="toolbar" tabIndex={0} aria-label={s.companion}
+  return <><main className="pill" data-videoonly={videoOnly && recordingOrPaused ? "" : undefined} data-screen={state.screen&&!state.screen.waiting&&state.state.type==="Recording"?"on":undefined} data-size={dot ? "dot" : tucked ? "tucked" : sidecar ? "sidecar" : "pill"} data-peek={state.companion.peeking} data-leaving={leaving || undefined} data-asking={prompting || undefined} role="toolbar" tabIndex={0} aria-label={s.companion}
     onKeyDown={event => {
       if (event.code === "Space" && event.target === event.currentTarget && state.state.type === "Recording") { event.preventDefault(); void mark(); }
       if (event.key === "Escape" && (state.state.type === "Recording" || paused)) {
@@ -205,7 +208,7 @@ export default function Companion() {
           <button className="primary" disabled={pending} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
           <button className="stop" disabled={pending} onClick={() => act(stop)}>{s.pillStop}</button>
         </> : stopped ? <>
-          <span className="dot stopped" /><span className="pillmsg" role="status">{notice || <><span className="lbl"><span className="long">{s.pillStopped}</span><span className="short">{s.pillStoppedShort}</span></span><span className="num" aria-live="off">{remaining ?? "…"} {s.seconds}</span></>}</span>
+          <span className="dot stopped" /><span className="pillmsg" role="status">{notice || <><span className="lbl"><span className="long">{videoOnly ? "Stopped · saving in" : s.pillStopped}</span><span className="short">{videoOnly ? "Stopped · saving in" : s.pillStoppedShort}</span></span><span className="num" aria-live="off">{remaining ?? "…"} {s.seconds}</span></>}</span>
           <button className="primary" disabled={pending || remaining === 0} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
           <button className="quiet" disabled={pending || remaining === 0} onClick={() => act(ipc.discardRecording)} title={s.pillDiscardTitle}>{s.pillDiscard}</button>
         </> : endingIn !== null && !sidecar ? <>
@@ -217,6 +220,7 @@ export default function Companion() {
         </> : <>
           <span className="dot pulse" aria-hidden="true" />
           <time className="t">{elapsedLabel(state.elapsed_ms)}</time>
+          {videoOnly && <span className="pillvo" title="No transcript or notes for this recording"><FilmIcon/><span>Video only{state.setup?.mic.kind === "Off" ? " · no mic" : ""}</span></span>}
           <Duet you={<button type="button" className={`lm micbtn${mic.report?.issue ? " warn" : ""}`} aria-haspopup="menu" aria-expanded={!!micMenu}
             aria-label={`Your microphone: ${mic.report?.active?.name ?? "system default"}${mic.report?.issue ? ", needs attention" : ""}. Change`}
             onClick={event => { if (micMenu || !mic.report) setMicMenu(null); else openMicMenu(event.currentTarget); }}>You</button>} />
@@ -244,6 +248,6 @@ export default function Companion() {
   {recordingOrPaused&&<ShareVideoOffer state={state}/>}
   {/* Outside the Pill: its rounded clip would cut the menu off. */}
   {micMenu && mic.report && <div ref={micMenuBox} className="micmenu-host" style={{ position: "fixed", left: micMenu.left, top: micMenu.top, zIndex: 60 }}>
-    <MicMenu report={mic.report} recording={state.state.type === "Recording"} done={micDone} onClose={() => setMicMenu(null)} style={{ position: "static" }}/></div>}
+    <MicMenu report={mic.report} recording={state.state.type === "Recording"} off={state.setup?.mic.kind === "Off"} done={micDone} onClose={() => setMicMenu(null)} style={{ position: "static" }}/></div>}
   </>;
 }

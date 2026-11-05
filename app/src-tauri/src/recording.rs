@@ -72,6 +72,17 @@ pub fn spawn(
                                 // none, and one track is transcribed after Stop (one-track captions:
                                 // later).
                                 let settings = app.state::<crate::settings::Store>().get();
+                                // A screen recording's page names its frame rate, as recorded.
+                                if let (0, Ok(settings)) = (offset_ms, &settings) {
+                                    let fps =
+                                        motetto_core::video::Preset::parse(&settings.screen_preset)
+                                            .fps();
+                                    let _ = crate::bookmarks::update(&root, &id, |s| {
+                                        if let Some(facts) = s.facts.as_mut() {
+                                            facts.fps = fps.unsigned_abs();
+                                        }
+                                    });
+                                }
                                 if live_captions(settings.as_ref().ok())
                                     && mic_on
                                     && system_on
@@ -448,6 +459,7 @@ fn create(root: &Path, id: &str, setup: Option<&RecordSetup>) -> Result<PathBuf,
                 mic_off: s.mic == MicChoice::Off,
                 app_sounds: s.app_sounds,
                 clicks: s.clicks,
+                fps: 0,
                 width: 0,
                 height: 0,
             })
@@ -833,6 +845,7 @@ mod tests {
                 mic_off: true,
                 app_sounds: false,
                 clicks: true,
+                fps: 0,
                 width: 1280,
                 height: 800,
             })

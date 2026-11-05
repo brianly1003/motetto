@@ -21,6 +21,8 @@ pub enum Action {
     Pause,
     /// Another mic was chosen: a new part when recording, nothing otherwise.
     SwitchMic,
+    /// The recording's mic, None included: a new part while recording or paused.
+    SetMic(MicChoice),
     SetScreen(Option<ScreenPick>),
     AnswerShareVideo(Option<ScreenPick>),
     ShareVideoAsk(bool),
@@ -497,11 +499,24 @@ impl<H: Host> Engine<H> {
                 Command::StopRecordingInMain
             }
             Action::Keep => Command::KeepRecording,
-            Action::SwitchMic => {
-                if self.session.app.state != SessionState::Recording {
-                    return Ok(());
+            // A setup that fixed the mic (a device, or None) gives way to the one just chosen.
+            Action::SwitchMic => match (&self.session.app.state, &self.session.app.setup) {
+                (SessionState::Recording | SessionState::Paused, Some(setup))
+                    if setup.mic != MicChoice::Default =>
+                {
+                    Command::SetMic(MicChoice::Default)
                 }
-                Command::SwitchMicrophone
+                (SessionState::Recording, _) => Command::SwitchMicrophone,
+                _ => return Ok(()),
+            },
+            Action::SetMic(mic) => {
+                if !matches!(
+                    self.session.app.state,
+                    SessionState::Recording | SessionState::Paused
+                ) {
+                    return Err("Choose the microphone while recording".into());
+                }
+                Command::SetMic(mic)
             }
             Action::Discard => Command::DiscardRecording,
             Action::UndoDiscard => Command::UndoDiscard,

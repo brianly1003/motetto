@@ -28,9 +28,15 @@ export default function RecentlyDeleted({deleted, refresh, notify, onError}: {de
     try { for (const id of ids) await meetingAction(id, action); }
     finally { setBusy(false); await refresh(); }
   }
+  // Meetings first: a trimmed original goes back into its meeting, so that meeting must be back
+  // already. Undo deletes the meetings again; a full video put back stays (trim it again).
   async function restoreAll() {
-    const ids = deleted.map(meeting => meeting.id);
-    try { await each(ids, "restore"); notify(s.restoredAll.replace("{n}", meetingsN(ids.length)), () => each(ids, "delete")); }
+    const meetings = deleted.filter(m => m.deleted_kind !== "trimmed_original").map(m => m.id);
+    const full = deleted.filter(m => m.deleted_kind === "trimmed_original").map(m => m.id);
+    try {
+      await each([...meetings, ...full], "restore");
+      notify(s.restoredAll.replace("{n}", meetingsN(meetings.length + full.length)), meetings.length ? () => each(meetings, "delete") : undefined);
+    }
     catch (error) { onError(String(error)); }
   }
   async function purgeAll() {
