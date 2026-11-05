@@ -57,6 +57,85 @@ pub fn duration_ms(path: &Path) -> Result<u64, String> {
     Ok((seconds * 1000.0).round() as u64)
 }
 
+/// Adds `range` of the asset at `at` in the composition and waits for AVFoundation to load it.
+fn insert(
+    composition: &AVMutableComposition,
+    asset: &AVURLAsset,
+    range: CMTimeRange,
+    at: CMTime,
+) -> Result<(), String> {
+    let (sent, inserted) = mpsc::channel();
+    let handler = block2::RcBlock::new(move |error: *mut NSError| {
+        let _ = sent.send(described(error));
+    });
+    // SAFETY: the composition and asset stay retained until the handler has answered or the wait
+    // gave up; the handler only sends on a channel, which is safe from any queue.
+    unsafe {
+        composition.insertTimeRange_ofAsset_atTime_completionHandler(range, asset, at, &handler)
+    };
+    match inserted.recv_timeout(TIMEOUT) {
+        Ok(None) => Ok(()),
+        Ok(Some(error)) => Err(error),
+        Err(_) => Err("reading the video took too long".into()),
+    }
+}
+
+/// A passthrough export session writing MPEG-4 to `dst`. MPEG-4 is checked against the
+/// session's supported types first: setting an unsupported type raises an Objective-C exception.
+fn session(
+    composition: &AVMutableComposition,
+    dst: &Path,
+) -> Result<Retained<AVAssetExportSession>, String> {
+    // SAFETY: reading framework constants that AVFoundation defines for the process's lifetime.
+    let (preset, mp4) = unsafe { (AVAssetExportPresetPassthrough, AVFileTypeMPEG4) };
+    let mp4 = mp4.ok_or("MPEG-4 isn't available")?;
+    // SAFETY: the composition is retained for the call; the preset is a valid preset name.
+    let session =
+        unsafe { AVAssetExportSession::exportSessionWithAsset_presetName(composition, preset) }
+            .ok_or("the video can't be exported without re-encoding")?;
+    // SAFETY: the session is retained; reading its supported types has no other requirement.
+    let types = unsafe { session.supportedFileTypes() };
+    if !types.to_vec().iter().any(|t| t.isEqualToString(mp4)) {
+        return Err("the video can't be saved as MP4 without re-encoding".into());
+    }
+    let output = url(dst)?;
+    // SAFETY: the URL and the supported file type outlive the calls; the export hasn't started.
+    unsafe {
+        session.setOutputURL(Some(&output));
+        session.setOutputFileType(Some(mp4));
+    }
+    Ok(session)
+}
+
+/// Runs the export and waits for it, cancelling it after the timeout.
+fn run(session: &AVAssetExportSession) -> Result<(), String> {
+    let (sent, done) = mpsc::channel();
+    let handler = block2::RcBlock::new(move || {
+        let _ = sent.send(());
+    });
+    // SAFETY: the session stays retained until it has finished or been cancelled below; the
+    // handler only sends on a channel, which is safe from any queue.
+    unsafe { session.exportAsynchronouslyWithCompletionHandler(&handler) };
+    if done.recv_timeout(TIMEOUT).is_err() {
+        // SAFETY: cancelling a running export of a retained session.
+        unsafe { session.cancelExport() };
+        return Err("trimming took over two minutes and was stopped".into());
+    }
+    // SAFETY: the export has finished, so its status and error are final.
+    let (status, error) = unsafe { (session.status(), session.error()) };
+    if status == AVAssetExportSessionStatus::Completed {
+        Ok(())
+    } else {
+        Err(format!(
+            "can't save the trimmed video: {}",
+            error.map_or_else(
+                || format!("{status:?}"),
+                |e| e.localizedDescription().to_string()
+            )
+        ))
+    }
+}
+
 /// Joins `from_ms..to_ms` of each part, in order, into one MP4 at `dst` without re-encoding.
 /// `dst` must not exist; a failed export leaves nothing there.
 pub fn export(parts: &[(PathBuf, u64, u64)], dst: &Path) -> Result<(), String> {
@@ -66,60 +145,24 @@ pub fn export(parts: &[(PathBuf, u64, u64)], dst: &Path) -> Result<(), String> {
     if dst.symlink_metadata().is_ok() {
         return Err("a video already exists where the trim goes".into());
     }
-    // SAFETY: the composition, assets and session stay retained until the export has finished
-    // or been cancelled; the handlers only send on a channel, which is safe from any queue.
-    let result = unsafe {
-        let composition = AVMutableComposition::composition();
+    // SAFETY: creating an empty composition has no requirements.
+    let composition = unsafe { AVMutableComposition::composition() };
+    let result = (|| {
         let mut at = ms(0)?;
         for (path, from, to) in parts {
-            let asset = asset(path)?;
             let range = CMTimeRange {
                 start: ms(*from)?,
                 duration: ms(to.saturating_sub(*from))?,
             };
-            let (sent, inserted) = mpsc::channel();
-            composition.insertTimeRange_ofAsset_atTime_completionHandler(
-                range,
-                &asset,
-                at,
-                &block2::RcBlock::new(move |error: *mut NSError| {
-                    let _ = sent.send(described(error));
-                }),
-            );
-            match inserted.recv_timeout(TIMEOUT) {
-                Ok(None) => {}
-                Ok(Some(error)) => return Err(format!("can't read {}: {error}", path.display())),
-                Err(_) => return Err("reading the video took too long".into()),
-            }
-            at = at.add(range.duration);
+            let asset = asset(path)?;
+            insert(&composition, &asset, range, at)
+                .map_err(|e| format!("can't read {}: {e}", path.display()))?;
+            // SAFETY: adding two valid millisecond times.
+            at = unsafe { at.add(range.duration) };
         }
-        let session = AVAssetExportSession::exportSessionWithAsset_presetName(
-            &composition,
-            AVAssetExportPresetPassthrough,
-        )
-        .ok_or("the video can't be exported without re-encoding")?;
-        let output = url(dst)?;
-        session.setOutputURL(Some(&output));
-        session.setOutputFileType(AVFileTypeMPEG4);
-        let (sent, done) = mpsc::channel();
-        session.exportAsynchronouslyWithCompletionHandler(&block2::RcBlock::new(move || {
-            let _ = sent.send(());
-        }));
-        if done.recv_timeout(TIMEOUT).is_err() {
-            session.cancelExport();
-            Err("trimming took over two minutes and was stopped".to_string())
-        } else if session.status() != AVAssetExportSessionStatus::Completed {
-            Err(format!(
-                "can't save the trimmed video: {}",
-                session
-                    .error()
-                    .map(|e| e.localizedDescription().to_string())
-                    .unwrap_or_else(|| format!("{:?}", session.status()))
-            ))
-        } else {
-            Ok(())
-        }
-    };
+        let session = session(&composition, dst)?;
+        run(&session)
+    })();
     if result.is_err() {
         let _ = std::fs::remove_file(dst);
     }
