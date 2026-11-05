@@ -3,6 +3,7 @@ import type { AskOffPending } from "./AskOffPending";
 import type { CompanionState } from "./CompanionState";
 import type { Discarded } from "./Discarded";
 import type { ProblemInfo } from "./ProblemInfo";
+import type { RecordSetup } from "./RecordSetup";
 import type { ScreenState } from "./ScreenState";
 import type { SessionState } from "./SessionState";
 import type { Sharing } from "./Sharing";
@@ -27,4 +28,12 @@ stops_at_ms: number | null,
  * After Discard in the Stopped Pill: the meeting went to Recently deleted; the Pill offers
  * Undo until `until_ms` (owner, 2026-10-20).
  */
-discarded: Discarded | null, };
+discarded: Discarded | null, 
+/**
+ * What the user chose before recording; None for the old shape (a call, notes, mic as is).
+ */
+setup: RecordSetup | null, 
+/**
+ * App name of a clip's window that closed and stopped the recording, for the Stopped Pill.
+ */
+screen_closed: string | null, };

@@ -29,6 +29,7 @@ fn start(s: Session, notes_only: bool) -> Session {
         Command::StartManual {
             meeting_id: "m1".into(),
             notes_only,
+            setup: None,
         },
     )
     .0
@@ -93,6 +94,7 @@ fn manual_start_publishes_visible_state_and_notice_before_capture() {
         Command::StartManual {
             meeting_id: "m1".into(),
             notes_only: false,
+            setup: None,
         },
     );
     assert_eq!(s.app.state, SessionState::Recording);
@@ -531,6 +533,7 @@ fn notes_only_needs_no_audio_permissions_ignores_idle_and_skips_grace() {
         Command::StartManual {
             meeting_id: "m1".into(),
             notes_only: true,
+            setup: None,
         },
     );
     assert_eq!(s.app.started_by, Some(StartReason::NotesOnly));
@@ -723,6 +726,7 @@ fn missing_permissions_models_and_disk_block_start_with_prioritized_problems() {
         Command::StartManual {
             meeting_id: "m1".into(),
             notes_only: false,
+            setup: None,
         },
     );
     assert!(
@@ -1057,6 +1061,7 @@ fn expiry_that_exits_cannot_start_another_recording() {
         Command::StartManual {
             meeting_id: "m2".into(),
             notes_only: false,
+            setup: None,
         },
     );
     assert_eq!(s.app.state, SessionState::Idle);
@@ -1524,6 +1529,7 @@ fn pause_resume_keeps_screen_and_idle_clears_it() {
         Command::StartManual {
             meeting_id: "m2".into(),
             notes_only: false,
+            setup: None,
         },
     )
     .0;
@@ -1724,4 +1730,229 @@ fn meeting_names_its_call_apps_including_a_call_already_running_at_record_now() 
     let mut s = s;
     s.idle();
     assert!(start(s, false).app_names().is_empty());
+}
+
+fn window_pick() -> ScreenPick {
+    ScreenPick {
+        choice: ScreenChoice::Window {
+            window_id: 42,
+            app: "Zoom".into(),
+        },
+        name: "Zoom".into(),
+    }
+}
+fn clip_setup(notes: bool) -> RecordSetup {
+    RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: true,
+        notes,
+        clicks: true,
+        screen: Some(window_pick()),
+    }
+}
+fn start_setup(s: Session, setup: RecordSetup) -> (Session, Vec<Effect>) {
+    step(
+        s,
+        0,
+        Command::StartManual {
+            meeting_id: "m1".into(),
+            notes_only: false,
+            setup: Some(setup),
+        },
+    )
+}
+/// A video-only recording: screen picture, mic off, no notes.
+fn clip() -> Session {
+    start_setup(fresh(), clip_setup(false)).0
+}
+
+#[test]
+fn video_only_start_sets_screen_and_setup() {
+    let s = clip();
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert_eq!(s.app.screen.unwrap().pick, window_pick());
+    assert!(s.app.setup.is_some());
+}
+
+#[test]
+fn mic_off_needs_no_mic_permission() {
+    let mut s = fresh();
+    s.readiness.microphone = false;
+    let (s, fx) = start_setup(s, clip_setup(false));
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert!(!fx.iter().any(|e| matches!(e, Effect::NotifyProblem { .. })));
+}
+
+#[test]
+fn video_only_needs_no_speech_model() {
+    let mut s = fresh();
+    s.readiness.speech_model = false;
+    assert_eq!(
+        start_setup(s, clip_setup(false)).0.app.state,
+        SessionState::Recording
+    );
+}
+
+#[test]
+fn notes_with_mic_off_still_need_speech_model() {
+    let mut s = fresh();
+    s.readiness.speech_model = false;
+    let (s, _) = start_setup(s, clip_setup(true));
+    assert_eq!(s.app.state, SessionState::Idle);
+    assert!(matches!(
+        s.app.problem.map(|p| p.problem),
+        Some(Problem::ModelMissing { .. })
+    ));
+}
+
+#[test]
+fn mic_off_still_needs_system_audio_permission() {
+    let mut s = fresh();
+    s.readiness.system_audio = false;
+    assert_eq!(
+        start_setup(s, clip_setup(false)).0.app.state,
+        SessionState::Idle
+    );
+}
+
+#[test]
+fn video_only_ignores_mic_silence() {
+    let s = clip();
+    let (s, _) = step(s, 0, mic(false));
+    let (s, _) = step(s, 31_000, Command::Tick);
+    let (s, _) = step(s, 60_000, Command::Tick);
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert_eq!(s.app.stops_at_ms, None);
+}
+
+#[test]
+fn video_only_window_closed_stops_with_note() {
+    let (s, fx) = step(
+        clip(),
+        5_000,
+        Command::ScreenEnded {
+            lost: true,
+            restart: false,
+        },
+    );
+    assert!(matches!(s.app.state, SessionState::Stopped { .. }));
+    assert_eq!(s.app.screen_closed, Some("Zoom".into()));
+    assert!(work(fx).contains(&Effect::StopCapture));
+}
+
+#[test]
+fn call_during_video_only_asks() {
+    let (s, fx) = detect(clip(), Mode::Ask);
+    assert!(matches!(s.app.state, SessionState::Asking { .. }));
+    let fx = work(fx);
+    assert!(!fx.contains(&Effect::StopCapture));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::AddApp { .. })));
+}
+
+#[test]
+fn yes_saves_clip_and_starts_call() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, fx) = step(
+        s,
+        1,
+        Command::AnswerAsk {
+            call_id: "c1".into(),
+            record: true,
+            screen: None,
+        },
+    );
+    assert_eq!(
+        work(fx),
+        vec![
+            Effect::StopCapture,
+            Effect::SaveClip {
+                meeting_id: "m1".into()
+            },
+            Effect::NotifyRecording {
+                reason: StartReason::App { app: "Zoom".into() }
+            },
+            Effect::StartCapture {
+                meeting_id: "m1".into(),
+                resume: false
+            },
+        ]
+    );
+    assert_eq!(s.app.setup, None);
+    assert_eq!(s.app.state, SessionState::Recording);
+}
+
+#[test]
+fn no_keeps_clip_running() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, fx) = step(
+        s,
+        1,
+        Command::AnswerAsk {
+            call_id: "c1".into(),
+            record: false,
+            screen: None,
+        },
+    );
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert_eq!(s.app.meeting_id.as_deref(), Some("m1"));
+    assert!(s.app.setup.is_some());
+    assert!(work(fx).is_empty());
+}
+
+#[test]
+fn clip_clock_runs_while_the_question_is_open() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, _) = step(s, 4_000, Command::Tick);
+    assert_eq!(s.app.elapsed_ms, 4_000);
+}
+
+#[test]
+fn video_only_stop_then_grace_saves_clip() {
+    let (s, _) = step(clip(), 1_000, Command::StopRecording);
+    let (s, fx) = step(s, 12_000, Command::Tick);
+    let fx = work(fx);
+    assert_eq!(
+        fx,
+        vec![Effect::SaveClip {
+            meeting_id: "m1".into()
+        }]
+    );
+    assert_eq!(s.app.state, SessionState::Idle);
+    assert_eq!(s.app.setup, None);
+}
+
+#[test]
+fn call_recording_keeps_old_rules() {
+    let setup = RecordSetup {
+        mic: MicChoice::Default,
+        app_sounds: true,
+        notes: true,
+        clicks: true,
+        screen: None,
+    };
+    let (s, _) = start_setup(fresh(), setup);
+    let (s, _) = step(s, 0, mic(false));
+    let (s, _) = step(s, 30_000, Command::Tick);
+    assert!(matches!(s.app.state, SessionState::Stopped { .. }));
+}
+
+#[test]
+fn set_mic_while_recording_updates_setup_and_restarts_the_part() {
+    let (s, fx) = step(clip(), 1_000, Command::SetMic(MicChoice::Default));
+    assert_eq!(
+        s.app.setup.as_ref().map(|u| &u.mic),
+        Some(&MicChoice::Default)
+    );
+    assert_eq!(
+        work(fx),
+        vec![
+            Effect::StopCapture,
+            Effect::StartCapture {
+                meeting_id: "m1".into(),
+                resume: true
+            }
+        ]
+    );
+    let (s, _) = step(fresh(), 0, Command::SetMic(MicChoice::Off));
+    assert_eq!(s.app.setup, None);
 }

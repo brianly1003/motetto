@@ -89,6 +89,8 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
                 };
                 ScreenTarget::Window(id)
             }
+            // Picked windows and areas are captured by a later change.
+            ScreenChoice::Window { .. } | ScreenChoice::Area { .. } => return Resolved::NoWindow,
         };
         // Unknown backing scales use 1x; source enumeration populates the native display cache.
         let scale = DISPLAYS

@@ -41,6 +41,10 @@ pub enum Effect {
         resume: bool,
     },
     StopCapture,
+    /// A video-only recording ended: keep its picture as a clip, with no transcript or notes.
+    SaveClip {
+        meeting_id: String,
+    },
     Finish {
         meeting_id: String,
         notes_only: bool,
@@ -84,6 +88,9 @@ struct PendingAsk {
     meeting_id: String,
     /// None while the pointer holds the card.
     card_until_ms: Option<u64>,
+    /// Set when the question came up during a video-only recording: its meeting id and the state
+    /// to return to, because the clip keeps recording while the question is open.
+    clip: Option<(String, SessionState)>,
 }
 
 /// Reducer state, including private timers and the full problem queue behind `AppState`.
@@ -152,6 +159,21 @@ impl Session {
         self.app.started_by != Some(StartReason::NotesOnly)
     }
 
+    /// A picture without notes: no mic rules, no transcript, saved as a clip.
+    fn video_only(&self) -> bool {
+        self.app.setup.as_ref().is_some_and(RecordSetup::video_only)
+    }
+
+    /// The question about a call was dropped: a clip goes on recording, anything else is idle.
+    fn drop_ask(&mut self) {
+        if let Some((_, state)) = self.ask.take().and_then(|a| a.clip) {
+            self.app.state = state;
+            self.app.companion.size = CompanionSize::Pill;
+        } else {
+            self.idle();
+        }
+    }
+
     fn restart_part(&self, effects: &mut Vec<Effect>) {
         if self.app.state == SessionState::Recording
             && self.audio()
@@ -177,6 +199,8 @@ impl Session {
         self.app.elapsed_ms = 0;
         self.app.started_by = None;
         self.app.screen = None;
+        self.app.setup = None;
+        self.app.screen_closed = None;
         self.app.share_video_offer = false;
         self.end_share();
         self.ask = None;
@@ -206,7 +230,15 @@ impl Session {
         id
     }
 
-    fn can_start(&mut self, notes_only: bool, since: &str, effects: &mut Vec<Effect>) -> bool {
+    fn can_start(
+        &mut self,
+        setup: Option<&RecordSetup>,
+        notes_only: bool,
+        since: &str,
+        effects: &mut Vec<Effect>,
+    ) -> bool {
+        let mic_off = setup.is_some_and(|s| s.mic == MicChoice::Off);
+        let no_notes = setup.is_some_and(|s| !s.notes);
         let mut blocked = Vec::new();
         if self.readiness.free_bytes < GB {
             blocked.push(Problem::DiskFull);
@@ -224,11 +256,12 @@ impl Session {
                     Side::TheCall,
                 ),
             ] {
-                if !allowed {
+                // System audio stays checked: it is the permission any screen picture needs too.
+                if !allowed && !(mic_off && kind == PermissionKind::Microphone) {
                     blocked.push(Problem::PermissionMissing { kind, side });
                 }
             }
-            if !self.readiness.speech_model {
+            if !self.readiness.speech_model && !no_notes {
                 blocked.push(Problem::ModelMissing {
                     kind: ModelKind::Speech,
                 });
@@ -255,7 +288,7 @@ impl Session {
     /// `can_start` for a detected call: nobody pressed anything, so only the top blocker is told.
     fn can_ask(&mut self, since: &str, effects: &mut Vec<Effect>) -> bool {
         let mut blocked = Vec::new();
-        if self.can_start(false, since, &mut blocked) {
+        if self.can_start(None, false, since, &mut blocked) {
             return true;
         }
         let top = blocked.iter().find_map(|e| match e {
@@ -277,6 +310,19 @@ impl Session {
             app_id: call.app_id.clone(),
             mode: call.mode,
         }));
+        // A clip keeps recording behind the question; a newer call keeps the clip it replaces.
+        let clip = if self.video_only()
+            && matches!(
+                self.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) {
+            self.app
+                .meeting_id
+                .clone()
+                .map(|id| (id, self.app.state.clone()))
+        } else {
+            self.ask.take().and_then(|a| a.clip)
+        };
         self.app.state = SessionState::Asking {
             call_id: call.call_id.clone(),
             app: call.app.clone(),
@@ -286,6 +332,7 @@ impl Session {
             call,
             meeting_id,
             card_until_ms: Some(now.saturating_add(ASK_CARD_MS)),
+            clip,
         });
     }
 
@@ -340,6 +387,17 @@ impl Session {
     }
 
     fn finish(&mut self, effects: &mut Vec<Effect>) {
+        if self.video_only() {
+            if let Some(meeting_id) = self.app.meeting_id.clone() {
+                effects.push(Effect::SaveClip { meeting_id });
+            }
+            self.idle();
+            if self.app.quit_pending {
+                effects.push(Effect::PauseDownload);
+                effects.push(Effect::Exit);
+            }
+            return;
+        }
         if let Some(meeting_id) = self.app.meeting_id.clone() {
             self.app.state = SessionState::Finishing {
                 meeting_id: meeting_id.clone(),
@@ -375,7 +433,8 @@ impl Session {
     }
 
     fn resume(&mut self, since: &str, effects: &mut Vec<Effect>) {
-        if self.can_start(false, since, effects) {
+        let setup = self.app.setup.clone();
+        if self.can_start(setup.as_ref(), false, since, effects) {
             self.app.state = SessionState::Recording;
             self.idle_since = None;
             self.pause_remind_at = None;
@@ -392,7 +451,12 @@ impl Session {
     }
 
     fn advance(&mut self, now: u64, effects: &mut Vec<Effect>) {
-        if self.app.state == SessionState::Recording {
+        let clip_recording = self
+            .ask
+            .as_ref()
+            .and_then(|a| a.clip.as_ref())
+            .is_some_and(|(_, state)| *state == SessionState::Recording);
+        if self.app.state == SessionState::Recording || clip_recording {
             self.app.elapsed_ms = self.app.elapsed_ms.saturating_add(now - self.last_ms);
             if self.audio()
                 && self
@@ -435,7 +499,7 @@ impl Session {
         if let SessionState::Stopped { resume_until_ms } = self.app.state
             && now >= resume_until_ms
         {
-            if self.app.elapsed_ms < u64::from(self.discard_short_s) * 1000 {
+            if self.app.elapsed_ms < u64::from(self.discard_short_s) * 1000 && !self.video_only() {
                 if let Some(meeting_id) = self.app.meeting_id.clone() {
                     effects.push(Effect::Discard { meeting_id });
                 }
@@ -469,8 +533,9 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
         Command::StartManual {
             meeting_id,
             notes_only,
+            setup,
         } if session.app.state == SessionState::Idle => {
-            if session.can_start(notes_only, &input.since, &mut effects) {
+            if session.can_start(setup.as_ref(), notes_only, &input.since, &mut effects) {
                 session.start(
                     meeting_id,
                     if notes_only {
@@ -480,13 +545,34 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                     },
                     &mut effects,
                 );
+                if let Some(setup) = setup {
+                    session.app.screen = setup.screen.clone().map(|pick| ScreenState {
+                        pick,
+                        while_sharing: None,
+                        waiting: false,
+                    });
+                    session.app.setup = Some(setup);
+                }
             }
         }
         Command::CallDetected { call, meeting_id } => {
             if !session.live.iter().any(|c| c.call_id == call.call_id) {
                 session.live.push(call.clone());
             }
-            if matches!(
+            if session.video_only()
+                && matches!(
+                    session.app.state,
+                    SessionState::Recording | SessionState::Paused
+                )
+            {
+                // A call during a clip is a question: Yes saves the clip and records the call.
+                if session.app.ask_on_call
+                    && call.mode == Mode::Ask
+                    && session.can_ask(&input.since, &mut effects)
+                {
+                    session.ask(call, meeting_id, now, &mut effects);
+                }
+            } else if matches!(
                 session.app.state,
                 SessionState::Recording | SessionState::Paused | SessionState::Stopped { .. }
             ) {
@@ -525,8 +611,18 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 .as_ref()
                 .is_some_and(|a| a.call.call_id == call_id)
             {
-                if record && session.can_start(false, &input.since, &mut effects) {
+                if record && session.can_start(None, false, &input.since, &mut effects) {
                     if let Some(ask) = session.ask.take() {
+                        if let Some((clip_id, state)) = ask.clip {
+                            // The clip ends here and the call starts fresh with the usual rules.
+                            if state == SessionState::Recording {
+                                effects.push(Effect::StopCapture);
+                            }
+                            effects.push(Effect::SaveClip {
+                                meeting_id: clip_id,
+                            });
+                            session.idle();
+                        }
                         session.join(&ask.call);
                         session.call = Some(ask.call.clone());
                         session.start(
@@ -541,7 +637,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                         });
                     }
                 } else if !record {
-                    session.idle();
+                    session.drop_ask();
                 }
             }
         }
@@ -552,7 +648,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 .as_ref()
                 .is_some_and(|a| a.call.call_id == call_id)
             {
-                session.idle();
+                session.drop_ask();
             } else if session
                 .queued
                 .as_ref()
@@ -581,7 +677,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 .is_some_and(|a| a.call.call_id == call_id) =>
         {
             if let Some(ask) = session.ask.clone() {
-                session.idle();
+                session.drop_ask();
                 session.app.ask_off_pending = Some(AskOffPending {
                     app_id: ask.call.app_id.clone(),
                     app: ask.call.app,
@@ -657,6 +753,26 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             session.pause_remind_at = Some(now.saturating_add(PAUSE_REMIND_MS));
         }
         Command::SwitchMicrophone => session.restart_part(&mut effects),
+        Command::SetMic(mic)
+            if matches!(
+                session.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) =>
+        {
+            let screen = session.app.screen.as_ref().map(|s| s.pick.clone());
+            session
+                .app
+                .setup
+                .get_or_insert(RecordSetup {
+                    mic: MicChoice::Default,
+                    app_sounds: true,
+                    notes: true,
+                    clicks: true,
+                    screen,
+                })
+                .mic = mic;
+            session.restart_part(&mut effects);
+        }
         Command::SetShareVideoAsk(on) => {
             session.share_video_ask = on;
             if !on {
@@ -695,6 +811,20 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 session.restart_part(&mut effects);
             }
         }
+        Command::ScreenEnded { lost: true, .. }
+            if matches!(
+                session.app.state,
+                SessionState::Recording | SessionState::Paused
+            ) && session.video_only() =>
+        {
+            // The window is the whole point of a clip, so closing it ends the recording.
+            if let Some(ScreenChoice::Window { app, .. }) =
+                session.app.screen.as_ref().map(|s| &s.pick.choice)
+            {
+                session.app.screen_closed = Some(app.clone());
+            }
+            session.stop(now, &mut effects);
+        }
         Command::ScreenEnded { lost, restart }
             if matches!(
                 session.app.state,
@@ -729,6 +859,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
         Command::MicActivity { app_id, active }
             if session.app.state == SessionState::Recording
                 && session.audio()
+                && !session.video_only()
                 && session.call.as_ref().is_none_or(|c| c.app_id == app_id) =>
         {
             // A manual recording has no call of its own, so any app's mic signal counts.
@@ -848,7 +979,10 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 .retain(|p| !resolved(&p.problem, &readiness));
             session.readiness = readiness;
             if session.app.state == SessionState::Recording
-                && !session.can_start(!session.audio(), &input.since, &mut effects)
+                && !{
+                    let setup = session.app.setup.clone();
+                    session.can_start(setup.as_ref(), !session.audio(), &input.since, &mut effects)
+                }
             {
                 session.stop(now, &mut effects);
             }

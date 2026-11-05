@@ -348,6 +348,7 @@ impl<H: Host> Engine<H> {
                     Command::StartManual {
                         meeting_id: timestamp(),
                         notes_only: false,
+                        setup: None,
                     },
                     now,
                 );
