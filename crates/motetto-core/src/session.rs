@@ -529,6 +529,22 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
     } else {
         input.command
     };
+    // A clip keeps capturing behind an open question, so a command that ends or inspects the
+    // recording takes the question away first and then acts on the clip.
+    if matches!(
+        command,
+        Command::StopRecording
+            | Command::StopRecordingInMain
+            | Command::RequestQuit
+            | Command::Quit { .. }
+            | Command::ScreenEnded { .. }
+            | Command::ReadinessChanged(_)
+            | Command::ProblemRaised(_)
+            | Command::AudioInterrupted
+    ) && session.ask.as_ref().is_some_and(|a| a.clip.is_some())
+    {
+        session.drop_ask();
+    }
     match command {
         Command::StartManual {
             meeting_id,

@@ -1851,7 +1851,14 @@ fn call_during_video_only_asks() {
 
 #[test]
 fn yes_saves_clip_and_starts_call() {
-    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, _) = step(
+        clip(),
+        0,
+        Command::CallDetected {
+            call: call(Mode::Ask),
+            meeting_id: "m2".into(),
+        },
+    );
     let (s, fx) = step(
         s,
         1,
@@ -1872,7 +1879,7 @@ fn yes_saves_clip_and_starts_call() {
                 reason: StartReason::App { app: "Zoom".into() }
             },
             Effect::StartCapture {
-                meeting_id: "m1".into(),
+                meeting_id: "m2".into(),
                 resume: false
             },
         ]
@@ -1955,4 +1962,57 @@ fn set_mic_while_recording_updates_setup_and_restarts_the_part() {
     );
     let (s, _) = step(fresh(), 0, Command::SetMic(MicChoice::Off));
     assert_eq!(s.app.setup, None);
+}
+
+#[test]
+fn stop_while_asking_over_a_clip_stops_the_clip() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, fx) = step(s, 1_000, Command::StopRecording);
+    assert!(matches!(s.app.state, SessionState::Stopped { .. }));
+    assert!(work(fx).contains(&Effect::StopCapture));
+    let (s, fx) = step(s, 12_000, Command::Tick);
+    assert_eq!(
+        work(fx),
+        vec![Effect::SaveClip {
+            meeting_id: "m1".into()
+        }]
+    );
+    assert_eq!(s.app.state, SessionState::Idle);
+}
+
+#[test]
+fn quit_while_asking_over_a_clip_saves_it() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, fx) = step(s, 1_000, Command::RequestQuit);
+    assert!(!work(fx).contains(&Effect::Exit));
+    assert!(s.app.quit_pending);
+    let (_, fx) = step(
+        s,
+        2_000,
+        Command::Quit {
+            stop_and_save: true,
+        },
+    );
+    let fx = work(fx);
+    assert!(fx.contains(&Effect::StopCapture));
+    assert!(fx.contains(&Effect::SaveClip {
+        meeting_id: "m1".into()
+    }));
+    assert!(fx.contains(&Effect::Exit));
+}
+
+#[test]
+fn window_closed_while_asking_over_a_clip_stops_it_with_note() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    let (s, fx) = step(
+        s,
+        1_000,
+        Command::ScreenEnded {
+            lost: true,
+            restart: false,
+        },
+    );
+    assert!(matches!(s.app.state, SessionState::Stopped { .. }));
+    assert_eq!(s.app.screen_closed, Some("Zoom".into()));
+    assert!(work(fx).contains(&Effect::StopCapture));
 }
