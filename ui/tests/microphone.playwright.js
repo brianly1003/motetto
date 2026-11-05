@@ -21,7 +21,7 @@ async (page) => {
     };
     window.fixtureLoud = () => { loud = true; };
     let next = 0; const callbacks = {}, listeners = {};
-    window.fixtureEmit = (event, payload) => { if (!listeners[event]) throw Error(`No listener for ${event}`); callbacks[listeners[event]]({event, id: 0, payload}); };
+    window.fixtureEmit = (event, payload) => { if (!listeners[event]) throw Error(`No listener for ${event}`); for (const h of listeners[event]) callbacks[h]?.({event, id: 0, payload}); };
     const now = Date.now();
     const rec = {id: 'rec1', title: 'Recorded meeting', created_ms: now - 74000, status: 'Recording', marks_ms: [], duration_ms: null, notes_ms: null, spellings: []};
     let state = {state: start, meeting_id: 'rec1', app: 'Zoom', elapsed_ms: 74000, started_by: {type: 'App', app: 'Zoom'}, auto_start: false, problem: null, more_problems: 0, quit_pending: false, dnd_active: false, onboarding_done: true, sharing: null, never_pending: null, companion: {visible: true, size: start.type === 'Asking' ? 'Ask' : 'Pill', pinned: false, peeking: false, display_id: ''}};
@@ -32,7 +32,7 @@ async (page) => {
       transformCallback: cb => { callbacks[++next] = cb; return next; }, unregisterCallback: id => delete callbacks[id],
       invoke: async (c, a) => {
         window.calls.push({c, a});
-        if (c === 'plugin:event|listen') { listeners[a.event] = a.handler; return a.handler; }
+        if (c === 'plugin:event|listen') { (listeners[a.event] ||= []).push(a.handler); return a.handler; }
         if (c === 'get_state') return state;
         if (c === 'microphones') return report();
         if (c === 'set_microphone') { chosen = a.id; loud = false; return report(); }
@@ -52,6 +52,7 @@ async (page) => {
         if (c === 'live_transcript') return ['rec1', '[00:07] Them: Can you hear me?', ''];
         if (c === 'get_my_notes') return {meeting_id: 'rec1', text: '', version: 1};
         if (c === 'resume_remaining_ms') return 9000;
+        if (['scripts_list', 'list_screen_sources', 'notes_translations'].includes(c)) return [];
         return null;
       }};
   };
@@ -65,7 +66,7 @@ async (page) => {
     await ref.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme);
     await ref.getByRole('button', {name: 'macOS', exact: true}).click();
     await ref.getByRole('button', {name: 'New recording', exact: true}).click();
-    await ref.locator('.recbar .micchip').waitFor();
+    await ref.locator('.recbar .micchip[data-micmenu]').waitFor();
 
     // 1. The recording page: amber chip, the note under the bar, Record from, the switch.
     const p = await page.context().newPage();
@@ -75,27 +76,32 @@ async (page) => {
     await p.addInitScript(fixture, {label: 'main', start: {type: 'Recording'}});
     await p.goto('http://127.0.0.1:3000/main/');
     // A recording opens on its own (owner 2026-10-20).
-    const chip = p.locator('.recbar .micchip');
+    const chip = p.getByRole('button', {name: /^Microphone:/});
     await chip.waitFor();
     if ((await chip.getAttribute('class')).includes('warn')) throw Error('A Bluetooth mic was flagged');
-    same(await styles(chip), await styles(ref.locator('.recbar .micchip')), 'Chip');
+    same(await styles(chip), await styles(ref.locator('.recbar .micchip[data-micmenu]')), 'Chip');
     const note = p.locator('.recnote');
     if (await note.count()) throw Error('A note shows without clipping');
     await p.screenshot({path: `.playwright-out/mic-app-recpage-${theme}.png`, clip: {x: 0, y: 0, width: 1048, height: 260}});
     await chip.click();
     const menu = p.getByRole('menu', {name: 'Microphone'});
     await menu.waitFor();
-    await ref.locator('.recbar .micchip').click();
+    await ref.locator('.recbar .micchip[data-micmenu]').click();
     same(await styles(menu), await styles(ref.locator('.micmenu')), 'Menu');
     const items = await menu.getByRole('menuitemradio').allInnerTexts();
-    if (items.length !== 4 || !items[0].startsWith('System default (OpenRun Pro 2 by Shokz)')) throw Error(`Menu items: ${items}`);
+    // The default device is listed once, as System default (owner 2026-11-05).
+    if (items.length !== 3 || !items[0].startsWith('System default (OpenRun Pro 2 by Shokz)') || items.slice(1).some(x => x.includes('Shokz'))) throw Error(`Menu items: ${items}`);
     if (await menu.getByRole('menuitemradio', {checked: true}).count() !== 1) throw Error('One choice is not checked');
     if (!(await menu.innerText()).includes('OpenRun Pro 2 by Shokz sets its own level.')) throw Error('Bluetooth volume line missing');
-    if (!items[1].includes('Bluetooth · 16 kHz') || !items[2].includes('Built-in · 48 kHz') || /quality/.test(items.join())) throw Error(`Menu labels: ${items}`);
+    if (!items[0].includes('Bluetooth · 16 kHz') || !items[1].includes('Built-in · 48 kHz') || /quality/.test(items.join())) throw Error(`Menu labels: ${items}`);
     await p.screenshot({path: `.playwright-out/mic-app-recmenu-${theme}.png`, clip: {x: 448, y: 0, width: 600, height: 520}});
     await p.keyboard.press('ArrowDown');
     await p.keyboard.press('Escape');
     if (await menu.count()) throw Error('Escape left the menu open');
+    await chip.click();
+    await menu.waitFor();
+    await p.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await menu.waitFor({state: 'detached', timeout: 2000});
     await chip.click();
     await menu.waitFor();
     await menu.getByRole('menuitemradio', {name: /MacBook Pro Microphone/}).click();
@@ -125,7 +131,7 @@ async (page) => {
     if (await st.getByRole('combobox', {name: 'Microphone'}).inputValue() !== '') throw Error('Settings is not on System default');
     if (await st.locator('.setnote').count()) throw Error('Settings warns about the chosen mic');
     const options = await st.locator('#mic-select option').allInnerTexts();
-    if (!options.includes('OpenRun Pro 2 by Shokz · Bluetooth · 16 kHz') || /quality/.test(options.join())) throw Error(`Options: ${options}`);
+    if (options[0] !== 'System default (OpenRun Pro 2 by Shokz)' || options.slice(1).some(x => x.includes('Shokz')) || !options.includes('MacBook Pro Microphone · Built-in · 48 kHz') || /quality/.test(options.join())) throw Error(`Options: ${options}`);
     if (await st.getByRole('slider').count()) throw Error('A Bluetooth mic shows a volume slider');
     await st.screenshot({path: `.playwright-out/mic-app-settings-${theme}.png`});
     await st.getByRole('combobox', {name: 'Microphone'}).selectOption('builtin');

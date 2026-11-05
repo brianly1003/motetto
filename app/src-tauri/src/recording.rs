@@ -346,6 +346,7 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                has_video: false,
             },
         )?;
     }

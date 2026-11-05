@@ -17,6 +17,9 @@ async (page) => {
         if (c === 'plugin:event|listen') return a.handler;
         if (c === 'get_state') return { state: { type: 'Idle' }, companion: { visible: false, size: 'Pill' }, elapsed_ms: 0, quit_pending: false, share_visible: false };
         if (c === 'list_meetings') return [summary];
+        if (c === 'get_meeting') return {summary,notes_md:'### Overview\nSynthetic fixture.',transcript:'[00:00] Me: Synthetic line.',transcript_heard:'',has_video:true};
+        if (c === 'meeting_media') return {tracks:[],videos:[{path:'',kind:'window',offset_ms:30000,duration_ms:10000,source:'Window',while_sharing:false,width:1280,height:720,bytes:100}],moments:[],duration_ms:60000,folder:'fixture'};
+        if (c === 'get_settings') return {keep_audio:'forever',keep_video:'same_as_audio'};
         if (c === 'deleted_meetings' || c === 'open_action_items') return [];
         if (c === 'scripts_list') return [{ name: 'Demo', modified_ms: Date.now(), bytes: 4 }];
         if (c === 'script_read') return '# Opening (1m)\nHello there.';
@@ -24,7 +27,7 @@ async (page) => {
     });
     await p.goto('http://127.0.0.1:3000/main/');
     await p.locator('.sidebar').waitFor();
-    const views = [['library', async () => {}], ['scripts', async () => { await p.getByRole('button', { name: 'Scripts' }).first().click(); await p.getByRole('button', { name: 'Present' }).waitFor(); }]];
+    const views = [['library', async () => {}], ['video', async () => { await p.getByRole('button',{name:/Launch sync/}).first().click(); await p.getByRole('tab',{name:'Video',exact:true}).click(); await p.locator('.vctl').waitFor(); }], ['fullscreen', async () => { await p.getByRole('button',{name:'Full screen',exact:true}).click(); await p.locator('.vplayer:fullscreen').waitFor(); }], ['scripts', async () => { if(await p.locator('.vplayer:fullscreen').count())await p.getByRole('button',{name:'Exit full screen',exact:true}).click(); await p.getByRole('button', { name: 'Scripts' }).first().click(); await p.getByRole('button', { name: 'Present' }).waitFor(); }]];
     for (const [view, open] of views) {
       await open();
       const count = await p.locator('button:visible').count();

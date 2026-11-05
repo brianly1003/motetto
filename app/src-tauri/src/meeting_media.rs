@@ -329,6 +329,16 @@ mod tests {
         )
         .unwrap();
         assert!(library::read(&root, "1").unwrap().has_video);
+        assert!(library::list(&root).unwrap()[0].has_video);
+        assert!(
+            library::search(&root, "Example").unwrap()[0]
+                .meeting
+                .has_video
+        );
+        crate::screen_files::delete(&root, "1").unwrap();
+        assert!(!library::list(&root).unwrap()[0].has_video);
+        crate::screen_files::restore(&root, "1").unwrap();
+        assert!(library::list(&root).unwrap()[0].has_video);
         fs::write(root.join("1").join(video), b"").unwrap();
         assert!(!has_video(&dir));
         fs::write(root.join("1").join(video), b"video fixture").unwrap();
@@ -346,6 +356,10 @@ mod tests {
         fs::remove_file(root.join("1").join(video)).unwrap();
         assert!(read(&root, "1").unwrap().videos.is_empty());
         assert!(!library::read(&root, "1").unwrap().has_video);
+        let mut stale = library::summary(&root, "1").unwrap();
+        stale.has_video = true;
+        library::save(&root, &stale).unwrap();
+        assert!(!library::list(&root).unwrap()[0].has_video);
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&path, root.join("1").join(video)).unwrap();
@@ -398,6 +412,12 @@ mod tests {
             .unwrap();
         let dir = library::folder(&root, "1").unwrap();
         assert!(has_video(&dir));
+        fs::write(
+            root.join("1/meeting.json"),
+            r#"{"id":"1","title":"Imported","created_ms":0,"status":"Ready"}"#,
+        )
+        .unwrap();
+        assert!(library::list(&root).unwrap()[0].has_video);
         let media = read(&root, "1").unwrap();
         assert_eq!(media.videos.len(), 1);
         assert_eq!(

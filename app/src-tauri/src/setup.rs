@@ -588,7 +588,7 @@ fn speed_test(app: &tauri::AppHandle, tier: TierId, stop: &Stop) -> Result<Speed
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct Heard {
+pub struct TestRecording {
     pub text: String,
 }
 
@@ -612,7 +612,7 @@ fn heard(segments: &[motetto_core::whisper::Segment]) -> String {
 }
 
 /// Ten seconds from the microphone, transcribed and thrown away (first run's Try it).
-fn test_recording_now(app: &tauri::AppHandle) -> Result<Heard, String> {
+fn test_recording_now(app: &tauri::AppHandle) -> Result<TestRecording, String> {
     let s = app.state::<Store>().get()?;
     if s.speech_path.is_empty() {
         return Err(TRY_WAIT.into());
@@ -649,7 +649,7 @@ fn test_recording_now(app: &tauri::AppHandle) -> Result<Heard, String> {
         let segments = server
             .transcribe(&audio, 0, None, &idle)
             .map_err(|e| e.to_string())?;
-        Ok(Heard {
+        Ok(TestRecording {
             text: heard(&segments),
         })
     });
@@ -915,7 +915,7 @@ pub async fn delete_unused_models(app: tauri::AppHandle) -> Result<u64, String> 
 }
 
 #[tauri::command]
-pub async fn test_recording(app: tauri::AppHandle) -> Result<Heard, String> {
+pub async fn test_recording(app: tauri::AppHandle) -> Result<TestRecording, String> {
     blocking(move || test_recording_now(&app)).await
 }
 
@@ -1327,7 +1327,11 @@ mod tests {
         );
         assert_eq!(heard(&[]), "");
         let config = ts_rs::Config::default().with_out_dir("../../ui/lib/bindings");
-        Heard::export_all(&config).unwrap();
+        assert_ne!(
+            TestRecording::name(&config),
+            crate::follow::Heard::name(&config)
+        );
+        TestRecording::export_all(&config).unwrap();
         SetupState::export_all(&config).unwrap();
     }
 

@@ -27,6 +27,8 @@ import { KbdGroup } from "@/components/ui/Kbd";
 
 const GROUPS=["Today","This week","Earlier"];
 
+function VideoAvailable(){return <span className="media-video" role="img" aria-label={s.videoAvailable} title={s.videoAvailable}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3.5" width="8.5" height="9" rx="2"/><path d="m10 6 4.5-2v8L10 10"/></svg></span>;}
+
 export default function Main(){
   const session=useSession();
   const live=session.state;
@@ -113,7 +115,7 @@ export default function Main(){
   const [rename,setRename]=useState<{id:string;n:number}|null>(null);
   const [version,setVersion]=useState(0);
   const [openCount,setOpenCount]=useState<number|null>(null);
-  const [toast,setToast]=useState<{text:string;undo?:()=>Promise<void>}|null>(null);
+  const [toast,setToast]=useState<{text:string;undo?:()=>Promise<void>;label?:string}|null>(null);
   const toastTimer=useRef<ReturnType<typeof setTimeout>>(undefined);
   const menuRef=useRef<HTMLDivElement>(null);
   const selection=useRef(0);
@@ -166,8 +168,8 @@ export default function Main(){
     if(left!==rowMenu.left)menu.style.left=`${left}px`;
     menu.querySelector<HTMLButtonElement>("button")?.focus();
   },[rowMenu]);
-  function notify(text:string,undo?:()=>Promise<void>){
-    clearTimeout(toastTimer.current);setToast({text,undo});
+  function notify(text:string,undo?:()=>Promise<void>,label?:string){
+    clearTimeout(toastTimer.current);setToast({text,undo,label});
     toastTimer.current=setTimeout(()=>setToast(null),undo?5000:3600);
   }
   async function refresh(){setVersion(n=>n+1);try{setMeetings(await ipc.listMeetings());setBytes(await ipc.libraryBytes());setOpenCount(openItems(await ipc.openActionItems()).length);const gone=await ipc.deletedMeetings();setDeleted(gone);if(!gone.length)setTrashOpen(false);setScriptsOpen(false);const next=await ipc.importing(),was=jobRef.current;jobRef.current=next;setJob(next);if(next?.import&&next.id&&next.id!==was?.id)void select(next.id);if(!next)stopped();}catch(e){setError(String(e));}}
@@ -253,11 +255,11 @@ export default function Main(){
         {hits?hits.length>0&&<div><div className="list-heading">{s.results}<span>{hits.length}</span></div>{hits.map(({meeting,snippet})=>{const current=!trashOpen&&selected?.summary.id===meeting.id;return <button key={meeting.id} className={`meeting-row hit ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>{setFound(was=>snippet?{id:meeting.id,tab:snippet.source==="Transcript"?"Transcript":"Notes",query:query.trim(),n:(was?.n??0)+1}:null);void select(meeting.id);}}>
           <strong title={meetingTitle(meeting)}><Marked text={meetingTitle(meeting)} query={query}/></strong>
           {snippet&&<em className="snip"><Marked text={snippet.text} query={query}/></em>}
-          <span><span>{meetingDate(meeting.created_ms)}</span>{snippet&&<b className="where">{s.matchedIn[snippet.source]}{snippet.at_ms!=null&&<> · {timeLabel(snippet.at_ms)}</>}</b>}</span></button>;})}</div>
+          <span><span className="mwhen">{meetingDate(meeting.created_ms)}</span>{meeting.has_video&&<VideoAvailable/>}{snippet&&<b className="where">{s.matchedIn[snippet.source]}{snippet.at_ms!=null&&<> · {timeLabel(snippet.at_ms)}</>}</b>}</span></button>;})}</div>
         :GROUPS.map(group=>{const items=shown.filter(meeting=>meetingGroup(meeting.created_ms)===group);return items.length?<div key={group}><div className="list-heading">{group}<span>{items.length}</span></div>{items.map(meeting=>{const current=!trashOpen&&selected?.summary.id===meeting.id;return <div key={meeting.id} className={`mrow${rowMenu?.id===meeting.id?" open":""}`} onContextMenu={event=>{event.preventDefault();setRowMenu({id:meeting.id,left:event.clientX,top:event.clientY});}}>
-          <button className={`meeting-row ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>select(meeting.id)}><strong title={meetingTitle(meeting)}>{meetingTitle(meeting)}</strong><span>{meetingDate(meeting.created_ms)}{meeting.duration_ms!=null?` · ${durationLabel(meeting.duration_ms)}`:""}{(()=>{const type=live?.meeting_id===meeting.id?live.state.type:null;
+          <button className={`meeting-row ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>select(meeting.id)}><strong title={meetingTitle(meeting)}>{meetingTitle(meeting)}</strong><span><span className="mwhen" title={`${meetingDate(meeting.created_ms)}${meeting.duration_ms!=null?` · ${durationLabel(meeting.duration_ms)}`:""}`}>{meetingDate(meeting.created_ms)}{meeting.duration_ms!=null?` · ${durationLabel(meeting.duration_ms)}`:""}</span><span className="mflags">{meeting.has_video&&<VideoAvailable/>}{(()=>{const type=live?.meeting_id===meeting.id?live.state.type:null;
             const [cls,label]=type==="Recording"?["rec",s.chipRecording]:type==="Paused"?["plain",s.paused]:type==="Stopped"?["plain",s.chipStopped]:job?.id===meeting.id?["attention",job.transcribe?s.chipTranscribing:s.finishing]:meeting.status==="Ready"?["ready",s.ready]:meeting.status==="Finishing"||type==="Finishing"?["attention",s.finishing]:["attention",s.failed];
-            return <i className={cls}>{label}</i>;})()}</span></button>
+            return <i className={cls}>{label}</i>;})()}</span></span></button>
           <button className="rowmore" aria-label={`${s.rowActions} ${meetingTitle(meeting)}`} aria-haspopup="menu" aria-expanded={rowMenu?.id===meeting.id} onClick={event=>{
             if(rowMenu?.id===meeting.id){setRowMenu(null);return;}
             const row=event.currentTarget.parentElement!.getBoundingClientRect();setRowMenu({id:meeting.id,left:row.right+14,top:row.top});
@@ -275,11 +277,11 @@ export default function Main(){
         :scriptsOpen?<ScriptsPage onError={setError} device={mac?"Mac":"PC"} pending={rehearsed} onTaken={()=>setRehearsed(null)} onCount={setScriptCount}/>
         :trashOpen?<RecentlyDeleted deleted={deleted} refresh={refresh} notify={notify} onError={setError}/>
         :selected&&job?.import&&job.id===selected.summary.id?<article className="document"><header className="dochead"><h1>{meetingTitle(selected.summary)}</h1><div className="document-meta"><span>{meetingDate(selected.summary.created_ms)}</span></div></header><ImportingPage id={selected.summary.id} stage={jobStage} stopping={stopping} onCancel={cancelImport}/></article>
-        :selected?<MeetingDocument key={selected.summary.id+(found?.id===selected.summary.id?`-${found.n}`:"")} find={found?.id===selected.summary.id?found:undefined} at={jump?.id===selected.summary.id?jump.ms:undefined} session={session} meeting={selected} rewriting={rewritingId===selected.summary.id?{stage:jobStage,transcribe:!!job?.transcribe}:undefined} onToast={(text,undo)=>notify(text,undo)} onChange={setSelected} onError={setError} renameRequest={rename?.id===selected.summary.id?rename.n:0} onRename={title=>renameMeeting(selected.summary.id,title)} onDelete={()=>void deleteMeeting(selected.summary.id)} onChanged={async removed=>{await refresh();if(removed){selection.current++;setSelected(null);}else await select(selected.summary.id);}}/>
+        :selected?<MeetingDocument key={selected.summary.id+(found?.id===selected.summary.id?`-${found.n}`:"")} find={found?.id===selected.summary.id?found:undefined} at={jump?.id===selected.summary.id?jump.ms:undefined} session={session} meeting={selected} rewriting={rewritingId===selected.summary.id?{stage:jobStage,transcribe:!!job?.transcribe}:undefined} onToast={(text,undo,label)=>notify(text,undo,label)} onChange={setSelected} onError={setError} renameRequest={rename?.id===selected.summary.id?rename.n:0} onRename={title=>renameMeeting(selected.summary.id,title)} onDelete={()=>void deleteMeeting(selected.summary.id)} onChanged={async removed=>{await refresh();if(removed){selection.current++;setSelected(null);}else await select(selected.summary.id);}}/>
         :meetings.length?<LibraryHome version={version} onOpen={id=>void select(id)} onPlay={(id,ms)=>{setJump({id,ms});void select(id);}} onCopied={()=>notify(s.itemsCopied)} onImport={importRecording} onError={setError} onCount={setOpenCount} disabled={!desktop||!!importBlocked} disabledReason={importBlocked} onDone={undo=>notify(s.itemDone,undo)} interrupted={meetings.filter(meeting=>meeting.status==="Interrupted"&&meeting.id!==job?.id)} onRecover={ids=>void recover(ids)} onDiscard={ids=>void discardRecovery(ids)}/>
         :<div className="home"><h1>{s.meetings}</h1><div className="empty"><Duet className="mark lg"/><b>{meetings.length?s.libraryTitle:s.emptyTitle}</b><span>{meetings.length?s.libraryBody:s.emptyBody}</span>
           <div className="field">{!meetings.length&&<button className="btn" onClick={()=>void recordNow()} disabled={!desktop||live?.state.type!=="Idle"}>{s.recordNow}</button>}<button className="btn ghost" onClick={importRecording} disabled={!desktop||!!importBlocked} title={importBlocked||undefined}>{s.import}</button></div>{!desktop&&<span className="hint">{s.browser}</span>}</div></div>}
-      {toast&&<div className="toast" role="status"><span>{toast.text}</span>{toast.undo&&<button onClick={()=>{const undo=toast.undo!;clearTimeout(toastTimer.current);setToast(null);void undo().catch(e=>setError(String(e)));}}>{s.undo}</button>}<button type="button" className="toast-close" aria-label="Dismiss notification" title="Dismiss notification" onClick={()=>{clearTimeout(toastTimer.current);setToast(null);}}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>}
+      {toast&&<div className="toast" role="status"><span>{toast.text}</span>{toast.undo&&<button onClick={()=>{const undo=toast.undo!;clearTimeout(toastTimer.current);setToast(null);void undo().catch(e=>setError(String(e)));}}>{toast.label??s.undo}</button>}<button type="button" className="toast-close" aria-label="Dismiss notification" title="Dismiss notification" onClick={()=>{clearTimeout(toastTimer.current);setToast(null);}}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>}
     </section>
     {rowMenu&&menuMeeting&&<div ref={menuRef} className="gmenu rowmenu" role="menu" aria-label={`${s.rowActions} ${meetingTitle(menuMeeting)}`} style={{left:rowMenu.left,top:rowMenu.top}} onKeyDown={event=>{
       if(event.key==="Escape"){setRowMenu(null);document.querySelector<HTMLButtonElement>(`.mrow.open .rowmore`)?.focus();}

@@ -20,7 +20,7 @@ async (page) => {
       if (c === 'get_state') return { state: { type: 'Idle' }, meeting_id: null, companion: { visible: false, size: 'Pill' }, elapsed_ms: 0, quit_pending: false };
       if (c === 'list_meetings') return [window.meeting.summary]; if (c === 'deleted_meetings') return [];
       if (c === 'get_meeting') return window.meeting;
-      if (c === 'meeting_media') return { tracks: [], duration_ms: 87000, folder: 'x' };
+      if (c === 'meeting_media') return { tracks: [], videos: [], moments: [], duration_ms: 87000, folder: 'x' };
       if (c === 'notes_translations') return []; if (c === 'translating') return null;
       if (c === 'save_notes') { if (a.expected !== window.meeting.notes_md) throw 'stale'; window.meeting.notes_md = a.markdown; return a.markdown; }
       if (c === 'set_unconfirmed') { window.meeting.summary = { ...window.meeting.summary, unconfirmed: a.lines }; return window.meeting.summary; }
@@ -30,6 +30,21 @@ async (page) => {
   await p.getByRole('button', { name: /Push services/ }).first().click();
   const box = p.locator('.notes .suggest');
   await box.waitFor();
+  const ref = await page.context().newPage();
+  await ref.route('https://**/*',r=>r.abort());
+  await ref.goto('http://127.0.0.1:3001/motetto-app-mockup.html');
+  await ref.locator('button[data-go="notes"]').first().click();
+  for(const theme of ['light','dark']){
+    for(const view of [p,ref])await view.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+    const heading=box.locator('.check-warning');
+    const color=await heading.evaluate(e=>getComputedStyle(e).color);
+    if(color!==await p.locator('.notes .unsure').first().evaluate(e=>getComputedStyle(e).color))fails.push(theme+': warning colors differ');
+    if(color!==await ref.locator('.check-warning').first().evaluate(e=>getComputedStyle(e).color))fails.push(theme+': heading differs from mockup');
+    if(await heading.evaluate(e=>getComputedStyle(e).backgroundColor)!=='rgba(0, 0, 0, 0)')fails.push(theme+': heading has a pill background');
+    if(color===await box.locator('.cgroup > .tip').evaluate(e=>getComputedStyle(e).color))fails.push(theme+': explanation lost its muted color');
+    await box.screenshot({path:`.playwright-out/quick-check-warning-${theme}.png`});
+  }
+  await ref.close();
   const heads = await p.locator('.notes h3').allTextContents();
   if (heads.join('|') !== 'Action items|Decisions|Overview') fails.push('headings: ' + heads.join('|'));
   const order = await p.locator('.notes > *').evaluateAll(els => els.map(e => e.className || e.tagName));

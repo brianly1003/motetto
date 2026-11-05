@@ -23,6 +23,13 @@ export const micSub = (m: Mic) => m.rate_hz > 0 ? `${KIND[m.transport]} · ${+(m
 const quieter = (volume: number) => Math.max(volume * .67, .25);
 const percent = (volume: number) => Math.round(volume * 100);
 
+/** The rows to offer: System default, then every other mic. The default device is listed once,
+ *  as System default (owner 2026-11-05), and a saved choice of that same device shows there. */
+export function micChoices(report: MicReport) {
+  const system = report.mics.find(m => m.is_default);
+  return { system, others: report.mics.filter(m => m !== system), chosen: report.chosen === system?.id ? null : report.chosen };
+}
+
 /** The report, checked every 2 s while shown and at once when any window changes the mic. */
 export function useMicReport(enabled = true) {
   const [report, setReport] = useState<MicReport | null>(null);
@@ -98,10 +105,10 @@ export function MicMenu({ report, recording, done, onError = done, onClose, styl
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => { menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(); }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const system = report.mics.find(m => m.is_default);
+  const { system, others, chosen } = micChoices(report);
   const pick = (id: string | null) => { onClose(); void pickMic(report, id, done, recording).catch(e => onError(String(e))); };
-  const option = (id: string | null, mic: Mic, label: string) => <button key={id ?? "system"} type="button" role="menuitemradio" className="mic" aria-checked={report.chosen === id} onClick={() => pick(id)}>
-    <MicIcon/><span className="t"><b>{label}</b><span>{micSub(mic)}</span></span><span className="ck">{report.chosen === id && <CheckIcon/>}</span>
+  const option = (id: string | null, mic: Mic, label: string) => <button key={id ?? "system"} type="button" role="menuitemradio" className="mic" aria-checked={chosen === id} onClick={() => pick(id)}>
+    <MicIcon/><span className="t"><b>{label}</b><span>{micSub(mic)}</span></span><span className="ck">{chosen === id && <CheckIcon/>}</span>
   </button>;
   const active = report.active;
   return <div ref={menu} className="gmenu dropdown micmenu" role="menu" aria-label="Microphone" style={style} onKeyDown={e => {
@@ -114,7 +121,7 @@ export function MicMenu({ report, recording, done, onError = done, onClose, styl
   }}>
     <div className="mhead">Record from</div>
     {system && option(null, system, `System default (${system.name})`)}
-    {report.mics.map(m => option(m.id, m, m.name))}
+    {others.map(m => option(m.id, m, m.name))}
     <div className="sep"/>
     {active && volume !== null
       ? <label className="vol"><MicIcon/><input type="range" min={0} max={100} value={percent(volume)} style={{ "--v": volume } as CSSProperties} aria-label={`Input volume for ${active.name}`} onChange={e => {

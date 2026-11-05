@@ -12,8 +12,9 @@ async (page) => {
     window.__TAURI_INTERNALS__ = { convertFileSrc: x => x, transformCallback: () => ++n, unregisterCallback: () => {}, invoke: async (c) => {
       if (c === 'plugin:event|listen') return n; if (c === 'get_state') return { state: { type: 'Idle' }, meeting_id: null, companion: { visible: false, size: 'Pill' }, elapsed_ms: 0, quit_pending: false };
       if (c === 'list_meetings') return [summary]; if (c === 'deleted_meetings') return [];
-      if (c === 'get_meeting') return { summary, notes_md: 'x', transcript: '[00:01] Me: First synthetic line.\n[01:12] Them: Second synthetic line.', transcript_heard: '' };
+      if (c === 'get_meeting') return { summary, notes_md: 'x', transcript: '[00:01] Me: First synthetic line.\n[01:12] Them: Second synthetic line.', transcript_heard: '', has_video: true };
       if (c === 'meeting_media') return { tracks: [], videos: [video, { ...video, offset_ms: 72000, while_sharing: true, source: 'Built-in Retina Display' }], moments: [0, 5000, 9000, 12000, 72000, 76000, 80000, 84000].map(ms => ({ ms, yours: ms >= 72000 })), duration_ms: 90000, folder: 'x' };
+      if (c === 'notification_permission') return true;
       if (c === 'get_settings') return { keep_audio: '30_days', keep_video: 'same_as_audio' }; return false; } };
   });
   await p.goto('http://127.0.0.1:3000/main/');

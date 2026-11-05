@@ -12,7 +12,7 @@ import type {Hardware} from '@/lib/bindings/Hardware';
 import type {SpeedResult} from '@/lib/bindings/SpeedResult';
 import type {TierId} from '@/lib/bindings/TierId';
 import NotificationPermission from '@/components/NotificationPermission';
-import {MicLevel,MicNote,micSub,pickMic,useMicReport} from '@/components/Microphone';
+import {MicLevel,MicNote,micChoices,micSub,pickMic,useMicReport} from '@/components/Microphone';
 
 const CALL_ORDER=['zoom','teams','teams_classic','meet','whatsapp','telegram','browser','slack','webex','facetime'];
 const TABS=['General','Audio','Screen','Calls','Models','Spellings','Privacy','About'];
@@ -134,16 +134,17 @@ export default function SettingsPage(){
       </>}
       {tab==='Audio'&&(()=>{
         // The microphone (DESIGN 4.15): the level moves only while Motetto records; it never opens the mic just to show it.
-        const r=mic.report,m=r?.active,system=r?.mics.find(x=>x.is_default),mac=info?.platform!=='windows';
+        const r=mic.report,m=r?.active,mac=info?.platform!=='windows';
         const sound=<button className="btn sm" onClick={()=>void ipc.openSoundSettings().catch(e=>setError(String(e)))}>Open Sound settings…</button>;
         if(!mac)return <Row label="Microphone" help="Motetto records the default microphone. Choose it in Windows sound settings.">{sound}</Row>;
         if(!r)return <p role="status">Loading microphones…</p>;
+        const {system,others,chosen}=micChoices(r);
         return <>
           <Row label="Microphone" help={m?`Motetto records ${m.name} (${micSub(m)}). Your call app keeps its own choice; pick the same mic there if you want both to match. The level moves while Motetto records.`:'No microphone is connected.'}>
-            <div className="field"><select id="mic-select" aria-label="Microphone" style={{width:320}} value={r.chosen??''} onChange={e=>void pickMic(r,e.target.value||null,micSaved,false).catch(err=>setError(String(err)))}>
+            <div className="field"><select id="mic-select" aria-label="Microphone" style={{width:320}} value={chosen??''} onChange={e=>void pickMic(r,e.target.value||null,micSaved,false).catch(err=>setError(String(err)))}>
               <option value="">System default ({system?.name??'none'})</option>
-              {r.chosen&&!r.mics.some(x=>x.id===r.chosen)&&<option value={r.chosen}>Not connected</option>}
-              {r.mics.map(x=><option key={x.id} value={x.id}>{x.name} · {micSub(x)}</option>)}
+              {chosen&&!r.mics.some(x=>x.id===chosen)&&<option value={chosen}>Not connected</option>}
+              {others.map(x=><option key={x.id} value={x.id}>{x.name} · {micSub(x)}</option>)}
             </select></div>
             <div className="setlevel"><span>Level</span><MicLevel bars={20} className="bars"/></div>
             <MicNote report={r} done={micSaved} onError={setError} className="micnote recnote setnote"/>

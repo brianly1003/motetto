@@ -36,14 +36,17 @@ pub fn loops(rows: &[(u64, u64, String)]) -> Vec<bool> {
 /// Subtitle credits whisper learned from YouTube and writes over music, applause or silence:
 /// "Hãy subscribe cho kênh Ghiền Mì Gõ..." came out twice over a song on 2026-10-25, live and
 /// after the call, and "...kênh lalaschool..." on another clip. Matched by the outro's shape, so a
-/// channel never seen before is caught too: subscribe + channel + video in one row, or the
-/// Amara.org subtitle credit. "Like and subscribe" alone is left in: people say it. Live captions
+/// channel never seen before is caught too: subscribe + channel + video (or the outro's "so you
+/// don't miss", as live captions can cut "video" into the next row) in one row, or the Amara.org
+/// subtitle credit. "Like and subscribe" alone is left in: people say it. Live captions
 /// drop every match; after the call `transcribe` keeps one the VAD heard spoken.
 pub fn credit(text: &str) -> bool {
     // Spaces dropped: whisper writes both "La La School" and "lalaschool".
     let text: String = text.to_lowercase().split_whitespace().collect();
     let has = |any: &[&str]| any.iter().any(|word| text.contains(word));
-    (has(&["subscribe", "đăngký", "đăngkí"]) && has(&["kênh", "channel"]) && has(&["video"]))
+    (has(&["subscribe", "đăngký", "đăngkí"])
+        && has(&["kênh", "channel"])
+        && has(&["video", "bỏlỡ", "don'tmiss", "nevermiss"]))
         || text.contains("amara.org")
 }
 
@@ -124,6 +127,9 @@ mod tests {
             "Hãy đăng ký kênh Team X để xem thêm nhiều video mới",
             "Please subscribe to my channel for more videos",
             "Subtitles by the Amara.org community",
+            // Live captions split the outro in two rows (2026-11-05): "video" was in the next one.
+            "Hãy subscribe cho kênh Ghiền Mì Gõ Để không bỏ lỡ những",
+            "Subscribe to the channel so you don't miss a thing",
         ] {
             assert!(credit(outro), "{outro}");
         }

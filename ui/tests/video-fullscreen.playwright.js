@@ -1,0 +1,86 @@
+// Browser fixture: controls use the meeting clock even when no picture exists at that time.
+async page => {
+  const results=[];
+  const assert=(ok,message)=>{if(!ok)throw Error(message);};
+  for(const theme of ['light','dark']){
+    const ctx=await page.context().browser().newContext({viewport:{width:1200,height:760},colorScheme:theme,reducedMotion:'reduce'});
+    const p=await ctx.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));
+    await ctx.route('https://**/*',r=>r.abort());
+    await p.addInitScript(()=>{
+      let n=0;
+      const summary={id:'1',title:'Fullscreen fixture',created_ms:1000,status:'Ready',marks_ms:[],duration_ms:90000,notes_ms:0,spellings:[],locked:false};
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
+      window.__TAURI_INTERNALS__={convertFileSrc:x=>x,transformCallback:()=>++n,unregisterCallback(){},invoke:async c=>{
+        if(c==='plugin:event|listen')return n;
+        if(c==='get_state')return {state:{type:'Idle'},companion:{visible:false,size:'Pill'},elapsed_ms:0,quit_pending:false};
+        if(c==='list_meetings')return [summary];
+        if(['deleted_meetings','open_action_items','scripts_list'].includes(c))return [];
+        if(c==='get_meeting')return {summary,notes_md:'### Overview\nSynthetic fixture.',transcript:'[00:00] Me: First synthetic line.\n[00:30] Them: Second synthetic line.',transcript_heard:'',has_video:true};
+        if(c==='meeting_media')return {tracks:[],videos:[{path:'',kind:'window',offset_ms:30000,duration_ms:10000,source:'Window',while_sharing:false,width:1280,height:720,bytes:100}],moments:[],duration_ms:90000,folder:'fixture'};
+        if(c==='get_settings')return {keep_audio:'forever',keep_video:'same_as_audio'};
+        return null;
+      }};
+    });
+    await p.goto('http://127.0.0.1:3000/main/');
+    await p.getByRole('button',{name:/Fullscreen fixture/}).first().click();
+    await p.getByRole('tab',{name:'Video',exact:true}).click();
+    await p.locator('.vctl').waitFor();
+    await p.getByRole('button',{name:'Full screen',exact:true}).click();
+    await p.locator('.vplayer:fullscreen').waitFor();
+    assert(await p.locator('.vplayer .vctl').isVisible(),'Playback bar missing in fullscreen');
+    const time=()=>p.locator('.vctl .mono').innerText();
+    await p.getByRole('button',{name:'Play video',exact:true}).focus();
+    await p.keyboard.press('ArrowRight');assert((await time()).startsWith('00:10'),'Right arrow must seek 10 seconds');
+    await p.keyboard.press('ArrowLeft');assert((await time()).startsWith('00:00'),'Left arrow must seek 10 seconds');
+    await p.keyboard.press('ArrowLeft');assert((await time()).startsWith('00:00'),'Backward seek must clamp at zero');
+    for(let i=0;i<10;i++)await p.keyboard.press('ArrowRight');
+    assert((await time()).startsWith('01:30'),'Forward seek must clamp at duration');
+    await p.keyboard.press('ArrowLeft');assert((await time()).startsWith('01:20'),'Seek must preserve paused playback');
+    assert(await p.getByRole('button',{name:'Play video',exact:true}).count(),'Arrow seek started paused playback');
+    await p.getByRole('slider',{name:'Seek video'}).focus();
+    await p.keyboard.press('ArrowLeft');assert((await time()).startsWith('01:19'),'Focused slider arrows were overridden');
+    await p.getByRole('combobox',{name:'Speed'}).selectOption('1.5');
+    assert(await p.locator('.vplayer:fullscreen').count(),'Speed change exited fullscreen');
+    await p.getByRole('combobox',{name:'Speed'}).focus();
+    assert(await p.getByRole('combobox',{name:'Speed'}).evaluate(e=>{const s=getComputedStyle(e);return s.borderTopWidth==='0px'&&s.outlineStyle==='none'&&s.boxShadow==='none';}),'Speed selector has a border or focus ring');
+    await p.locator('.vctl').screenshot({path:`.playwright-out/video-speed-focus-${theme}.png`});
+    await p.getByRole('combobox',{name:'Speed'}).evaluate(e=>e.blur());
+    const cc=p.locator('.vctl .cc');await cc.click();assert(await cc.getAttribute('aria-pressed')==='false','CC failed');await cc.click();
+    if(await p.getByRole('button',{name:'Play video',exact:true}).count())await p.getByRole('button',{name:'Play video',exact:true}).click();
+    await p.mouse.move(600,250);await p.waitForFunction(()=>getComputedStyle(document.querySelector('.vctl')).opacity==='0',{},{timeout:6000});
+    assert(await p.locator('.vctl').evaluate(e=>getComputedStyle(e).opacity==='0'),'Playing controls did not hide');
+    assert(await p.locator('.vtoggle').evaluate(e=>getComputedStyle(e).cursor==='none'),'Idle cursor did not hide');
+    await p.mouse.move(610,260);await p.waitForTimeout(50);
+    assert(await p.locator('.vctl').evaluate(e=>getComputedStyle(e).opacity==='1'),'Mouse movement did not reveal controls');
+    await p.keyboard.press('Tab');await p.getByRole('button',{name:'Pause',exact:true}).focus();await p.waitForTimeout(3200);
+    assert(await p.locator('.vctl').evaluate(e=>getComputedStyle(e).opacity==='1'),'Keyboard-focused controls disappeared');
+    const before=await time();await p.keyboard.press('ArrowLeft');
+    assert(await p.getByRole('button',{name:'Pause video',exact:true}).count(),'Arrow seek paused running playback');
+    assert((await time())!==before,'Arrow seek did not move running playback');
+    await p.locator('.vctl').hover();await p.waitForTimeout(3200);
+    assert(await p.locator('.vctl').evaluate(e=>getComputedStyle(e).opacity==='1'),'Hovered controls disappeared');
+    await p.getByRole('button',{name:'Pause',exact:true}).click();await p.mouse.move(600,250);await p.waitForTimeout(3200);
+    assert(await p.locator('.vctl').evaluate(e=>getComputedStyle(e).opacity==='1'),'Paused controls disappeared');
+    await p.screenshot({path:`.playwright-out/video-fullscreen-app-${theme}.png`});
+    const props=['display','gridTemplateColumns','gap','padding','backgroundImage','borderRadius','color'];
+    const styles=await p.locator('.vctl').evaluate((e,props)=>props.map(k=>getComputedStyle(e)[k]),props);
+    const ref=await ctx.newPage();await ref.goto('http://127.0.0.1:3001/motetto-app-mockup.html');
+    await ref.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+    await ref.locator('button[data-go="notes"]').first().click();await ref.locator('[data-tab="video"]').click();
+    await ref.locator('[data-vfull]').click();await ref.locator('.vplayer:fullscreen').waitFor();
+    const refStyles=await ref.locator('.vctl').evaluate((e,props)=>props.map(k=>getComputedStyle(e)[k]),props);
+    assert(JSON.stringify(styles)===JSON.stringify(refStyles),'Fullscreen bar differs from prototype: '+JSON.stringify({styles,refStyles}));
+    await ref.screenshot({path:`.playwright-out/video-fullscreen-reference-${theme}.png`});await ref.close();
+    await p.bringToFront();
+    await p.getByRole('button',{name:'Exit full screen',exact:true}).click();await p.waitForFunction(()=>!document.fullscreenElement);
+    assert(await p.locator('.vctl').isVisible(),'Normal controls did not restore');
+    await p.setViewportSize({width:760,height:520});
+    await p.getByRole('button',{name:'Full screen',exact:true}).click();await p.locator('.vplayer:fullscreen').waitFor();
+    assert(await p.locator('.vctl').evaluate(e=>e.getBoundingClientRect().right<=innerWidth),'Controls overflow at minimum size');
+    assert(await p.locator('.vcap').evaluate(e=>e.getBoundingClientRect().bottom<=document.querySelector('.vctl').getBoundingClientRect().top),'Captions overlap controls');
+    await p.screenshot({path:`.playwright-out/video-fullscreen-small-${theme}.png`});
+    await p.getByRole('button',{name:'Exit full screen',exact:true}).click();
+    assert(!errors.length,errors.join('\n'));results.push({theme,controls:true,arrows:true,idle:true,hover:true,paused:true,parity:true,minimum:true});await ctx.close();
+  }
+  return results;
+}

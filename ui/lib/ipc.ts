@@ -220,7 +220,7 @@ export async function onTranslate(callback: (progress: TranslateProgress) => voi
 import type {Catalog} from "./bindings/Catalog";
 import type {Grant} from "./bindings/Grant";
 import type {Hardware} from "./bindings/Hardware";
-import type {Heard} from "./bindings/Heard";
+import type {TestRecording} from "./bindings/TestRecording";
 import type {Permissions} from "./bindings/Permissions";
 import type {SpeedResult} from "./bindings/SpeedResult";
 import type {SetupState} from "./bindings/SetupState";
@@ -237,7 +237,7 @@ export const startSetup=(tier:TierId)=>invoke<void>('start_setup',{tier});
 export const pauseDownload=()=>invoke<void>('pause_download');
 export const answerSlow=(useLower:boolean)=>invoke<void>('answer_slow',{useLower});
 export const setupState=()=>invoke<SetupState>('setup_state');
-export const testRecording=()=>invoke<Heard>('test_recording');
+export const testRecording=()=>invoke<TestRecording>('test_recording');
 export const runSpeedTest=(tier:TierId)=>invoke<SpeedResult>('run_speed_test',{tier});
 export const downloadModel=(id:string)=>invoke<void>('download_model',{id});
 export const deleteModel=(id:string)=>invoke<void>('delete_model',{id});

@@ -16,6 +16,9 @@ pub struct MeetingSummary {
     #[ts(type = "number")]
     pub created_ms: u64,
     pub status: String,
+    /// Current playable video availability, recomputed from saved files.
+    #[serde(default)]
+    pub has_video: bool,
     #[serde(default)]
     #[ts(type = "number[]")]
     pub marks_ms: Vec<u64>,
@@ -296,6 +299,7 @@ pub fn summary(root: &Path, id: &str) -> Result<MeetingSummary, String> {
     summary.duration_ms = summary
         .duration_ms
         .or_else(|| crate::meeting_media::duration(root, id).ok().flatten());
+    summary.has_video = crate::meeting_media::has_video(&dir);
     Ok(summary)
 }
 
@@ -317,6 +321,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        has_video: false,
     }
 }
 
@@ -364,12 +369,13 @@ pub fn read(root: &Path, id: &str) -> Result<Meeting, String> {
     } else {
         String::new()
     };
+    let has_video = summary.has_video;
     Ok(Meeting {
         summary,
         notes_md,
         transcript,
         transcript_heard,
-        has_video: crate::meeting_media::has_video(&dir),
+        has_video,
     })
 }
 
@@ -442,6 +448,7 @@ pub fn import(
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        has_video: false,
     };
     let dir = root.join(&summary.id);
     fs::create_dir(&dir).map_err(|e| e.to_string())?;
@@ -706,6 +713,7 @@ mod tests {
                     notes_language: None,
                     apps: vec![],
                     unconfirmed: vec![],
+                    has_video: false,
                 },
             )
             .unwrap();
@@ -753,6 +761,7 @@ mod tests {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                has_video: false,
             };
             save(&root, &summary).unwrap();
         }

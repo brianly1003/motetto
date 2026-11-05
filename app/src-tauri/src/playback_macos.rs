@@ -79,9 +79,12 @@ impl Engine {
             return self.start_ms;
         };
         // SAFETY: worker-thread objects; both calls return nil while the node is not rendering.
+        // Before the first render or after a device change, lastRenderTime can be a time with
+        // no valid field, and playerTimeForNodeTime throws on that, so it is skipped.
         let played = unsafe {
             let node: &AVAudioNode = &track.node;
             node.lastRenderTime()
+                .filter(|render| render.isSampleTimeValid() || render.isHostTimeValid())
                 .and_then(|render| track.node.playerTimeForNodeTime(&render))
                 .map_or(0.0, |time| {
                     time.sampleTime().max(0) as f64 / time.sampleRate()

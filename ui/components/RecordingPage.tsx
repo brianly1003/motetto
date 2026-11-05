@@ -32,8 +32,13 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
   useEffect(() => {
     if (!micMenu) return;
     const close = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest?.(".micmenu, .micchip")) setMicMenu(null); };
-    document.addEventListener("pointerdown", close); return () => document.removeEventListener("pointerdown", close);
+    // A click in another window or app reaches no element here; the window losing focus closes it too.
+    const blur = () => setMicMenu(null);
+    document.addEventListener("pointerdown", close); window.addEventListener("blur", blur);
+    return () => { document.removeEventListener("pointerdown", close); window.removeEventListener("blur", blur); };
   }, [micMenu]);
+  // Stop from the companion or a shortcut hides the chip; its menu goes with it.
+  useEffect(() => { if (stopped) setMicMenu(null); }, [stopped]);
   const [tab, setTab] = useState<"notes" | "live">("notes");
   const [live, setLive] = useState("");
   const [liveError, setLiveError] = useState("");

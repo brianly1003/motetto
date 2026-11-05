@@ -1,4 +1,5 @@
 export const strings = {
+  videoAvailable: "Video available",
   sidebarHide: "Hide sidebar", sidebarShow: "Show sidebar",
   scr_audio: "Audio", scr_audio_screen: "Audio + screen", scr_none: "The screen isn't recorded.",
   scr_record_from: "Record from", scr_menu_title: "Record the screen", scr_audio_only: "Audio only",
@@ -27,7 +28,7 @@ export const strings = {
   showOnly: "Show only {name}'s items", showEveryone: "Show everyone's items", showAll: "Show all", fixName: "Fix this name…", ownerName: "Owner's name",
   assignTo: "Assign to", newPerson: "new", typeAName: "Type a name",
   lockNotes: "Lock notes", locked: "Locked", unlocked: "Unlocked. You can edit these notes again.", lockedNow: "Locked. These notes are read-only until you unlock them.",
-  lockedHint: "Locked for review. Click Locked to edit again.", unlockTitle: "Locked for review. Click to unlock.", editHint: "Click anywhere to edit. Changes save as you type.",
+  lockedHint: "Locked for review. Click Locked to edit again.", lockedError: "These notes are locked. Unlock them to edit.", unlock: "Unlock", unlockTitle: "Locked for review. Click to unlock.", editHint: "Click anywhere to edit. Changes save as you type.",
   markMoment: "Mark this moment", marked: "Marked", mark: "mark",
   companion: "Motetto companion", showControls: "Recording. Show controls", shrink: "Shrink to Dot",
   pillQuitQuestion: "Quit while recording?",
