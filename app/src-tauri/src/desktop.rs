@@ -124,6 +124,7 @@ pub fn run() {
             crate::capture_overlay::capture_memory,
             crate::capture_overlay::start_capture,
             crate::capture_overlay::pick_capture,
+            crate::capture_overlay::capture_esc_ack,
             crate::settings::open_settings,
             crate::setup::open_setup,
             crate::settings::get_settings,

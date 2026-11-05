@@ -79,6 +79,17 @@ export const captureMemory = (kind: CaptureKind) => invoke<CaptureMemory>('captu
 export const startCapture = (kind: CaptureKind, setup: RecordSetup, memory: CaptureMemory|null = null) => invoke<void>('start_capture', {kind, setup, memory});
 /** During a recording: the setup's choice becomes the recorded screen instead of starting. */
 export const pickCapture = (screen: ScreenPick) => invoke<void>('pick_capture', {screen});
+/** Esc pressed anywhere while the setup is open; the page answers within 500 ms or Rust closes it. */
+export const onCaptureEsc = (callback: (n: number) => void) => listen<number>('motetto://capture-esc', callback);
+export const captureEscAck = (n: number) => invoke<void>('capture_esc_ack', {n});
+/** One setup across displays: each overlay sends its changes to the others. */
+export async function sendCaptureSetup<T>(payload: T) {
+  const { emit } = await import("@tauri-apps/api/event");
+  return emit('motetto://capture-setup', payload);
+}
+export const onCaptureSetup = <T,>(callback: (payload: T) => void) => listen<T>('motetto://capture-setup', callback);
+/** Record now: the screen setup on macOS (mic, timer and what to record first); elsewhere it starts. */
+export const recordNow = () => /Mac/.test(navigator.platform) ? openCapture('Call') : startRecording();
 export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});
 export const deleteVideo = (id:string) => invoke<void>('delete_video',{id});
 export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});

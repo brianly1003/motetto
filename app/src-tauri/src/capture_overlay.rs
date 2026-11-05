@@ -7,6 +7,7 @@ use motetto_core::{
     video::{self, AreaRect},
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 use ts_rs::TS;
 
@@ -90,15 +91,29 @@ pub struct CaptureWindow {
     pub width: f64,
     pub height: f64,
     pub display: u32,
+    /// Motetto's own window: the setup shows it can't be chosen.
+    pub own: bool,
 }
 
 /// A display as (id, x, y, width, height) in global points, top-left origin.
 type Display = (u32, f64, f64, f64, f64);
 
+/// The overlays' own title, so they are never listed as a window to point at.
+const TITLE: &str = "Motetto screen setup";
+
 /// Pickable windows (front first) on the display that holds each one's centre; a window
-/// spanning two displays is offered on one of them.
+/// spanning two displays is offered on one of them. Motetto's own windows (not the overlays)
+/// are listed as `own`, so pointing at one says why it can't be chosen.
 fn on_displays(windows: &[video::WindowInfo], displays: &[Display]) -> Vec<CaptureWindow> {
-    video::pickable(windows)
+    let all: Vec<_> = windows
+        .iter()
+        .filter(|w| w.title != TITLE)
+        .map(|w| video::WindowInfo {
+            own: false,
+            ..w.clone()
+        })
+        .collect();
+    video::pickable(&all)
         .into_iter()
         .filter_map(|w| {
             let (cx, cy) = (w.x + w.width / 2.0, w.y + w.height / 2.0);
@@ -114,6 +129,7 @@ fn on_displays(windows: &[video::WindowInfo], displays: &[Display]) -> Vec<Captu
                 width: w.width,
                 height: w.height,
                 display,
+                own: windows.iter().any(|o| o.id == w.id && o.own),
             })
         })
         .collect()
@@ -169,8 +185,28 @@ fn displays(app: &tauri::AppHandle) -> Vec<Display> {
 
 /// Opening and closing one at a time, so a second open never races the first for a label.
 static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Esc closes the overlays from Rust, whichever display or app has the keyboard.
+/// Esc reaches the overlays from Rust, whichever display or app has the keyboard: the page
+/// closes a menu, goes back from the countdown or closes, and answers `capture_esc_ack`.
 const ESCAPE: &str = "Escape";
+/// The last Esc sent to the pages, and the last one a page answered.
+static ESC_SENT: AtomicU64 = AtomicU64::new(0);
+static ESC_ANSWERED: AtomicU64 = AtomicU64::new(0);
+/// How long a page has to answer before Rust closes every overlay itself.
+const ESC_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// No page answered this Esc: the setup must not trap the screen, so it closes.
+fn unanswered(sent: u64, answered: u64) -> bool {
+    answered < sent
+}
+
+fn escape(app: &tauri::AppHandle) {
+    let sent = ESC_SENT.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = app.emit("motetto://capture-esc", sent);
+    std::thread::sleep(ESC_WAIT);
+    if unanswered(sent, ESC_ANSWERED.load(Ordering::SeqCst)) {
+        close(app);
+    }
+}
 
 /// Opens one overlay per display, replacing any open ones. `mode` opens on that mode instead of
 /// the remembered one. Display changes while it is open are not followed: reopening fixes them.
@@ -214,13 +250,17 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
         .on_shortcut(ESCAPE, |app, _, event| {
             if event.state == ShortcutState::Pressed {
                 let app = app.clone();
-                tauri::async_runtime::spawn_blocking(move || close(&app));
+                tauri::async_runtime::spawn_blocking(move || escape(&app));
             }
         })
         .map_err(|e| e.to_string())?;
     crate::window_native::activate_self(app);
     for (i, &(id, x, y, width, height)) in displays.iter().enumerate() {
-        let mut url = format!("capture/?display={id}&kind={kind:?}");
+        // The main display's page holds the setup bar; the others point at windows and areas.
+        let mut url = format!(
+            "capture/?display={id}&kind={kind:?}&main={}",
+            u8::from(i == main)
+        );
         if let Some(mode) = mode {
             url.push_str(&format!("&mode={mode}"));
         }
@@ -230,7 +270,7 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
         )
         // Never in a capture by any app, even with Shown on.
         .content_protected(true)
-        .title("Motetto screen setup")
+        .title(TITLE)
         .position(x, y)
         .inner_size(width, height)
         .decorations(false)
@@ -295,6 +335,12 @@ pub async fn close_capture(app: tauri::AppHandle) -> Result<(), String> {
         Ok(())
     })
     .await
+}
+
+/// A page handled Esc number `n` (closed a menu, went back, or closed the setup).
+#[tauri::command]
+pub fn capture_esc_ack(n: u64) {
+    ESC_ANSWERED.fetch_max(n, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -412,8 +458,25 @@ mod tests {
                 .iter()
                 .map(|w| (w.id, w.display, w.x, w.y))
                 .collect::<Vec<_>>(),
-            [(10, 2, 160.0, 100.0), (12, 1, 100.0, 100.0)]
+            [
+                (10, 2, 160.0, 100.0),
+                (11, 1, 100.0, 100.0),
+                (12, 1, 100.0, 100.0)
+            ]
         );
+        assert_eq!(listed.iter().filter(|w| w.own).count(), 1);
+        assert!(listed[1].own);
+        let mut overlay = window(14, 100.0, true);
+        overlay.title = TITLE.into();
+        assert!(on_displays(&[overlay], &displays).is_empty());
+    }
+
+    #[test]
+    fn esc_closes_when_no_page_answers() {
+        assert!(unanswered(1, 0));
+        assert!(!unanswered(1, 1));
+        assert!(unanswered(3, 2));
+        assert!(!unanswered(2, 3));
     }
 
     #[test]

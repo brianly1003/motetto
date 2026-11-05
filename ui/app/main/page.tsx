@@ -223,7 +223,7 @@ export default function Main(){
   },[liveId]);
   // The live meeting's page follows the session: Stopped, then Writing the notes, then Ready.
   useEffect(()=>{if(openId.current&&openId.current===live?.meeting_id)void reread(openId.current);},[live?.state.type]);
-  async function recordNow(){setTrashOpen(false);setScriptsOpen(false);await session.act(ipc.startRecording);}
+  async function recordNow(){setTrashOpen(false);setScriptsOpen(false);await session.act(ipc.recordNow);}
   // Recover = Write the notes again on the saved parts (it transcribes them first), one meeting at a
   // time on its own progress page; Discard = Recently deleted, with Undo.
   async function recover(ids:string[]){for(const id of ids){await select(id);notify(s.recovered);try{await ipc.meetingAction(id,"regenerate");}catch(e){setError(String(e));break;}finally{await refresh();}}}
