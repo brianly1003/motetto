@@ -155,6 +155,10 @@ fn menu(
         };
         builder = builder.item(&item.build(app)?);
     }
+    if action == Action::Record && cfg!(target_os = "macos") {
+        builder = builder
+            .item(&MenuItemBuilder::with_id("record-screen", "Record the screen…").build(app)?);
+    }
     if action == Action::Stop && cfg!(target_os = "macos") {
         builder = builder.item(
             &MenuItemBuilder::with_id(

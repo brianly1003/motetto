@@ -118,6 +118,12 @@ pub fn run() {
             hold_ask,
             set_ask_on_call,
             set_share_visible,
+            crate::capture_overlay::open_capture,
+            crate::capture_overlay::close_capture,
+            crate::capture_overlay::capture_windows,
+            crate::capture_overlay::capture_memory,
+            crate::capture_overlay::start_capture,
+            crate::capture_overlay::pick_capture,
             crate::settings::open_settings,
             crate::setup::open_setup,
             crate::settings::get_settings,
@@ -292,7 +298,14 @@ pub fn run() {
                             let _ = app.emit("motetto://notice", error);
                         }
                     }
-                    "record" => dispatch(app.clone(), Action::Start),
+                    "record" => dispatch(
+                        app.clone(),
+                        Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
+                    ),
+                    "record-screen" => dispatch(
+                        app.clone(),
+                        Action::OpenCapture(crate::capture_overlay::CaptureKind::Clip),
+                    ),
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
                     "stop" => dispatch(app.clone(), Action::Stop),
@@ -474,7 +487,7 @@ async fn start_recording(app: tauri::AppHandle, notes_only: Option<bool>) -> Res
     if notes_only == Some(true) {
         return Err("Notes-only sessions are not implemented yet".into());
     }
-    act(app, Action::Start).await
+    act(app, Action::Start(None)).await
 }
 #[tauri::command]
 async fn stop_recording(app: tauri::AppHandle) -> Result<(), String> {
@@ -764,6 +777,15 @@ impl Host for Desktop {
         }
         show(&self.app);
         let _ = self.app.emit("motetto://notice", message);
+    }
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind) {
+        // Off the session thread: building windows waits on the main thread.
+        let app = self.app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) = crate::capture_overlay::open(&app, kind, None) {
+                let _ = app.emit("motetto://notice", error);
+            }
+        });
     }
     fn cant_record(&self, body: &str) {
         // Mid-call, nobody pressed anything: never pull a window forward, even if this fails.

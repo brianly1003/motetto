@@ -94,6 +94,12 @@ impl Host for Fake {
         self.log.lock().unwrap().push(format!("ask_on_call:{on}"));
         Ok(())
     }
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind) {
+        self.log
+            .lock()
+            .unwrap()
+            .push(format!("open_capture:{kind:?}"));
+    }
 }
 fn engine() -> Engine<Fake> {
     Engine::new(
@@ -115,18 +121,18 @@ fn engine() -> Engine<Fake> {
 #[test]
 fn publishes_and_announces_before_capture_and_rejects_overlap() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     assert_eq!(
         &*e.host.log.lock().unwrap(),
         &["state:Recording", "announce", "capture:0"]
     );
-    assert!(e.action(Action::Start, 10).is_err());
+    assert!(e.action(Action::Start(None), 10).is_err());
     assert!(e.busy.load(Ordering::SeqCst));
 }
 #[test]
 fn resume_has_fresh_stop_and_excludes_pause_from_offset() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.action(Action::Stop, 25_000).unwrap();
     assert!(e.host.stops.lock().unwrap()[0].load(Ordering::SeqCst));
     e.action(Action::Resume, 29_000).unwrap();
@@ -146,7 +152,7 @@ fn resume_has_fresh_stop_and_excludes_pause_from_offset() {
 #[test]
 fn deadline_wins_over_resume_and_processing_only_runs_once() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.action(Action::Stop, 25_000).unwrap();
     e.action(Action::Resume, 35_000).unwrap();
     e.apply(Command::Tick, 36_000);
@@ -168,7 +174,7 @@ fn deadline_wins_over_resume_and_processing_only_runs_once() {
 #[test]
 fn short_recording_discards_after_grace_and_releases_import_gate() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.action(Action::Stop, 2_000).unwrap();
     e.apply(Command::Tick, 11_999);
     assert!(e.busy.load(Ordering::SeqCst));
@@ -179,7 +185,7 @@ fn short_recording_discards_after_grace_and_releases_import_gate() {
 #[test]
 fn discard_in_the_pill_trashes_without_notes_and_releases_the_gate() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     // Not while recording: only the Stopped Pill offers Discard.
     e.action(Action::Discard, 30_000).unwrap();
     assert!(
@@ -206,19 +212,19 @@ fn discard_in_the_pill_trashes_without_notes_and_releases_the_gate() {
 fn blocked_permission_and_failed_announcement_never_capture() {
     let mut e = engine();
     e.host.allowed.store(false, Ordering::SeqCst);
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     assert!(e.host.stops.lock().unwrap().is_empty());
     assert!(!e.busy.load(Ordering::SeqCst));
     e.host.allowed.store(true, Ordering::SeqCst);
     e.host.announce_ok = false;
-    e.action(Action::Start, 1).unwrap();
+    e.action(Action::Start(None), 1).unwrap();
     assert!(e.host.stops.lock().unwrap().is_empty());
     assert!(e.session.app.problem.is_some());
 }
 #[test]
 fn quitting_waits_for_processing_and_failure_keeps_window_open() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     let id = e.session.app.meeting_id.clone().unwrap();
     e.action(Action::RequestQuit, 100).unwrap();
     e.action(Action::Quit(false), 101).unwrap();
@@ -253,7 +259,7 @@ fn quitting_waits_for_processing_and_failure_keeps_window_open() {
 #[test]
 fn successful_finish_emits_notes_before_quit() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     let id = e.session.app.meeting_id.clone().unwrap();
     e.action(Action::RequestQuit, 100).unwrap();
     e.action(Action::Quit(true), 101).unwrap();
@@ -276,7 +282,7 @@ fn successful_finish_emits_notes_before_quit() {
 fn import_reservation_prevents_recording_and_early_exit() {
     let mut e = engine();
     e.busy.store(true, Ordering::SeqCst);
-    assert!(e.action(Action::Start, 0).is_err());
+    assert!(e.action(Action::Start(None), 0).is_err());
     assert!(e.action(Action::RequestQuit, 1).is_err());
     assert!(!e.host.log.lock().unwrap().contains(&"exit".into()));
 }
@@ -284,7 +290,7 @@ fn import_reservation_prevents_recording_and_early_exit() {
 #[test]
 fn notification_stop_is_scoped_to_its_meeting_and_sizes_are_validated() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     let id = e.session.app.meeting_id.clone().unwrap();
     assert!(e.session.app.dnd_active);
     e.action(Action::StopMeeting("older-meeting".into()), 25_000)
@@ -308,7 +314,7 @@ fn notification_stop_is_scoped_to_its_meeting_and_sizes_are_validated() {
 fn bookmarks_use_recording_time_and_reject_stopped_sessions() {
     let mut e = engine();
     assert!(e.mark().is_err());
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.apply(Command::Tick, 25_000);
     assert_eq!(e.mark().unwrap(), 25_000);
     e.action(Action::Stop, 25_000).unwrap();
@@ -321,7 +327,7 @@ fn bookmarks_use_recording_time_and_reject_stopped_sessions() {
 fn pause_stops_capture_resume_starts_a_fresh_part_and_the_long_pause_reminds() {
     let mut e = engine();
     assert!(e.action(Action::Pause, 0).is_err());
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.action(Action::Pause, 30_000).unwrap();
     assert_eq!(e.session.app.state, SessionState::Paused);
     assert!(e.host.stops.lock().unwrap()[0].load(Ordering::SeqCst));
@@ -464,7 +470,7 @@ fn off_app_never_asks() {
 #[test]
 fn second_call_app_while_recording_raises_no_problem() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     zoom_call(&mut e, 1_000);
     e.watch(
         WatchEvent::Mic {
@@ -529,7 +535,7 @@ fn a_blocked_detected_call_notifies_quietly_and_a_blocked_start_still_shows_mote
             ["cant_record:Microphone is off. Turn it on in System Settings."]
         );
     }
-    e.action(Action::Start, 1_000).unwrap();
+    e.action(Action::Start(None), 1_000).unwrap();
     let log = e.host.log.lock().unwrap();
     assert!(log.iter().any(|s| s.starts_with("notice:")));
     assert_eq!(
@@ -541,7 +547,7 @@ fn a_blocked_detected_call_notifies_quietly_and_a_blocked_start_still_shows_mote
 fn record_now_while_asking_records_the_asked_call_or_releases_the_gate() {
     let mut e = engine();
     zoom_call(&mut e, 0);
-    e.action(Action::Start, 1_000).unwrap();
+    e.action(Action::Start(None), 1_000).unwrap();
     assert_eq!(e.session.app.state, SessionState::Recording);
     assert_eq!(e.session.app.app.as_deref(), Some("Zoom"));
     assert!(e.busy.load(Ordering::SeqCst));
@@ -551,7 +557,7 @@ fn record_now_while_asking_records_the_asked_call_or_releases_the_gate() {
     let mut e = engine();
     zoom_call(&mut e, 0);
     e.host.allowed.store(false, Ordering::SeqCst);
-    e.action(Action::Start, 1_000).unwrap();
+    e.action(Action::Start(None), 1_000).unwrap();
     assert_ne!(e.session.app.state, SessionState::Recording);
     assert!(!e.busy.load(Ordering::SeqCst));
 }
@@ -560,7 +566,7 @@ fn record_now_while_asking_records_the_asked_call_or_releases_the_gate() {
 fn saved_preferences_set_timers_discard_and_initial_size() {
     let mut e = engine();
     e.host.preferences = (10, 0, true);
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     assert_eq!(e.session.idle_stop_s, 10);
     assert_eq!(e.session.discard_short_s, 0);
     assert_eq!(e.session.app.companion.size, CompanionSize::Dot);
@@ -580,7 +586,7 @@ fn explicit_stop_restores_main_after_stopping_but_automatic_stop_does_not() {
         let mut e = engine();
         e.action(Action::Stop, 0).unwrap();
         assert!(!e.host.log.lock().unwrap().iter().any(|s| s == "show-main"));
-        e.action(Action::Start, 0).unwrap();
+        e.action(Action::Start(None), 0).unwrap();
         if paused {
             e.action(Action::Pause, 25_000).unwrap();
         }
@@ -605,7 +611,7 @@ fn explicit_stop_restores_main_after_stopping_but_automatic_stop_does_not() {
         );
     }
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     e.host.log.lock().unwrap().clear();
     e.apply(Command::StopRecording, 26_000);
     assert!(
@@ -647,7 +653,7 @@ fn notes_model_ready_resolves_only_the_missing_notes_model() {
 #[test]
 fn screen_failure_ignores_an_old_part_of_the_same_meeting() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     let first = e.stop.clone().unwrap();
     let pick = ScreenPick {
         choice: ScreenChoice::Display { id: 1 },
@@ -668,7 +674,7 @@ fn screen_failure_ignores_an_old_part_of_the_same_meeting() {
 #[test]
 fn capture_jobs_use_the_current_picture_and_skip_a_waiting_window() {
     let mut e = engine();
-    e.action(Action::Start, 0).unwrap();
+    e.action(Action::Start(None), 0).unwrap();
     let window = ScreenPick {
         choice: ScreenChoice::CallWindow {
             app_id: "zoom".into(),
@@ -699,4 +705,42 @@ fn capture_jobs_use_the_current_picture_and_skip_a_waiting_window() {
     e.action(Action::AnswerShareVideo(Some(display.clone())), 5)
         .unwrap();
     assert_eq!(e.host.screens.lock().unwrap().last(), Some(&Some(display)));
+}
+#[test]
+fn start_with_setup_passes_setup() {
+    let mut e = engine();
+    let clip_setup = RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: true,
+        notes: false,
+        clicks: true,
+        screen: Some(ScreenPick {
+            choice: ScreenChoice::Window {
+                window_id: 7,
+                app: "Notes".into(),
+            },
+            name: "Notes window".into(),
+        }),
+    };
+    e.action(Action::Start(Some(clip_setup.clone())), 0)
+        .unwrap();
+    assert_eq!(e.session.app.state, SessionState::Recording);
+    assert_eq!(e.session.app.setup, Some(clip_setup));
+}
+#[test]
+fn record_now_shortcut_opens_setup() {
+    use crate::capture_overlay::CaptureKind;
+    assert!(matches!(
+        crate::shortcuts::record_key(&SessionState::Idle),
+        Some(Action::OpenCapture(CaptureKind::Call))
+    ));
+    assert!(matches!(
+        crate::shortcuts::record_key(&SessionState::Recording),
+        Some(Action::Stop)
+    ));
+    // The controller opens the setup instead of recording; nothing starts until start_capture.
+    let mut e = engine();
+    e.action(Action::OpenCapture(CaptureKind::Call), 0).unwrap();
+    assert_eq!(e.session.app.state, SessionState::Idle);
+    assert_eq!(&*e.host.log.lock().unwrap(), &["open_capture:Call"]);
 }

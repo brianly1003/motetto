@@ -141,6 +141,9 @@ pub struct Settings {
     pub prompter: Prompter,
     pub spellings: Vec<Spelling>,
     pub shortcuts: BTreeMap<String, String>,
+    /// The screen setup's last choices for Record now and for Record the screen.
+    pub capture_call: crate::capture_overlay::CaptureMemory,
+    pub capture_clip: crate::capture_overlay::CaptureMemory,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -189,6 +192,8 @@ impl Default for Settings {
             sounds: true,
             companion: Companion::default(),
             prompter: Prompter::default(),
+            capture_call: crate::capture_overlay::CaptureMemory::call(),
+            capture_clip: crate::capture_overlay::CaptureMemory::clip(),
             spellings: motetto_core::config::terms()
                 .map(|terms| {
                     terms
@@ -349,6 +354,9 @@ impl Settings {
             .is_some_and(|id| id.is_empty() || id.len() > 255 || id.contains('\0'))
         {
             return Err("That microphone id isn't valid.".into());
+        }
+        if !self.capture_call.valid() || !self.capture_clip.valid() {
+            return Err("Choose a supported screen setup.".into());
         }
         if !["detect", "en", "vi", "zh", "ja"].contains(&self.call_language.as_str())
             || (self.notes_language != "same_as_call"
@@ -523,15 +531,18 @@ pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<
             }
             store.change(|s| {
                 // Calls choices may have changed in the controller since this window loaded.
-                // So may the mic, from the Pill or the recording page (`microphone.rs`).
+                // So may the mic, from the Pill or the recording page (`microphone.rs`), and the
+                // screen setup's memories.
                 let ask = s.ask_on_call;
                 let modes = s.app_modes.clone();
                 let mic = s.mic_device.clone();
+                let capture = (s.capture_call.clone(), s.capture_clip.clone());
                 let rust_owned = s.clone();
                 *s = settings.clone();
                 s.ask_on_call = ask;
                 s.app_modes = modes;
                 s.mic_device = mic;
+                (s.capture_call, s.capture_clip) = capture;
                 keep_setup(s, rust_owned);
                 crate::setup::refresh_paths(s, catalog(), &models);
             })
@@ -710,6 +721,36 @@ mod tests {
             assert_eq!(restored.appearance, appearance);
         }
         settings.appearance = "sepia".into();
+        assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn capture_defaults() {
+        use crate::capture_overlay::CaptureMemory;
+        use motetto_core::events::MicChoice;
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        let memory = |mode: &str, mic, notes, timer| CaptureMemory {
+            mode: String::from(mode),
+            mic,
+            app_sounds: true,
+            notes,
+            timer,
+            clicks: true,
+            area: None,
+            remember: true,
+        };
+        assert_eq!(
+            settings.capture_call,
+            memory("audio", MicChoice::Default, true, 0)
+        );
+        assert_eq!(
+            settings.capture_clip,
+            memory("window", MicChoice::Off, false, 3)
+        );
+        settings.validate().unwrap();
+        settings.capture_clip.timer = 4;
+        assert!(settings.validate().is_err());
+        settings.capture_clip.timer = 10;
+        settings.capture_clip.mode = "everything".into();
         assert!(settings.validate().is_err());
     }
     #[test]

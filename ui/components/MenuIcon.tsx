@@ -2,6 +2,7 @@
 // in docs/app/motetto-app-mockup.html.
 const paths = {
   screen: <><rect x="1.8" y="2.6" width="12.4" height="8.6" rx="1.4"/><path d="M5.5 13.8h5M8 11.2v2.6"/></>,
+  area: <><path d="M2.4 5V2.4H5M11 2.4h2.6V5M13.6 11v2.6H11M5 13.6H2.4V11"/><rect x="5.4" y="5.4" width="5.2" height="5.2" rx=".8" strokeDasharray="1.5 1.3"/></>,
   window: <><rect x="2.2" y="3" width="11.6" height="10" rx="1.4"/><path d="M2.2 5.8h11.6M4 4.4h.1M5.6 4.4h.1"/></>,
   open: <path d="M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/>,
   rename: <><path d="M10.8 2.7l2.5 2.5L6 12.5l-3.2.7.7-3.2z"/><path d="M9.3 4.2l2.5 2.5"/></>,

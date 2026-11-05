@@ -3,6 +3,8 @@ export const strings = {
   sidebarHide: "Hide sidebar", sidebarShow: "Show sidebar",
   scr_audio: "Audio", scr_audio_screen: "Audio + screen", scr_none: "The screen isn't recorded.",
   scr_record_from: "Record from", scr_menu_title: "Record the screen", scr_audio_only: "Audio only",
+  scr_choose_window: "Choose a window…", scr_choose_window_sub: "Any app's window. Click it on the screen.",
+  scr_choose_area: "Choose an area…", scr_choose_area_sub: "Draw the part of the screen to keep.",
   scr_foot: "About {size} an hour. Motetto's own windows are never in the video, and it stays on this Mac.",
   scr_added: "Recording the {source} too, from {mm:ss}.", scr_switched: "Recording the {source} now. It's still one video.", scr_stopped: "Stopped recording the screen. The audio goes on.",
   scr_share_title: "Record your screen while you share?", scr_share_body: "{App} hides its window while you share, so the video would miss your demo.",

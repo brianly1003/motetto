@@ -12,7 +12,10 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub enum Action {
-    Start,
+    /// Record now; a setup carries the choices made on the screen setup bar.
+    Start(Option<RecordSetup>),
+    /// Record now from the tray or the shortcut: open the setup bar, which starts later.
+    OpenCapture(crate::capture_overlay::CaptureKind),
     Stop,
     StopMeeting(String),
     Pause,
@@ -127,6 +130,8 @@ pub trait Host: Send + 'static {
     fn set_app_mode(&self, app_id: &str, mode: Mode) -> Result<(), String>;
     fn ask_on_call(&self) -> bool;
     fn set_ask_on_call(&self, on: bool) -> Result<(), String>;
+    /// Shows the screen setup over every display; it calls `start_capture` when it is done.
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind);
 }
 
 pub struct Controller {
@@ -333,8 +338,17 @@ impl<H: Host> Engine<H> {
             return Err("Motetto is shutting down".into());
         }
         // Record now while asking is the answer to the question (guardrail 2): record that call.
+        // The asked call keeps its own mic rules; only the setup's picture carries over.
         let action = match (action, &self.session.app.state) {
-            (Action::Start, SessionState::Asking { call_id, .. }) => Action::AnswerAsk {
+            (Action::Start(setup), SessionState::Asking { call_id, .. }) => Action::AnswerAsk {
+                call_id: call_id.clone(),
+                record: true,
+                screen: setup.and_then(|s| s.screen),
+            },
+            (
+                Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
+                SessionState::Asking { call_id, .. },
+            ) => Action::AnswerAsk {
                 call_id: call_id.clone(),
                 record: true,
                 screen: None,
@@ -342,13 +356,17 @@ impl<H: Host> Engine<H> {
             (action, _) => action,
         };
         let command = match action {
-            Action::Start => {
+            Action::OpenCapture(kind) => {
+                self.host.open_capture(kind);
+                return Ok(());
+            }
+            Action::Start(setup) => {
                 self.reserve(now)?;
                 self.apply(
                     Command::StartManual {
                         meeting_id: timestamp(),
                         notes_only: false,
-                        setup: None,
+                        setup,
                     },
                     now,
                 );

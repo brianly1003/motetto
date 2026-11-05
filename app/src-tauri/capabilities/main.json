@@ -6,7 +6,8 @@
     "companion",
     "settings",
     "prompter",
-    "onboarding"
+    "onboarding",
+    "capture-*"
   ],
   "permissions": [
     "core:event:allow-listen",

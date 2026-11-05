@@ -66,6 +66,19 @@ import type {ScreenOption} from './bindings/ScreenOption';
 export const answerAsk = (callId: string, record: boolean, screen: ScreenPick|null = null) => invoke<void>("answer_ask", { callId, record, screen });
 export const listScreenSources = () => invoke<ScreenOption[]>('list_screen_sources');
 export const setScreen = (screen: ScreenPick|null) => invoke<void>('set_screen', {screen});
+import type {CaptureKind} from './bindings/CaptureKind';
+import type {CaptureMemory} from './bindings/CaptureMemory';
+import type {CaptureWindow} from './bindings/CaptureWindow';
+import type {RecordSetup} from './bindings/RecordSetup';
+/** The screen setup over every display; `mode` opens it on that mode instead of the remembered one. */
+export const openCapture = (kind: CaptureKind, mode: 'audio'|'display'|'window'|'area'|null = null) => invoke<void>('open_capture', {kind, mode});
+export const closeCapture = () => invoke<void>('close_capture');
+export const captureWindows = () => invoke<CaptureWindow[]>('capture_windows');
+export const captureMemory = (kind: CaptureKind) => invoke<CaptureMemory>('capture_memory', {kind});
+/** Once the countdown ends: closes the overlays, saves the memory when Remember is on, records. */
+export const startCapture = (kind: CaptureKind, setup: RecordSetup, memory: CaptureMemory|null = null) => invoke<void>('start_capture', {kind, setup, memory});
+/** During a recording: the setup's choice becomes the recorded screen instead of starting. */
+export const pickCapture = (screen: ScreenPick) => invoke<void>('pick_capture', {screen});
 export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});
 export const deleteVideo = (id:string) => invoke<void>('delete_video',{id});
 export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});

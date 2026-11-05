@@ -149,9 +149,10 @@ pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
             _ => s.app.as_deref(),
         });
         let rules = watch::rules();
+        // Only a detected call offers its window; any other window is chosen on the screen setup.
         let mut options: Vec<_> = rules
             .iter()
-            .filter(|rule| active.is_none_or(|name| name == rule.name))
+            .filter(|rule| active.is_some_and(|name| name == rule.name))
             .filter(|rule| video::pick_window(&windows, rule, &rules).is_some())
             .map(|rule| ScreenOption {
                 pick: ScreenPick {
