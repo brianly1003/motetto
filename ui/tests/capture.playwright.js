@@ -37,7 +37,7 @@ async (page) => {
         if (c === 'capture_memory') return memory[a.kind];
         if (c === 'capture_windows') return windows;
         if (c === 'microphones') return {mics, chosen: null, active: mics[0], issue: null};
-        if (c === 'get_levels') return [.12, 0];
+        if (c === 'capture_level') return .12;
         if (c === 'list_screen_sources') return [{pick: {choice: {kind: 'Display', id: 1}, name: 'Built-in Retina Display'}, sub: ''}];
         return null;
       }};
@@ -212,7 +212,26 @@ async (page) => {
     const c = await open(ctx, theme, 'Call');
     if (!(await c.locator('[data-capmode="audio"][aria-checked="true"]').count()) || !(await c.locator('.caplvl').count())) throw Error('call setup');
     if ((await c.locator('.capbar .rectime').innerText()).trim() !== 'Now') throw Error('call timer');
+    // The meter listens to the system default mic only, and is real: capture_level, never a loop.
+    await c.waitForFunction(() => window.calls.some(x => x.c === 'capture_mic_preview' && x.a.on) && window.calls.some(x => x.c === 'capture_level'));
+    if (!(await c.locator('#caphint').innerText()).includes("Check your mic's level")) throw Error('audio hint');
+    // Audio only: clicks pass through except over the bar and the hint.
+    await c.waitForFunction(() => window.calls.some(x => x.c === 'capture_controls' && x.a.through && x.a.rects.length === 2));
+    const bar = await c.locator('.capbar').boundingBox();
+    const sentBar = await c.evaluate(() => window.calls.filter(x => x.c === 'capture_controls').at(-1).a.rects);
+    if (!sentBar.some(([x, y, w, h]) => Math.abs(x - bar.x) <= 1 && Math.abs(y - bar.y) <= 1 && Math.abs(w - bar.width) <= 1 && Math.abs(h - bar.height) <= 1)) throw Error('bar rect not sent ' + JSON.stringify(sentBar));
     await c.screenshot({path: `.playwright-out/capture-app-audio-${theme}.png`});
+    await c.locator('[data-capmode="window"]').click();
+    await c.waitForFunction(() => window.calls.filter(x => x.c === 'capture_controls').at(-1).a.through === false);
+    await c.locator('[data-capmode="audio"]').click();
+    await c.locator('[data-cap="mic"]').click();
+    await c.locator('[data-capset="mic:usb"]').click();
+    await c.waitForFunction(() => window.calls.filter(x => x.c === 'capture_mic_preview').at(-1).a.on === false);
+    await c.locator('.caplvl').waitFor({state: 'detached'});
+    if ((await c.locator('.caplvl').count()) || (await c.locator('#caphint').innerText()).includes("Check your mic's level")) throw Error('meter shown for a device it cannot listen to');
+    await c.locator('[data-cap="mic"]').click();
+    await c.locator('[data-capset="mic:"]').click();
+    await c.locator('.caplvl').waitFor();
     await c.keyboard.press('Enter');
     await c.waitForTimeout(200);
     const call = await c.evaluate(() => window.calls.find(x => x.c === 'start_capture')?.a);

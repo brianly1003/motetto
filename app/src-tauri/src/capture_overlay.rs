@@ -2,12 +2,19 @@
 //! mic, options and start timer are chosen before the first frame. The page runs the countdown
 //! and calls `start_capture` (or `pick_capture` during a recording) once it ends.
 use crate::controller::{Action, Controller};
+use crate::prompter::{Hit, Rect, hit};
 use motetto_core::{
     events::{MicChoice, RecordSetup, ScreenPick},
     video::{self, AreaRect},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 use ts_rs::TS;
 
@@ -199,6 +206,57 @@ fn unanswered(sent: u64, answered: u64) -> bool {
     answered < sent
 }
 
+/// Each overlay's controls (logical rects in its window, from the page) and whether the mouse
+/// passes through elsewhere (Audio only). Picking modes take every click.
+static CONTROLS: Mutex<BTreeMap<String, Controls>> = Mutex::new(BTreeMap::new());
+type Controls = (bool, Vec<[f64; 4]>);
+/// Each open starts one watcher; a newer open or a close ends the older one.
+static WATCHER: AtomicU64 = AtomicU64::new(0);
+
+/// Whether an overlay takes the mouse: always while picking; in Audio only, over its controls.
+fn takes_mouse(through: bool, hit: Hit) -> bool {
+    !through || hit == Hit::Control
+}
+
+/// ~30 times a second, as the prompter does: a window that ignores the cursor gets no events, so
+/// the pointer is polled against each overlay's controls.
+fn watch(app: &tauri::AppHandle) {
+    let id = WATCHER.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut last: BTreeMap<String, bool> = BTreeMap::new();
+        while WATCHER.load(Ordering::SeqCst) == id {
+            std::thread::sleep(std::time::Duration::from_millis(33));
+            let controls = CONTROLS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            for (label, window) in app.webview_windows() {
+                if !label.starts_with("capture-") {
+                    continue;
+                }
+                let (through, rects) = controls.get(&label).cloned().unwrap_or_default();
+                let (Ok(position), Ok(size), Ok(cursor), Ok(scale)) = (
+                    window.outer_position(),
+                    window.outer_size(),
+                    window.cursor_position(),
+                    window.scale_factor(),
+                ) else {
+                    continue;
+                };
+                let frame = Rect {
+                    x: position.x as f64,
+                    y: position.y as f64,
+                    w: size.width as f64,
+                    h: size.height as f64,
+                };
+                let takes = takes_mouse(through, hit(&rects, frame, (cursor.x, cursor.y), scale));
+                if last.get(&label) != Some(&takes) {
+                    let _ = window.set_ignore_cursor_events(!takes);
+                    last.insert(label, takes);
+                }
+            }
+        }
+    });
+}
+
 fn escape(app: &tauri::AppHandle) {
     let sent = ESC_SENT.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = app.emit("motetto://capture-esc", sent);
@@ -290,6 +348,7 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
             let _ = window.set_focus();
         }
     }
+    watch(app);
     Ok(())
 }
 
@@ -300,6 +359,10 @@ pub fn close(app: &tauri::AppHandle) {
 
 fn close_all(app: &tauri::AppHandle) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    WATCHER.fetch_add(1, Ordering::SeqCst);
+    CONTROLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    // The mic is free again before a recording starts.
+    crate::mic_preview::stop();
     let shortcuts = app.global_shortcut();
     if shortcuts.is_registered(ESCAPE) {
         let _ = shortcuts.unregister(ESCAPE);
@@ -341,6 +404,15 @@ pub async fn close_capture(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn capture_esc_ack(n: u64) {
     ESC_ANSWERED.fetch_max(n, Ordering::SeqCst);
+}
+
+/// The page's controls (at most 16) and whether clicks elsewhere pass to the apps below.
+#[tauri::command]
+pub fn capture_controls(window: tauri::WebviewWindow, through: bool, rects: Vec<[f64; 4]>) {
+    CONTROLS.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        window.label().into(),
+        (through, rects.into_iter().take(16).collect()),
+    );
 }
 
 #[tauri::command]
@@ -469,6 +541,15 @@ mod tests {
         let mut overlay = window(14, 100.0, true);
         overlay.title = TITLE.into();
         assert!(on_displays(&[overlay], &displays).is_empty());
+    }
+
+    #[test]
+    fn audio_only_lets_the_mouse_through_except_over_controls() {
+        assert!(takes_mouse(false, Hit::Over));
+        assert!(takes_mouse(false, Hit::Outside));
+        assert!(takes_mouse(true, Hit::Control));
+        assert!(!takes_mouse(true, Hit::Over));
+        assert!(!takes_mouse(true, Hit::Outside));
     }
 
     #[test]

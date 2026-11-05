@@ -88,6 +88,11 @@ export async function sendCaptureSetup<T>(payload: T) {
   return emit('motetto://capture-setup', payload);
 }
 export const onCaptureSetup = <T,>(callback: (payload: T) => void) => listen<T>('motetto://capture-setup', callback);
+/** The overlay's controls in its window's points; with `through` (Audio only) clicks elsewhere reach the apps below. */
+export const captureControls = (through: boolean, rects: [number, number, number, number][]) => invoke<void>('capture_controls', {through, rects});
+/** A meter-only listen to the system default mic while the setup is open; never written. */
+export const captureMicPreview = (on: boolean) => invoke<void>('capture_mic_preview', {on});
+export const captureLevel = () => invoke<number>('capture_level');
 /** Record now: the screen setup on macOS (mic, timer and what to record first); elsewhere it starts. */
 export const recordNow = () => /Mac/.test(navigator.platform) ? openCapture('Call') : startRecording();
 export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});

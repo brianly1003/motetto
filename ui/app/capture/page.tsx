@@ -11,7 +11,7 @@ import type { CaptureMemory } from "@/lib/bindings/CaptureMemory";
 import type { CaptureWindow } from "@/lib/bindings/CaptureWindow";
 import type { MicChoice } from "@/lib/bindings/MicChoice";
 import { useMicReport } from "@/components/Microphone";
-import { CaptureMenu, type Which } from "@/components/capture/CaptureMenus";
+import { CaptureMenu, micRow, type Which } from "@/components/capture/CaptureMenus";
 import { Countdown } from "@/components/capture/Countdown";
 import { Picker } from "@/components/capture/Picker";
 import { CapHint, SetupBar } from "@/components/capture/SetupBar";
@@ -165,6 +165,34 @@ function Setup() {
     return () => removeEventListener("keydown", key, true);
   }, []);
 
+  // The mic meter before recording: only the system default mic can be listened to (meter only).
+  const preview = main && !live && !!cap && cap.mic.kind !== "Off" && !!report?.mics.some(m => m.is_default) && micRow(cap.mic, report) === null;
+  const [previewing, setPreviewing] = useState(false);
+  useEffect(() => {
+    if (!preview || !ipc.desktopAvailable()) { setPreviewing(false); return; }
+    let active = true;
+    void ipc.captureMicPreview(true).then(() => { if (active) setPreviewing(true); }).catch(() => { if (active) setPreviewing(false); });
+    return () => { active = false; void ipc.captureMicPreview(false).catch(() => {}); };
+  }, [preview]);
+
+  // Rust lets clicks through in Audio only, except over what this page shows.
+  const sent = useRef("");
+  useEffect(() => {
+    if (!cap) return;
+    const timer = setTimeout(() => {
+      const rects = Array.from(document.querySelectorAll(".capbar, .caphint, .capmenu, .capcd"), e => {
+        const r = e.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height].map(Math.round) as [number, number, number, number];
+      }).filter(r => r[2] > 0 && r[3] > 0);
+      const through = cap.mode === "audio";
+      const key = JSON.stringify([through, rects]);
+      if (key === sent.current) return;
+      sent.current = key;
+      void ipc.captureControls(through, rects).catch(() => {});
+    }, 50);
+    return () => clearTimeout(timer);
+  });
+
   if (!cap) return null;
   const set = (key: string, mic?: MicChoice) => {
     update(capSet(cap, key, mic));
@@ -190,8 +218,8 @@ function Setup() {
     onPointerDown={() => setMenu(null)}
     onEnter={() => { if (cap.mode === "display" && !cap.count && cap.screen?.id !== display) update({ ...cap, screen: here() }); }}>
     {main && <>
-      <CapHint cap={cap} own={ownHover} screenName={name}/>
-      <SetupBar cap={cap} live={live} ready={ready} what={what} report={report} menu={menu?.which ?? null}
+      <CapHint cap={cap} own={ownHover} screenName={name} meter={previewing}/>
+      <SetupBar cap={cap} live={live} ready={ready} what={what} report={report} menu={menu?.which ?? null} meter={previewing}
         onMode={(m: Mode) => { setHover(null); update(capMode(cap, m)); }}
         onMenu={(which, anchor) => setMenu(menu?.which === which ? null : { which, anchor })}
         onGo={() => go()} onClose={() => void ipc.closeCapture()}/>

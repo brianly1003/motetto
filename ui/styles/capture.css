@@ -123,3 +123,5 @@ html, body { background: transparent !important; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .caplvl i { transition: none; } }
 @media (prefers-reduced-motion: reduce) { .capbar, .capcd, .capcd .cdnum.tick, .capture[data-counting] .caphl, .capture[data-counting] .caparea { animation: none; } .caphl, .capcd .ring .prog { transition: none; } }
 .capbar > .lead { order: -1; }
+/* Audio only lets clicks through the page; the countdown card must still take its buttons. */
+.capture[data-mode="audio"] .capcd { pointer-events: auto; }

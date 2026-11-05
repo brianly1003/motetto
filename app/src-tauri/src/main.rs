@@ -18,6 +18,9 @@ mod library_commands;
 mod live;
 mod meeting_actions;
 mod meeting_media;
+mod mic_preview;
+#[cfg(target_os = "macos")]
+mod mic_preview_macos;
 mod microphone;
 mod model_store;
 mod my_notes;
