@@ -3,6 +3,7 @@
 mod bookmarks;
 mod calls;
 mod catalog;
+mod clicks;
 mod companion;
 mod controller;
 mod desktop;

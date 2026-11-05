@@ -2265,6 +2265,7 @@ dependencies = [
  "hound",
  "motetto-core",
  "objc2",
+ "objc2-app-kit",
  "objc2-avf-audio",
  "objc2-foundation",
  "objc2-speech",
