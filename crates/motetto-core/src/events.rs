@@ -62,6 +62,9 @@ pub struct AppState {
     pub setup: Option<RecordSetup>,
     /// App name of a clip's window that closed and stopped the recording, for the Stopped Pill.
     pub screen_closed: Option<String>,
+    /// A clip that goes on recording (or stays paused) behind an open call question: the state it
+    /// returns to, so the Pill and the tray still show it as recording and offer Stop.
+    pub held_clip: Option<SessionState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -172,6 +175,7 @@ impl Default for AppState {
             discarded: None,
             setup: None,
             screen_closed: None,
+            held_clip: None,
         }
     }
 }

@@ -327,7 +327,12 @@ impl Session {
             call_id: call.call_id.clone(),
             app: call.app.clone(),
         };
-        self.app.companion.size = CompanionSize::Ask;
+        // Over a clip the question sits in the Pill, beside the clip's clock and Stop.
+        self.app.companion.size = if clip.is_some() {
+            CompanionSize::Pill
+        } else {
+            CompanionSize::Ask
+        };
         self.ask = Some(PendingAsk {
             call,
             meeting_id,
@@ -795,12 +800,34 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                 session.app.share_video_offer = false;
             }
         }
+        // A clip is its picture: there is no Audio only to switch it to.
+        Command::SetScreen(None) if session.video_only() => {}
+        // The clip's window closed: the window chosen instead records the next part.
+        Command::SetScreen(Some(pick))
+            if matches!(session.app.state, SessionState::Stopped { .. })
+                && session.app.screen_closed.is_some()
+                && session.video_only() =>
+        {
+            session.app.screen_closed = None;
+            if let Some(setup) = session.app.setup.as_mut() {
+                setup.screen = Some(pick.clone());
+            }
+            session.app.screen = Some(ScreenState {
+                pick,
+                while_sharing: None,
+                waiting: false,
+            });
+            session.resume(&input.since, &mut effects);
+        }
         Command::SetScreen(pick)
             if matches!(
                 session.app.state,
                 SessionState::Recording | SessionState::Paused
             ) && session.audio() =>
         {
+            if let Some(setup) = session.app.setup.as_mut() {
+                setup.screen = pick.clone();
+            }
             let screen = pick.map(|pick| ScreenState {
                 pick,
                 while_sharing: None,
@@ -891,11 +918,13 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
         {
             session.stop(now, &mut effects)
         }
+        // After its window closed a clip resumes on a newly chosen window (SetScreen), never on
+        // the one that is gone.
         Command::ResumeRecording
             if matches!(
                 session.app.state,
                 SessionState::Stopped { .. } | SessionState::Paused
-            ) =>
+            ) && session.app.screen_closed.is_none() =>
         {
             session.resume(&input.since, &mut effects)
         }
@@ -1160,6 +1189,11 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
             let deadline = since.saturating_add(u64::from(session.idle_stop_s) * 1000);
             session.app.elapsed_ms + deadline.saturating_sub(now)
         });
+    session.app.held_clip = session
+        .ask
+        .as_ref()
+        .and_then(|a| a.clip.as_ref())
+        .map(|(_, state)| state.clone());
     session.problems.sort_by_key(|p| priority(&p.problem));
     session.app.problem = session.problems.first().cloned();
     session.app.more_problems = session.problems.len().saturating_sub(1) as u32;

@@ -36,4 +36,9 @@ setup: RecordSetup | null,
 /**
  * App name of a clip's window that closed and stopped the recording, for the Stopped Pill.
  */
-screen_closed: string | null, };
+screen_closed: string | null, 
+/**
+ * A clip that goes on recording (or stays paused) behind an open call question: the state it
+ * returns to, so the Pill and the tray still show it as recording and offer Stop.
+ */
+held_clip: SessionState | null, };

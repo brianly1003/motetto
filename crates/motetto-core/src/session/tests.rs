@@ -2016,3 +2016,82 @@ fn window_closed_while_asking_over_a_clip_stops_it_with_note() {
     assert_eq!(s.app.screen_closed, Some("Zoom".into()));
     assert!(work(fx).contains(&Effect::StopCapture));
 }
+
+#[test]
+fn a_clip_behind_the_question_is_shown_as_recording() {
+    let (s, _) = detect(clip(), Mode::Ask);
+    assert_eq!(s.app.held_clip, Some(SessionState::Recording));
+    assert_eq!(s.app.companion.size, CompanionSize::Pill);
+    let (s, _) = step(
+        s,
+        1,
+        Command::AnswerAsk {
+            call_id: "c1".into(),
+            record: false,
+            screen: None,
+        },
+    );
+    assert_eq!(s.app.held_clip, None);
+    // A question over nothing holds no clip.
+    let (s, _) = detect(fresh(), Mode::Ask);
+    assert!(matches!(s.app.state, SessionState::Asking { .. }));
+    assert_eq!(s.app.held_clip, None);
+}
+
+fn other_window() -> ScreenPick {
+    ScreenPick {
+        choice: ScreenChoice::Window {
+            window_id: 9,
+            app: "Notes".into(),
+        },
+        name: "Notes window".into(),
+    }
+}
+
+#[test]
+fn a_clip_keeps_its_picture_and_its_setup_follows_the_source() {
+    // Audio only is no choice for a clip: nothing changes, nothing restarts.
+    let (s, fx) = step(clip(), 1_000, Command::SetScreen(None));
+    assert!(work(fx).is_empty());
+    assert_eq!(s.app.screen.as_ref().map(|x| &x.pick), Some(&window_pick()));
+    assert_eq!(
+        s.app.setup.as_ref().and_then(|u| u.screen.as_ref()),
+        Some(&window_pick())
+    );
+    // Another window: the next part records it, and the setup says so.
+    let (s, fx) = step(s, 2_000, Command::SetScreen(Some(other_window())));
+    assert!(work(fx).contains(&Effect::StopCapture));
+    assert_eq!(
+        s.app.setup.as_ref().and_then(|u| u.screen.as_ref()),
+        Some(&other_window())
+    );
+    assert!(s.video_only());
+}
+
+#[test]
+fn a_closed_window_is_replaced_by_the_one_chosen_and_the_clip_resumes() {
+    let (s, _) = step(
+        clip(),
+        5_000,
+        Command::ScreenEnded {
+            lost: true,
+            restart: false,
+        },
+    );
+    assert_eq!(s.app.screen_closed, Some("Zoom".into()));
+    // Resume itself can't reuse the window that is gone.
+    let (s, fx) = step(s, 6_000, Command::ResumeRecording);
+    assert!(matches!(s.app.state, SessionState::Stopped { .. }));
+    assert!(work(fx).is_empty());
+    let (s, fx) = step(s, 7_000, Command::SetScreen(Some(other_window())));
+    assert_eq!(s.app.state, SessionState::Recording);
+    assert_eq!(s.app.screen_closed, None);
+    assert_eq!(
+        s.app.screen.as_ref().map(|x| &x.pick),
+        Some(&other_window())
+    );
+    assert!(work(fx).contains(&Effect::StartCapture {
+        meeting_id: "m1".into(),
+        resume: true
+    }));
+}
