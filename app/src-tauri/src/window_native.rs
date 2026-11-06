@@ -137,8 +137,10 @@ pub fn follow_share_visible(app: &tauri::AppHandle, shown: bool) -> Result<(), S
         shown,
         app.webview_windows()
             .values()
-            // The screen setup overlay is never shown in a capture.
-            .filter(|window| !window.label().starts_with("capture-"))
+            // The screen setup overlay and the recording frame are never shown in a capture.
+            .filter(|window| {
+                !window.label().starts_with("capture-") && window.label() != "recframe"
+            })
             .map(|window| window.set_content_protected(!shown))
             .collect::<Vec<_>>(),
     )

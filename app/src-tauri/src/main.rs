@@ -32,6 +32,7 @@ mod playback;
 #[cfg(target_os = "macos")]
 mod playback_macos;
 mod prompter;
+mod rec_frame;
 mod recording;
 mod recording_screen;
 mod rehearse;
