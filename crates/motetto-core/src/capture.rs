@@ -688,6 +688,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs Screen Recording permission and takes 6-13 s; area_rect tests cover the refusal"]
     fn video_only_with_a_tiny_area_fails_at_once() {
         // Without Screen Recording permission the call fails earlier, which is also immediate.
         let display = SCShareableContent::get()

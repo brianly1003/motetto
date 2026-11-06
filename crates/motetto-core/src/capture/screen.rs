@@ -31,7 +31,14 @@ pub(super) fn picture_filter(
                 .windows()
                 .into_iter()
                 .find(|w| w.window_id() == id)
-                .ok_or("the call window is no longer available")?;
+                .ok_or("the window is no longer available")?;
+            // Motetto's own windows are never recorded, whoever asks for one.
+            if window
+                .owning_application()
+                .is_some_and(|a| a.process_id() as u32 == std::process::id())
+            {
+                return Err("Motetto's own windows are never recorded".into());
+            }
             let frame = window.frame();
             let filter = SCContentFilter::create()
                 .with_window(&window)
