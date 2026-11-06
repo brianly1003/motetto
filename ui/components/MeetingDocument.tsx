@@ -126,14 +126,15 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   // is moving to Recently deleted or gone; the library closes the page. Reading it would fail.
   const wasLive=useRef(live);
   useEffect(()=>{
-    const ended=wasLive.current&&!live&&!writing;wasLive.current=live;
+    // A saved screen recording is Ready, not discarded: read its video.
+    const ended=wasLive.current&&!live&&!writing&&meeting.summary.status!=='Ready';wasLive.current=live;
     // The tracks are still being written while it records or its notes are written.
     if(live||writing||ended)return;
     let active=true;setMediaFailed(false);
     ipc.meetingMedia(meeting.summary.id).then(value=>{if(active){setMedia(value);if(!value.videos.length)setTab(tab=>tab==='Video'?'Audio':tab);}}).catch(error=>{if(active){setMediaFailed(true);onError(String(error));}});
     return()=>{active=false;};
-  // A trim, or its undo, changes the recording's length: read the new files.
-  },[meeting.summary.id,live,writing,meeting.summary.duration_ms]);
+  // A trim, or its undo, changes the recording's length; a clip turns Ready once saved.
+  },[meeting.summary.id,live,writing,meeting.summary.duration_ms,meeting.summary.status]);
   // null until known: native audio (macOS) or the audio elements below.
   const [nativeAudio,setNativeAudio]=useState<boolean|null>(null);
   useEffect(()=>{
