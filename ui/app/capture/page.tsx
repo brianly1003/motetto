@@ -100,13 +100,11 @@ function Setup() {
     }
   }
 
-  function go(skipTimer = false, chosen?: CaptureWindow | null, screen?: Screen) {
+  function go(skipTimer = false) {
     const c = capRef.current;
     if (!c || c.count) return;
     let next = { ...c };
-    if (screen) next.screen = screen;
     if (next.mode === "display" && !next.screen) next.screen = here();
-    if (chosen) next.sel = chosen;
     if (next.mode === "window" && !next.sel) { if (!hover || hover.own) return; next.sel = hover; }
     setMenu(null);
     const n = !live && !skipTimer ? next.timer : 0;
@@ -156,6 +154,22 @@ function Setup() {
     return () => { active = false; off?.(); };
   }, []);
 
+  // Any press but on a menu or its own button (which toggles it) closes the open menu, including
+  // on the bar and, in Audio only, on the veil that lets clicks through; so does a click elsewhere.
+  const menuRef = useRef(menu); menuRef.current = menu;
+  const closing = useRef(false);
+  useEffect(() => {
+    const press = (e: PointerEvent) => {
+      const t = e.target as Element;
+      closing.current = !!menuRef.current && !t.closest?.(".capbar, .capmenu, .capcd");
+      if (!t.closest?.(".capmenu, [aria-haspopup]")) setMenu(null);
+    };
+    const blur = () => setMenu(null);
+    addEventListener("pointerdown", press, true);
+    addEventListener("blur", blur);
+    return () => { removeEventListener("pointerdown", press, true); removeEventListener("blur", blur); };
+  }, []);
+
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
     const c = capRef.current, t = e.target as Element;
@@ -192,7 +206,8 @@ function Setup() {
         const r = e.getBoundingClientRect();
         return [r.left, r.top, r.width, r.height].map(Math.round) as [number, number, number, number];
       }).filter(r => r[2] > 0 && r[3] > 0);
-      const through = cap.mode === "audio";
+      // An open menu takes the next click anywhere, so a click outside closes it.
+      const through = cap.mode === "audio" && !menu;
       const key = JSON.stringify([through, rects]);
       if (key === sent.current) return;
       sent.current = key;
@@ -221,9 +236,8 @@ function Setup() {
     onHover={setHover}
     onArea={(a, done) => { if (done) { setDrawn(null); update({ ...cap, area: a }); } else setDrawn(a); }}
     onChoose={w => update({ ...cap, sel: w })}
-    onGo={w => go(false, w)}
-    onDisplay={() => go(false, null, here())}
-    onPointerDown={() => setMenu(null)}
+    onDisplay={() => update({ ...cap, screen: here() })}
+    closing={closing}
     onEnter={() => { if (cap.mode === "display" && !cap.count && cap.screen?.id !== display) update({ ...cap, screen: here() }); }}>
     {main && <>
       <CapHint cap={cap} own={ownHover} screenName={name} meter={previewing}/>

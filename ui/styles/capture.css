@@ -64,7 +64,7 @@ html, body { background: transparent !important; overflow: hidden; }
 .capmenu button:hover .sub, .capmenu button:focus-visible .sub { color: rgba(255,255,255,.8); }
 .capmenu .ck { width: 14px; height: 14px; color: #8fa8ff; }
 .capmenu button:hover .ck { color: #fff; }
-.capmenu .note { padding: 6px 10px; font-size: 11.5px; line-height: 1.4; color: rgba(243,244,239,.6); }
+.capmenu .note { padding: 6px 10px; font-size: 11.5px; line-height: 1.4; color: rgba(243,244,239,.6); background: none; border: 0; border-radius: 0; }
 /* The start timer (owner 2026-11-05): part of the Record button, so when it starts is decided
    next to where you start it. Now, 3, 5 or 10 s; a small dial says how long at a glance. */
 .recsplit { display: inline-flex; align-items: stretch; margin-left: 2px; border-radius: 10px; box-shadow: 0 6px 16px -6px rgba(208,55,43,.7); }

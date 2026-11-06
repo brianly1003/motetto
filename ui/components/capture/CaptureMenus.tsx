@@ -83,7 +83,11 @@ export function CaptureMenu({ which, cap, report, anchor, onSet, onClose }: {
       const at = items.indexOf(document.activeElement as HTMLElement);
       items[(at + (e.key === "ArrowUp" ? -1 : 1) + items.length) % items.length]?.focus();
     }}
-    onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node) && !(e.relatedTarget as Element | null)?.closest?.("[data-cap]")) onClose(); }}>
+    // WebKit doesn't focus a clicked button: without this, the press blurs the menu shut first.
+    onMouseDown={e => e.preventDefault()}
+    // Tab out of the menu closes it. A press with no new focus (WebKit) is left to the press itself,
+    // so pressing the menu's own button again toggles it shut instead of reopening it.
+    onBlur={e => { const to = e.relatedTarget as Element | null; if (to && !e.currentTarget.contains(to) && !to.closest("[data-cap]")) onClose(); }}>
     {body}
   </div>;
 }

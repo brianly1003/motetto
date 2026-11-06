@@ -223,6 +223,32 @@ async (page) => {
     await c.screenshot({path: `.playwright-out/capture-app-audio-${theme}.png`});
     await c.locator('[data-capmode="window"]').click();
     await c.waitForFunction(() => window.calls.filter(x => x.c === 'capture_controls').at(-1).a.through === false);
+    // Entire screen: a click on the screen only chooses it; nothing records until Record.
+    await c.locator('[data-capmode="display"]').click();
+    await c.mouse.click(700, 300);
+    await c.waitForTimeout(150);
+    if (await count(c, 'start_capture')) throw Error('a click on the screen started recording');
+    // None: the menu row must take the press (WebKit does not focus a clicked button).
+    await c.locator('[data-cap="mic"]').click();
+    await c.locator('[data-capset="mic:off"]').click();
+    if ((await c.locator('[data-cap="mic"]').innerText()).trim() !== 'No mic') throw Error('None not chosen');
+    // A menu's own button toggles it shut; a press anywhere else closes it and does nothing more.
+    await c.locator('[data-cap="opts"]').click();
+    await c.locator('[data-cap="opts"]').click();
+    await c.waitForTimeout(150);
+    if (await c.locator('.capmenu').count()) throw Error('the same button again left the menu open');
+    await c.locator('[data-capmode="window"]').click();
+    await c.locator('[data-cap="mic"]').click();
+    await c.mouse.move(800, 300);
+    await c.mouse.click(800, 300);
+    await c.waitForTimeout(150);
+    if ((await c.locator('.capmenu').count()) || (await c.locator('#caphl.chosen').count())) throw Error('a press closing the menu chose a window');
+    await c.locator('[data-capmode="audio"]').click();
+    await c.locator('[data-cap="opts"]').click();
+    await c.waitForFunction(() => window.calls.filter(x => x.c === 'capture_controls').at(-1).a.through === false);
+    await c.mouse.click(700, 300);
+    await c.waitForTimeout(150);
+    if (await c.locator('.capmenu').count()) throw Error('Audio only: a click outside left the menu open');
     await c.locator('[data-capmode="audio"]').click();
     await c.locator('[data-cap="mic"]').click();
     await c.locator('[data-capset="mic:usb"]').click();

@@ -63,6 +63,6 @@ export function CapHint({ cap, own, screenName, meter = true }: { cap: Cap; own:
   else if (cap.mode === "audio") body = meter ? <>Your mic and the call&apos;s sound, no screen. Check your mic&apos;s level, then <kbd className="kbd">Return</kbd> records</> : <>Your mic and the call&apos;s sound, no screen. <kbd className="kbd">Return</kbd> records</>;
   else if (cap.mode === "window") body = cap.sel ? <><b>{cap.sel.title || cap.sel.app}</b> chosen. <kbd className="kbd">Return</kbd> records · click another window to change</> : <>Click a window to choose it. Nothing records until you press Record. <kbd className="kbd">Esc</kbd> cancels</>;
   else if (cap.mode === "area") body = <>Drag to draw an area, then move it or drag its edges. <kbd className="kbd">Return</kbd> records · <kbd className="kbd">Esc</kbd> cancels</>;
-  else body = <>Click anywhere to record {screenName}, notifications included. <kbd className="kbd">Esc</kbd> cancels</>;
+  else body = <><b>{screenName}</b>, notifications included. Nothing records until you press Record. <kbd className="kbd">Esc</kbd> cancels</>;
   return <div className="caphint" id="caphint">{body}</div>;
 }
