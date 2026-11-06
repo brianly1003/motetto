@@ -760,15 +760,27 @@ impl Host for Desktop {
         if crate::companion::available(&self.app) {
             return Ok(());
         }
-        let window = self
-            .app
-            .get_webview_window("main")
-            .ok_or("Open Motetto before starting a recording")?;
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-        window
-            .set_title("Motetto - Recording microphone and system audio")
-            .map_err(|e| e.to_string())
+        if self.app.get_webview_window("main").is_none() {
+            return Err("Open Motetto before starting a recording".into());
+        }
+        // The Pill reports ready once it has painted, a moment after the state showed it: give it
+        // 1.5 s before the library comes forward as the confirmation, so a start from the screen
+        // setup (which hid the library) doesn't bring it back. The recording isn't held up.
+        let app = self.app.clone();
+        std::thread::spawn(move || {
+            for _ in 0..30 {
+                if crate::companion::available(&app) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.set_title("Motetto - Recording microphone and system audio");
+            }
+        });
+        Ok(())
     }
     fn show_main(&self) {
         show(&self.app);
