@@ -98,6 +98,7 @@ impl<'de> Deserialize<'de> for MeetingKind {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
 pub struct ScreenFacts {
     /// The window's app, the area or the display, as the setup named it.
     pub source: String,
@@ -107,7 +108,6 @@ pub struct ScreenFacts {
     pub app_sounds: bool,
     pub clicks: bool,
     /// Frames a second the picture was recorded at; 0 when not known.
-    #[serde(default)]
     pub fps: u32,
     /// The video's size in pixels; 0 until the first picture part is saved.
     pub width: u32,
@@ -637,6 +637,13 @@ pub(crate) fn used_spellings() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_facts_from_an_older_or_newer_writer_still_read() {
+        let facts: ScreenFacts = serde_json::from_str(r#"{"source":"Safari"}"#).unwrap();
+        assert_eq!(facts.source, "Safari");
+        assert!(!facts.mic_off && facts.width == 0);
+    }
     #[test]
     fn bytes_sum_meeting_files_but_not_links() {
         let root = temp_root();

@@ -171,6 +171,8 @@ pub fn spawn(
                                         let target = crate::clicks::target(&picture.target);
                                         Some(crate::clicks::start(&app, dir, offset_ms, target))
                                     });
+                                    // The red frame outlines a window or an area while it records.
+                                    crate::rec_frame::set(picture.as_ref().map(|p| p.target));
                                     let part_began = std::time::Instant::now();
                                     let result = motetto_core::capture::record_with_levels(
                                         base,
@@ -184,6 +186,7 @@ pub fn spawn(
                                         },
                                     )
                                     .map_err(|e| e.to_string());
+                                    crate::rec_frame::set(None);
                                     picture.take();
                                     // The last part decides: one not ended by a Stop click clears an
                                     // earlier part's suggestion.
@@ -256,11 +259,12 @@ pub fn spawn(
                         }
                     }
                     Job::SaveClip { id } => {
-                        // A failed capture stays NeedsAttention with its partial files.
+                        // A failed capture with no picture stays NeedsAttention with its
+                        // partial files; one whose earlier parts left a picture is saved.
                         let failed = recording
                             .as_ref()
                             .is_some_and(|r| r.id == id && r.failure.is_some());
-                        if !failed && root.join(&id).is_dir() {
+                        if (!failed || has_picture(&root, &id)) && root.join(&id).is_dir() {
                             let _ = app.emit(
                                 "motetto://notice",
                                 match save_clip(&root, &id) {
@@ -520,17 +524,35 @@ fn clip_title(created_ms: u64) -> String {
 fn save_clip(root: &Path, id: &str) -> Result<(), String> {
     let dir = library::folder(root, id)?;
     let parts: Vec<crate::screen::ScreenPart> = crate::screen_files::read(&dir, "screen.json");
+    let audio: Vec<(Vec<String>, u64)> = crate::screen_files::read(&dir, "parts.json");
     let mut summary = library::summary(root, id)?;
     summary.status = "Ready".into();
     summary.kind = library::MeetingKind::Screen;
-    if let (Some(facts), Some(part)) = (
-        summary.facts.as_mut(),
-        parts.iter().find(|p| p.width > 0 && p.height > 0),
-    ) {
-        facts.width = part.width;
-        facts.height = part.height;
+    if let Some(facts) = summary.facts.as_mut() {
+        // The facts follow what was recorded, not the setup at the start: the mic or the
+        // source can change between parts.
+        let written = |side: &str| {
+            audio
+                .iter()
+                .flat_map(|(files, _)| files)
+                .any(|f| f.ends_with(side) && Path::new(f).is_file())
+        };
+        facts.mic_off = !written(".mic.wav");
+        facts.app_sounds = written(".system.wav");
+        if let Some(part) = parts.iter().rev().find(|p| p.width > 0 && p.height > 0) {
+            facts.width = part.width;
+            facts.height = part.height;
+            facts.source = part.source.name.clone();
+        }
     }
     library::save(root, &summary)
+}
+/// Whether a clip left any picture: a later part that failed must not discard earlier ones.
+fn has_picture(root: &Path, id: &str) -> bool {
+    let dir = root.join(id);
+    crate::screen_files::read::<Vec<crate::screen::ScreenPart>>(&dir, "screen.json")
+        .iter()
+        .any(|p| dir.join(&p.file).is_file())
 }
 fn status(root: &Path, id: &str, value: &str) -> Result<library::MeetingSummary, String> {
     let mut summary = library::summary(root, id)?;
@@ -851,6 +873,36 @@ mod tests {
             })
         );
         assert!(!dir.join("transcript.txt").exists() && !dir.join("notes.md").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_clip_is_saved_with_the_tracks_and_source_it_recorded() {
+        let root = root();
+        // Started with no mic and no app sounds; the mic was turned on for the second part.
+        create(&root, "123", Some(&clip(MicChoice::Off, false))).unwrap();
+        let dir = root.join("123");
+        assert!(!has_picture(&root, "123"));
+        let mic = dir.join("part-0001.mic.wav");
+        fs::write(&mic, b"audio").unwrap();
+        fs::write(
+            dir.join("parts.json"),
+            serde_json::to_vec(&[(vec![mic.to_string_lossy().into_owned()], 5_000u64)]).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join("part-0000.screen.mp4"), b"video").unwrap();
+        fs::write(
+            dir.join("screen.json"),
+            r#"[{"file":"part-0000.screen.mp4","offset_ms":0,"source":{"kind":"window","name":"Safari"},"while_sharing":false,"width":1280,"height":800},
+               {"file":"part-0001.screen.mp4","offset_ms":5000,"source":{"kind":"window","name":"Notes window"},"while_sharing":false,"width":900,"height":700}]"#,
+        )
+        .unwrap();
+        // The first part's picture is on disk, so a later failure still saves the clip.
+        assert!(has_picture(&root, "123"));
+        save_clip(&root, "123").unwrap();
+        let facts = library::summary(&root, "123").unwrap().facts.unwrap();
+        assert!(!facts.mic_off && !facts.app_sounds);
+        assert_eq!(facts.source, "Notes window");
+        assert_eq!((facts.width, facts.height), (900, 700));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

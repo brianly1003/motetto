@@ -270,6 +270,7 @@ pub fn run() {
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
             crate::screen::watch(app.handle().clone())?;
+            crate::rec_frame::follow(app.handle().clone())?;
             let saved = app.state::<crate::settings::Store>().get()?;
             dispatch(
                 app.handle().clone(),
@@ -790,11 +791,11 @@ impl Host for Desktop {
         show(&self.app);
         let _ = self.app.emit("motetto://notice", message);
     }
-    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind) {
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind, mode: Option<&'static str>) {
         // Off the session thread: building windows waits on the main thread.
         let app = self.app.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            if let Err(error) = crate::capture_overlay::open(&app, kind, None) {
+            if let Err(error) = crate::capture_overlay::open(&app, kind, mode) {
                 let _ = app.emit("motetto://notice", error);
             }
         });

@@ -316,8 +316,9 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
     for (i, &(id, x, y, width, height)) in displays.iter().enumerate() {
         // The main display's page holds the setup bar; the others point at windows and areas.
         let mut url = format!(
-            "capture/?display={id}&kind={kind:?}&main={}",
-            u8::from(i == main)
+            "capture/?display={id}&kind={kind:?}&main={}&main_display={}",
+            u8::from(i == main),
+            displays[main].0
         );
         if let Some(mode) = mode {
             url.push_str(&format!("&mode={mode}"));
@@ -421,6 +422,8 @@ pub async fn capture_windows(app: tauri::AppHandle) -> Result<Vec<CaptureWindow>
     blocking(move || {
         #[cfg(target_os = "macos")]
         {
+            // The setup's sizes and the recording's both need each display's scale.
+            crate::screen::refresh_displays(&app);
             let windows = motetto_core::capture::screen_windows().map_err(|e| e.to_string())?;
             Ok(on_displays(&windows, &displays(&app)))
         }
@@ -456,6 +459,8 @@ pub async fn start_capture(
 ) -> Result<(), String> {
     blocking(move || {
         close(&app);
+        #[cfg(target_os = "macos")]
+        crate::screen::refresh_displays(&app);
         let mut setup = setup;
         setup.mic = resolve_mic(setup.mic, || crate::microphone::for_capture(&app));
         if let Some(memory) = memory {

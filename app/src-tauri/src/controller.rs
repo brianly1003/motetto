@@ -11,6 +11,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// A setup with no mic, no app sounds and no picture is refused before anything is created.
+pub const NOTHING_TO_RECORD: &str =
+    "Nothing to record: choose a microphone, turn on app sounds or choose what to show.";
+
 pub enum Action {
     /// Record now; a setup carries the choices made on the screen setup bar.
     Start(Option<RecordSetup>),
@@ -147,8 +151,9 @@ pub trait Host: Send + 'static {
     fn set_app_mode(&self, app_id: &str, mode: Mode) -> Result<(), String>;
     fn ask_on_call(&self) -> bool;
     fn set_ask_on_call(&self, on: bool) -> Result<(), String>;
-    /// Shows the screen setup over every display; it calls `start_capture` when it is done.
-    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind);
+    /// Shows the screen setup over every display, on `mode` when given; it calls
+    /// `start_capture` (or `pick_capture` for a recording under way) when it is done.
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind, mode: Option<&'static str>);
 }
 
 pub struct Controller {
@@ -393,10 +398,17 @@ impl<H: Host> Engine<H> {
         };
         let command = match action {
             Action::OpenCapture(kind) => {
-                self.host.open_capture(kind);
+                self.host.open_capture(kind, None);
                 return Ok(());
             }
             Action::Start(setup) => {
+                // No mic, no app sounds and no picture would make an empty meeting.
+                if setup
+                    .as_ref()
+                    .is_some_and(|s| s.mic == MicChoice::Off && !s.app_sounds && s.screen.is_none())
+                {
+                    return Err(NOTHING_TO_RECORD.into());
+                }
                 self.reserve(now)?;
                 self.apply(
                     Command::StartManual {
@@ -464,6 +476,12 @@ impl<H: Host> Engine<H> {
             Action::AskOnCall(on) => {
                 self.host.set_ask_on_call(on)?;
                 Command::SetAskOnCall(on)
+            }
+            // The clip's window closed: Resume chooses another window on the setup.
+            Action::Resume if self.session.app.screen_closed.is_some() => {
+                self.host
+                    .open_capture(crate::capture_overlay::CaptureKind::Clip, Some("window"));
+                return Ok(());
             }
             Action::Resume => {
                 if self.capture_failed {

@@ -135,6 +135,24 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
     }
 }
 
+/// The displays as (id, name, backing scale), read on the main thread; they also fill the scale
+/// cache a picture's size is resolved with. None when the main thread doesn't answer in 2 s.
+#[cfg(target_os = "macos")]
+pub fn refresh_displays(app: &tauri::AppHandle) -> Option<Vec<(u32, String, f64)>> {
+    let (tx, rx) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let _ = tx.send(motetto_core::capture::displays(mtm));
+        }
+    })
+    .ok()?;
+    let displays = rx.recv_timeout(Duration::from_secs(2)).ok()?;
+    if let Ok(mut cache) = DISPLAYS.lock() {
+        *cache = displays.clone();
+    }
+    Some(displays)
+}
+
 pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -165,19 +183,7 @@ pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
                 sub: "Only the call, with whatever people share. Recommended.".into(),
             })
             .collect();
-        let (tx, rx) = mpsc::channel();
-        if app
-            .run_on_main_thread(move || {
-                if let Some(mtm) = objc2::MainThreadMarker::new() {
-                    let _ = tx.send(motetto_core::capture::displays(mtm));
-                }
-            })
-            .is_ok()
-            && let Ok(displays) = rx.recv_timeout(Duration::from_secs(2))
-        {
-            if let Ok(mut cache) = DISPLAYS.lock() {
-                *cache = displays.clone();
-            }
+        if let Some(displays) = refresh_displays(app) {
             options.extend(displays.into_iter().map(|(id, name, _)| ScreenOption {
                 pick: ScreenPick {
                     choice: ScreenChoice::Display { id },

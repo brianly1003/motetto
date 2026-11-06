@@ -95,11 +95,11 @@ impl Host for Fake {
         self.log.lock().unwrap().push(format!("ask_on_call:{on}"));
         Ok(())
     }
-    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind) {
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!("open_capture:{kind:?}"));
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind, mode: Option<&'static str>) {
+        self.log.lock().unwrap().push(match mode {
+            Some(mode) => format!("open_capture:{kind:?}:{mode}"),
+            None => format!("open_capture:{kind:?}"),
+        });
     }
 }
 fn engine() -> Engine<Fake> {
@@ -731,12 +731,27 @@ fn start_with_setup_passes_setup() {
 #[test]
 fn record_now_shortcut_opens_setup() {
     use crate::capture_overlay::CaptureKind;
+    let at = |state: SessionState, held_clip: Option<SessionState>| AppState {
+        state,
+        held_clip,
+        ..AppState::default()
+    };
     assert!(matches!(
-        crate::shortcuts::record_key(&SessionState::Idle),
+        crate::shortcuts::record_key(&at(SessionState::Idle, None)),
         Some(Action::OpenCapture(CaptureKind::Call))
     ));
     assert!(matches!(
-        crate::shortcuts::record_key(&SessionState::Recording),
+        crate::shortcuts::record_key(&at(SessionState::Recording, None)),
+        Some(Action::Stop(StopSource::Keyboard))
+    ));
+    let asking = SessionState::Asking {
+        call_id: "c1".into(),
+        app: "Zoom".into(),
+    };
+    assert!(crate::shortcuts::record_key(&at(asking.clone(), None)).is_none());
+    // A clip recording behind the question is stopped by the record key.
+    assert!(matches!(
+        crate::shortcuts::record_key(&at(asking, Some(SessionState::Recording))),
         Some(Action::Stop(StopSource::Keyboard))
     ));
     // The controller opens the setup instead of recording; nothing starts until start_capture.
@@ -818,4 +833,47 @@ fn none_and_back_to_a_device_restart_the_part() {
         Some(&MicChoice::Default)
     );
     assert_eq!(e.session.app.state, SessionState::Recording);
+}
+
+#[test]
+fn resume_after_a_clip_window_closed_opens_the_setup_on_window() {
+    let mut e = engine();
+    let setup = RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: true,
+        notes: false,
+        clicks: true,
+        screen: Some(motetto_core::events::ScreenPick {
+            choice: motetto_core::events::ScreenChoice::Window {
+                window_id: 7,
+                app: "Safari".into(),
+            },
+            name: "Safari window".into(),
+        }),
+    };
+    e.action(Action::Start(Some(setup)), 0).unwrap();
+    e.action(Action::ScreenLost, 1_000).unwrap();
+    assert_eq!(e.session.app.screen_closed.as_deref(), Some("Safari"));
+    e.host.log.lock().unwrap().clear();
+    e.action(Action::Resume, 2_000).unwrap();
+    assert!(matches!(e.session.app.state, SessionState::Stopped { .. }));
+    assert_eq!(&*e.host.log.lock().unwrap(), &["open_capture:Clip:window"]);
+}
+
+#[test]
+fn a_setup_with_nothing_to_record_never_starts() {
+    let mut e = engine();
+    let silent = RecordSetup {
+        mic: MicChoice::Off,
+        app_sounds: false,
+        notes: true,
+        clicks: true,
+        screen: None,
+    };
+    assert_eq!(
+        e.action(Action::Start(Some(silent)), 0).unwrap_err(),
+        NOTHING_TO_RECORD
+    );
+    assert_eq!(e.session.app.state, SessionState::Idle);
+    assert!(e.host.log.lock().unwrap().is_empty());
 }
