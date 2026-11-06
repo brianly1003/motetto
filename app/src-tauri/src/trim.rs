@@ -38,9 +38,6 @@ const MANIFESTS: [&str; 4] = [
 ];
 /// The pre-trim summary, kept beside the original so a restore puts its times back.
 const SUMMARY: &str = "meeting.json";
-/// How far past the video's length the end handle may be: the strip's length comes from the
-/// summary, which can run a few ms longer than the joined parts. Clamped to the video.
-const END_SLACK_MS: u64 = 250;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Click {
@@ -331,11 +328,9 @@ fn trim_with(
         .collect::<Result<Vec<_>, String>>()?;
     let total = spans.iter().map(|(offset, length)| offset + length).max();
     let total = total.unwrap_or(0);
-    let to_ms = if to_ms > total && to_ms <= total + END_SLACK_MS {
-        total
-    } else {
-        to_ms
-    };
+    // The strip's length comes from the audio, which can outlast the picture: an end at or
+    // past the video can only mean "to the end".
+    let to_ms = to_ms.min(total);
     let range = TrimRange::new(from_ms, to_ms, total)?;
     let plan = cut::plan_parts(&spans, range);
     let tmp = scratch(&dir, full.is_some())?;
@@ -772,6 +767,15 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn a_start_only_trim_past_the_video_keeps_to_the_end() {
+        let root = root("past-end");
+        meeting(&root, "screen");
+        // The audio said 9 s; the picture is 5 s long.
+        let trimmed = trim_with(&root, "1", 1000, 9000, &FAKE).unwrap();
+        assert_eq!(trimmed.duration_ms, Some(4000));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn a_failure_after_the_swap_puts_everything_back() {
         let root = root("undo");

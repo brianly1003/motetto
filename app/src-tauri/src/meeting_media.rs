@@ -123,23 +123,25 @@ fn video_parts(dir: &Path) -> Vec<(crate::screen::ScreenPart, PathBuf)> {
 
 /// Initial document tabs need availability, without reading audio samples for waveforms.
 pub fn has_video(dir: &Path) -> bool {
-    let Ok(tracks) = audio(dir) else {
+    if audio(dir).is_err() {
         return false;
-    };
-    // A screen recording without a mic or app sounds has a picture and no audio at all.
-    video_parts(dir).into_iter().any(|(part, path)| {
-        fs::metadata(path).is_ok_and(|m| m.len() > 0)
-            && (tracks.is_empty()
-                || tracks.iter().any(|(path, offset)| {
-                    *offset == part.offset_ms
-                        && path.file_name().is_some_and(|name| {
-                            name.to_string_lossy().split('.').next() == part.file.split('.').next()
-                        })
-                }))
-    })
+    }
+    // A part recorded with no mic and no app sounds has a picture and no audio of its own.
+    video_parts(dir)
+        .into_iter()
+        .any(|(_, path)| fs::metadata(path).is_ok_and(|m| m.len() > 0))
 }
 
 pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
+    read_with(root, id, motetto_core::trim::duration_ms)
+}
+
+/// `length` reads a video file's length (AVFoundation; tests stand in for it).
+fn read_with(
+    root: &Path,
+    id: &str,
+    length: fn(&Path) -> Result<u64, String>,
+) -> Result<MeetingMedia, String> {
     let dir = library::folder(root, id)?;
     let mut tracks = Vec::new();
     for (path, offset_ms) in audio(&dir)? {
@@ -211,11 +213,8 @@ pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
             })
             .map(|t| t.duration_ms)
             .max();
-        // Without any audio (no mic, no app sounds) the video's own length places it.
-        let length = match heard {
-            None if tracks.is_empty() => motetto_core::trim::duration_ms(&path).ok(),
-            heard => heard,
-        };
+        // A part without audio of its own (no mic, no app sounds) is placed by its video's length.
+        let length = heard.or_else(|| length(&path).ok());
         let Some(duration_ms) = length else {
             continue;
         };
@@ -364,9 +363,10 @@ mod tests {
         fs::write(root.join("1").join(video), b"video fixture").unwrap();
         let mut parts: Vec<crate::screen::ScreenPart> =
             crate::screen_files::read(&root.join("1"), "screen.json");
+        // A part with no audio of its own (no mic, no app sounds) still has its picture.
         parts[0].offset_ms = 999;
         crate::screen_files::write(&root.join("1"), "screen.json", &parts).unwrap();
-        assert!(!has_video(&dir));
+        assert!(has_video(&dir));
         parts[0].offset_ms = 500;
         crate::screen_files::write(&root.join("1"), "screen.json", &parts).unwrap();
         let with_video = read(&root, "1").unwrap();
@@ -498,5 +498,73 @@ mod tests {
     fn export_bindings() {
         MeetingMedia::export_all(&ts_rs::Config::default().with_out_dir("../../ui/lib/bindings"))
             .unwrap();
+    }
+    #[test]
+    fn a_silent_part_after_one_with_audio_keeps_its_place() {
+        let root = std::env::temp_dir().join(format!("motetto-media-mixed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("1")).unwrap();
+        let wav = root.join("1/part-0000.system.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&wav, spec).unwrap();
+        for _ in 0..32000 {
+            writer.write_sample(100i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        crate::screen_files::write(
+            &root.join("1"),
+            "parts.json",
+            &vec![(vec![wav.to_string_lossy().into_owned()], 0u64)],
+        )
+        .unwrap();
+        // The second part was recorded after None, with app sounds off: no WAV of its own.
+        fs::write(root.join("1/part-0000.screen.mp4"), "2000").unwrap();
+        fs::write(root.join("1/part-0001.screen.mp4"), "3000").unwrap();
+        let part = |file: &str, offset_ms| crate::screen::ScreenPart {
+            file: file.into(),
+            offset_ms,
+            source: crate::screen::ScreenSourceInfo {
+                kind: "window".into(),
+                name: "Safari".into(),
+            },
+            while_sharing: false,
+            width: 2,
+            height: 2,
+        };
+        crate::screen_files::write(
+            &root.join("1"),
+            "screen.json",
+            &vec![
+                part("part-0000.screen.mp4", 0),
+                part("part-0001.screen.mp4", 2000),
+            ],
+        )
+        .unwrap();
+        fs::write(
+            root.join("1/screen-clicks.json"),
+            r#"[{"ms":500},{"ms":4000}]"#,
+        )
+        .unwrap();
+        let length = |path: &Path| -> Result<u64, String> {
+            fs::read_to_string(path)
+                .map_err(|e| e.to_string())?
+                .parse()
+                .map_err(|_| "not a length".to_string())
+        };
+        let media = read_with(&root, "1", length).unwrap();
+        let spans: Vec<_> = media
+            .videos
+            .iter()
+            .map(|v| (v.offset_ms, v.duration_ms))
+            .collect();
+        assert_eq!(spans, vec![(0, 2000), (2000, 3000)]);
+        assert_eq!(media.duration_ms, 5000);
+        assert_eq!(media.clicks, vec![500, 4000]);
+        fs::remove_dir_all(root).unwrap();
     }
 }
