@@ -1111,30 +1111,30 @@ input.sp-name:hover { background: var(--surface-2); }
 .vplayer:fullscreen { display: block; width: 100%; height: 100%; background: #111412; color: #fff; }
 .vplayer:fullscreen .vframe { position: absolute; inset: 0; border-radius: 0; aspect-ratio: auto; min-height: 0; box-shadow: none; }
 .vplayer:fullscreen .vframe > .vscene { width: 100%; height: 100%; aspect-ratio: auto; }
-.vplayer:fullscreen .vctl { position: absolute; z-index: 2; inset: auto 0 0; display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto auto; gap: 4px 12px; padding: 44px 28px 20px; border: 0; border-radius: 0; background: linear-gradient(transparent,rgba(0,0,0,.88)); opacity: 1; transition: opacity 180ms ease; }
-.vplayer:fullscreen .vscrub { grid-column: 1 / -1; grid-row: 1; height: 24px; min-width: 0; }
-.vplayer:fullscreen .vscrub::before { top: 10px; background: rgba(255,255,255,.3); }
-.vplayer:fullscreen .vscrub i { top: 10px; background: #a6cfa0; }
-.vplayer:fullscreen .vscrub i::after { content: ""; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #a6cfa0; }
-.vplayer:fullscreen .vscrub b { top: 17px; background: #c9c0ff; }
-.vplayer:fullscreen .vscrub .tick { top: 7px; background: #fff; }
-.vplayer:fullscreen .vctl .mono { color: #fff; font-size: 13px; }
-.vplayer:fullscreen .vctl .iconbtn { width: 40px; height: 40px; color: #fff; background: transparent; border-radius: 8px; }
-.vplayer:fullscreen .vctl .iconbtn:hover { background: rgba(255,255,255,.16); }
-.vplayer:fullscreen .vctl .iconbtn svg { width: 20px; height: 20px; }
-.vplayer:fullscreen .vctl .cc { border: 1px solid rgba(255,255,255,.45); height: 30px; }
-.vplayer:fullscreen .vctl .cc[aria-pressed="true"] { color: #111412; background: #fff; border-color: #fff; }
-.vplayer:fullscreen .vctl .cc[aria-pressed="true"]:hover { background: #e7ebe5; }
-.vplayer:fullscreen .vctl select { color: #fff; background: #242724; border: 0; outline: none; box-shadow: none; height: 32px; padding: 0 8px; color-scheme: dark; }
-.vplayer:fullscreen .vctl select:focus-visible { background: #353b34; }
-.vplayer:fullscreen .vctl :not(select):focus-visible { outline: 2px solid #a6cfa0; outline-offset: 3px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl { position: absolute; z-index: 2; inset: auto 0 0; display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto auto; gap: 4px 12px; padding: 44px 28px 20px; border: 0; border-radius: 0; background: linear-gradient(transparent,rgba(0,0,0,.88)); opacity: 1; transition: opacity 180ms ease; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub { grid-column: 1 / -1; grid-row: 1; height: 24px; min-width: 0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub::before { top: 10px; background: rgba(255,255,255,.3); }
+:is(.vplayer, .clipplayer):fullscreen .vscrub i { top: 10px; background: #a6cfa0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub i::after { content: ""; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #a6cfa0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub b { top: 17px; background: #c9c0ff; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub .tick { top: 7px; background: #fff; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .mono { color: #fff; font-size: 13px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn { width: 40px; height: 40px; color: #fff; background: transparent; border-radius: 8px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn:hover { background: rgba(255,255,255,.16); }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn svg { width: 20px; height: 20px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc { border: 1px solid rgba(255,255,255,.45); height: 30px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc[aria-pressed="true"] { color: #111412; background: #fff; border-color: #fff; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc[aria-pressed="true"]:hover { background: #e7ebe5; }
+:is(.vplayer, .clipplayer):fullscreen .vctl select { color: #fff; background: #242724; border: 0; outline: none; box-shadow: none; height: 32px; padding: 0 8px; color-scheme: dark; }
+:is(.vplayer, .clipplayer):fullscreen .vctl select:focus-visible { background: #353b34; }
+:is(.vplayer, .clipplayer):fullscreen .vctl :not(select):focus-visible { outline: 2px solid #a6cfa0; outline-offset: 3px; }
 .vplayer:fullscreen .vcap { bottom: 132px; font-size: clamp(15px,1.6vw,22px); max-width: min(86%,960px); transition: bottom 180ms ease; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vctl { opacity: 0; pointer-events: none; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vframe { cursor: none; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vtoggle { cursor: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vctl { opacity: 0; pointer-events: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) :is(.vframe, .clipframe) { cursor: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vtoggle { cursor: none; }
 .vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vcap { bottom: 32px; }
-@media (max-width: 780px) { .vplayer:fullscreen .vctl { padding: 32px 16px 12px; gap: 4px 8px; } .vplayer:fullscreen .vcap { bottom: 120px; } }
-@media (prefers-reduced-motion: reduce) { .vplayer:fullscreen .vctl, .vplayer:fullscreen .vcap { transition: none; } }
+@media (max-width: 780px) { :is(.vplayer, .clipplayer):fullscreen .vctl { padding: 32px 16px 12px; gap: 4px 8px; } .vplayer:fullscreen .vcap { bottom: 120px; } }
+@media (prefers-reduced-motion: reduce) { :is(.vplayer, .clipplayer):fullscreen .vctl, .vplayer:fullscreen .vcap { transition: none; } }
 
 .meeting-row .mwhen { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meeting-row .mflags { display: inline-flex; align-items: center; gap: 7px; flex: none; }
@@ -1192,9 +1192,12 @@ input.sp-name:hover { background: var(--surface-2); }
 .clipframe .vtoggle { z-index: 2; }
 .cliplive { display: grid; place-items: center; padding: 20px; color: rgba(243,244,239,.72); font: 500 13px/1.4 var(--font-ui); text-align: center; }
 .clipplayer { display: grid; gap: 12px; min-width: 0; }
-.clipplayer:fullscreen { background: #000; grid-template-rows: minmax(0, 1fr) auto; padding: 12px; }
-.clipplayer:fullscreen .clipstage { border-radius: 0; box-shadow: none; padding: 0; }
-.clipplayer:fullscreen .clipframe { width: auto; height: 100%; max-width: 100%; }
+/* Full screen as the meeting video (.vplayer:fullscreen): the picture fills it, the controls lie on it. */
+.clipplayer:fullscreen { display: block; width: 100%; height: 100%; background: #111412; color: #fff; }
+.clipplayer:fullscreen .clipstage { position: absolute; inset: 0; border-radius: 0; box-shadow: none; padding: 0; min-height: 0; background: none; }
+.clipplayer:fullscreen .clipframe { width: 100%; height: 100%; max-width: none; border-radius: 0; box-shadow: none; background: none; }
+.clipplayer:fullscreen .clipctl { grid-template-columns: 40px minmax(0,1fr) auto auto; }
+.clipplayer:fullscreen .vscrub .cdot { top: 8px; box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
 .cdot { pointer-events: none; }
 .tfilm i { position: relative; overflow: hidden; background: #16191c; filter: none; }
 .tfilm i video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

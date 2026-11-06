@@ -11,7 +11,7 @@ import { elapsedLabel } from "@/lib/session";
 import { strings as s } from "@/lib/strings";
 import * as ipc from "@/lib/ipc";
 import { MenuIcon } from "./MenuIcon";
-import { MeetingVideo, Play, useMeetingVideo } from "./VideoTab";
+import { MeetingVideo, Play, useFullscreen, useMeetingVideo } from "./VideoTab";
 import TrimStrip, { CutIcon, mmss } from "./TrimStrip";
 
 const svg = (d: ReactNode) => <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
@@ -102,8 +102,8 @@ export default function ScreenRecordingPage({ meeting, player, trimming, onTrim,
   const f = set && { ...set, mic_off: !media.tracks.some(t => t.speaker === "You"), app_sounds: media.tracks.some(t => t.speaker === "Them") };
   const { video, current, error, setError } = useMeetingVideo(media, position, playing, rate);
   const box = useRef<HTMLDivElement>(null);
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => { const changed = () => setFullscreen(document.fullscreenElement === box.current); document.addEventListener("fullscreenchange", changed); return () => document.removeEventListener("fullscreenchange", changed); }, []);
+  // Full screen as the meeting video has it: controls on the picture, faded while playing.
+  const full = useFullscreen(box, playing, position, media.duration_ms, scrub, () => {});
   // ⌘T opens and closes the trim strip on this page.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -118,14 +118,14 @@ export default function ScreenRecordingPage({ meeting, player, trimming, onTrim,
   const quiet = !!f?.mic_off && !f.app_sounds;
   const mac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
   return <div className="clipbody">
-    <div ref={box} className="clipplayer">
+    <div ref={box} className={`clipplayer${full.controlsHidden ? " controls-hidden" : ""}`} {...full.bind}>
       <div className="clipstage"><div className="clipframe" style={frameStyle(f)}><MeetingVideo video={video} setError={setError} audio={media.tracks.length > 0}/>{(!current || error) && <div className="vgap" role="status">{error || s.video_gap}</div>}
         <button type="button" className="vtoggle" aria-label={playing ? "Pause video" : "Play video"} onClick={togglePlay}>{!playing && <span className="vbig"><Play/></span>}</button></div></div>
       {trimming ? <TrimStrip media={media} reachMs={meeting.summary.reach_ms} onCancel={onTrimCancel} onSave={onTrimSave}/>
         : <div className="vctl clipctl"><button type="button" className="iconbtn" aria-label={playing ? "Pause" : "Play"} title="Play or pause (Space)" onClick={togglePlay}>{playing ? <PauseIcon/> : <Play/>}</button><span className="mono">{mmss(position / 1000)} / {mmss(media.duration_ms / 1000)}</span>
           <div className="vscrub"><i style={{ width: `${position / total * 100}%` }}/>{f?.clicks !== false && media.clicks.map(ms => <span key={ms} className="cdot" style={{ left: `${ms / total * 100}%` }} title="Click"/>)}<input type="range" aria-label={media.clicks.length ? "Seek. Dots mark your mouse clicks" : "Seek video"} min={0} max={media.duration_ms} value={position} onChange={e => scrub(Number(e.target.value))}/></div>
           <select aria-label="Speed" value={rate} onChange={e => setRate(Number(e.target.value))}>{[1, 1.5, 2].map(r => <option key={r} value={r}>{r}×</option>)}</select>
-          <button type="button" className="iconbtn" aria-label={fullscreen ? "Exit full screen" : "Full screen"} title={fullscreen ? "Exit full screen (Esc)" : "Full screen"} onClick={() => void (document.fullscreenElement ? document.exitFullscreen() : box.current?.requestFullscreen())?.catch(() => {})}>{svg(<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>)}</button></div>}
+          {full.button}</div>}
     </div>
     {f && <div className="cfacts">{chips(f)}</div>}
     {quiet ? <div className="clipcard quiet"><span className="cic"><SpeakerIcon/></span><div><b>No sound in this video</b><p>You recorded it with the microphone and app sounds off, so there&apos;s nothing to transcribe.</p></div></div>
