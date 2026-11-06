@@ -65,11 +65,18 @@ pub fn ready(app: &tauri::AppHandle) {
     app.state::<State>().ready.store(true, Ordering::SeqCst);
 }
 
+/// The controls are on screen, or were just shown: macOS reports a window visible only once the
+/// show reaches the main thread, so a check right after it would bring the library forward.
 pub fn available(app: &tauri::AppHandle) -> bool {
-    app.state::<State>().ready.load(Ordering::SeqCst)
+    let state = app.state::<State>();
+    let shown = state
+        .previous
+        .lock()
+        .is_ok_and(|p| p.is_some_and(|(visible, ..)| visible));
+    state.ready.load(Ordering::SeqCst)
         && app
             .get_webview_window("companion")
-            .is_some_and(|w| w.is_visible().unwrap_or(false))
+            .is_some_and(|w| shown || w.is_visible().unwrap_or(false))
 }
 
 pub fn update(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
