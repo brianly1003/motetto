@@ -148,7 +148,12 @@ export default function Companion() {
   const discarded = !asking && state.state.type === "Idle" ? state.discarded : null;
   // Asking and the Undo prompts are Pill-only: Rust sizes them (Ask card, then Pill), never Dot or Tucked.
   const prompting = !!(asking || offPending || discarded);
-  if (asking && state.companion.size === "Ask") return <AskCard key={asking.call_id} app={asking.app} callId={asking.call_id}/>;
+  // A clip goes on recording behind the question: its clock, Video only and Stop stay beside it.
+  const heldClip = asking && state.held_clip ? state.held_clip : null;
+  // A clip's window closed: Resume chooses another window instead of the one that is gone.
+  const closed = stopped ? state.screen_closed : null;
+  const resume = () => closed ? ipc.openCapture("Clip", "window") : ipc.resumeRecording();
+  if (asking && !heldClip && state.companion.size === "Ask") return <AskCard key={asking.call_id} app={asking.app} callId={asking.call_id}/>;
   const dot = state.companion.size === "Dot" && !state.quit_pending && !stopped && !paused && !prompting;
   const sidecar = state.companion.size === "Sidecar" && !stopped && !state.quit_pending && !prompting;
   const tucked = state.companion.size === "Tucked" && !stopped && !state.quit_pending && !prompting;
@@ -188,6 +193,13 @@ export default function Companion() {
           <span className="pillmsg">{notice || (state.state.type === "Finishing" ? s.quitPending : s.pillQuitQuestion)}</span>
           <button className="quiet" disabled={pending} onClick={() => act(() => ipc.quitRecording(false))}>{state.state.type === "Recording" ? s.keepRecording : s.stayOpen}</button>
           {state.state.type !== "Finishing" && <button className="primary" disabled={pending} onClick={() => act(async () => { await flushNotes.current(); await ipc.quitRecording(true); })}>{s.stopAndSave}</button>}
+        </> : asking && heldClip ? <>
+          <span className={`dot ${heldClip.type === "Paused" ? "stopped" : "pulse"}`} aria-hidden="true" />
+          <time className="t">{elapsedLabel(state.elapsed_ms)}</time>
+          <span className="pillvo" title={s.askOverClipTitle}><FilmIcon/><span>{notice || s.askOverClip.replace("{App}", asking.app)}</span></span>
+          <button className="primary" disabled={pending} onClick={() => act(() => ipc.answerAsk(asking.call_id, true))}>{s.askRecord}</button>
+          <button className="iconbtn" disabled={pending} aria-label={s.askNotThisCall} title={s.askNotThisCall} onClick={() => act(() => ipc.answerAsk(asking.call_id, false))}>✕</button>
+          <button className="stop" disabled={pending} onClick={() => act(stop)}>{s.pillStop}</button>
         </> : asking ? <>
           <span className="dot amber" aria-hidden="true" />
           <span className="pillmsg" role="status">{notice || s.askPill.replace("{App}", asking.app)}</span>
@@ -208,8 +220,8 @@ export default function Companion() {
           <button className="primary" disabled={pending} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
           <button className="stop" disabled={pending} onClick={() => act(stop)}>{s.pillStop}</button>
         </> : stopped ? <>
-          <span className="dot stopped" /><span className="pillmsg" role="status">{notice || <><span className="lbl"><span className="long">{videoOnly ? "Stopped · saving in" : s.pillStopped}</span><span className="short">{videoOnly ? "Stopped · saving in" : s.pillStoppedShort}</span></span><span className="num" aria-live="off">{remaining ?? "…"} {s.seconds}</span></>}</span>
-          <button className="primary" disabled={pending || remaining === 0} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button>
+          <span className="dot stopped" /><span className="pillmsg" role="status">{notice || (closed ? s.windowClosed.replace("{App}", closed) : <><span className="lbl"><span className="long">{videoOnly ? "Stopped · saving in" : s.pillStopped}</span><span className="short">{videoOnly ? "Stopped · saving in" : s.pillStoppedShort}</span></span><span className="num" aria-live="off">{remaining ?? "…"} {s.seconds}</span></>)}</span>
+          <button className="primary" disabled={pending || remaining === 0} onClick={() => act(resume)}>{s.resume}</button>
           <button className="quiet" disabled={pending || remaining === 0} onClick={() => act(ipc.discardRecording)} title={s.pillDiscardTitle}>{s.pillDiscard}</button>
         </> : endingIn !== null && !sidecar ? <>
           <span className="dot pulse" aria-hidden="true" />

@@ -16,7 +16,7 @@ export const strings = {
   video_delete_confirm: "Delete the {size} video? The audio, notes and transcript stay.",
   video_deleted: "Video moved to Recently deleted. The audio, notes and transcript stay.",
   askTitle: "Record this {App} call?", askBody: "Nothing is recorded until you choose Record.", askConsent: "Tell the people on the call before you record.", askRecord: "Record",
-  askNotThisCall: "Not for this call", askDontAsk: "Don't ask for {App}", askClose: "Close: not this call", askMore: "More choices", askPill: "{App} call · not recording",
+  askNotThisCall: "Not for this call", askDontAsk: "Don't ask for {App}", askClose: "Close: not this call", askMore: "More choices", askPill: "{App} call · not recording", askOverClip: "Video only · {App} call started", askOverClipTitle: "Record saves this video and records the call. ✕ goes on recording the video.", windowClosed: "The {App} window closed.",
   askOffDone: "Motetto won't ask about {App} calls. Turn it back on in Settings › Calls.", whyStarted: "Recording because you chose Record for this {App} call.", startedManually: "Started manually.",
   deletePermanently: "Delete permanently", permanentDeleteWarning: "Its audio, video, transcript and notes are removed from this computer. This can't be undone.",
   rename: "Rename", renamed: "Renamed.", renameSave: "save", renameCancel: "cancel",
@@ -36,7 +36,7 @@ export const strings = {
   pillQuitQuestion: "Quit while recording?",
   pillStop: "Stop", pillStopped: "Stopped · notes start in", pillStoppedShort: "Stopped · notes in", pillPaused: "Paused · not recording", pillDiscard: "Discard", pillDiscardTitle: "No notes. The recording goes to Recently deleted for 30 days.", pillDiscarded: "Recording discarded. It's in Recently deleted.", pillEnding: "Call over? Stopping in", pillEndingTitle: "{App} stopped using the microphone. Motetto stops then, unless you keep recording.", pillEndingQuiet: "No one is using the microphone. Motetto stops then, unless you keep recording.",
   pause: "Pause", pauseRecording: "Pause recording", pauseTitle: "Pause. Nothing is recorded until you resume.",
-  paused: "Paused", pausedFor: "Paused for", chipRecording: "Recording", videoOnly: "Video only", fullVideoOf: "Full video of {title}", micNoneRecording: "Your mic is off. Only the other side is recorded now.", chipStopped: "Stopped", seconds: "s", recordingShort: "Recording",
+  paused: "Paused", pausedFor: "Paused for", chipRecording: "Recording", videoOnly: "Video only", fullVideoOf: "Full video of {title}", fullVideoNotes: "Notes were written for the trimmed video, so the full video can't come back.", micNoneRecording: "Your mic is off. Only the other side is recorded now.", chipStopped: "Stopped", seconds: "s", recordingShort: "Recording",
   permissionBody: "Allow notifications for recording reminders and completed notes. Recording controls stay visible even with Focus on.",
   allowNotifications: "Allow notifications", notificationsDenied: "Notifications are off. Turn them on in System Settings > Notifications > Motetto.",
 

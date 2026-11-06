@@ -32,7 +32,7 @@ export default function RecentlyDeleted({deleted, refresh, notify, onError}: {de
   // already. Undo deletes the meetings again; a full video put back stays (trim it again).
   async function restoreAll() {
     const meetings = deleted.filter(m => m.deleted_kind !== "trimmed_original").map(m => m.id);
-    const full = deleted.filter(m => m.deleted_kind === "trimmed_original").map(m => m.id);
+    const full = deleted.filter(m => m.deleted_kind === "trimmed_original" && m.kind === "screen").map(m => m.id);
     try {
       await each([...meetings, ...full], "restore");
       notify(s.restoredAll.replace("{n}", meetingsN(meetings.length + full.length)), meetings.length ? () => each(meetings, "delete") : undefined);

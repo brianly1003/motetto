@@ -36,7 +36,12 @@ export default function TrimStrip({ media, reachMs, onCancel, onSave }: { media:
     const key = (e: KeyboardEvent) => {
       const side = (document.activeElement as HTMLElement | null)?.dataset?.th as "a" | "b" | undefined;
       if (side && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); const r = latest.current; set(side, +(r[side] + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1 : 0.1)).toFixed(1)); }
-      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
+      else if (e.key === "Escape") {
+        // Another menu or popover that is open closes on its own Esc first.
+        const other = document.querySelector('[role="menu"], [role="listbox"], [role="alertdialog"]');
+        if (other && !bar.current?.contains(document.activeElement)) return;
+        e.preventDefault(); e.stopPropagation(); onCancel();
+      }
       else if (e.key === "Enter" && (side || document.activeElement === document.body)) { e.preventDefault(); save(); }
     };
     document.addEventListener("keydown", key, true);

@@ -76,13 +76,19 @@ export function ClipRecording({ meeting, state, pending, act }: { meeting: Meeti
     return () => { active = false; clearInterval(timer); };
   }, [stopped]);
   const mac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+  // What records now: the source and the mic can change between parts.
+  const source = state.screen?.pick.name ?? f?.source ?? "";
+  const micOff = state.setup ? state.setup.mic.kind === "Off" : !!f?.mic_off;
+  // The window closed: Resume chooses another one on the setup.
+  const closed = stopped ? state.screen_closed : null;
+  const resume = () => closed ? ipc.openCapture("Clip", "window") : ipc.resumeRecording();
   return <>
     <div className="recbar" role="status"><span className={`dot${stopped || paused ? " off" : " pulse"}`}/><b>{stopped ? s.chipStopped : paused ? s.paused : s.chipRecording}</b><span className="t">{elapsedLabel(state.elapsed_ms)}</span>
-      <span className="tip">{stopped ? <>Saving to your library in <span>{remaining ?? "…"}</span> s</> : paused ? "Not recording. Resume when you're ready." : `The screen · ${f?.source ?? ""}${f?.mic_off ? " · no mic" : ""}`}</span><span className="sp"/>
-      {stopped ? <><button type="button" className="btn sm primary" disabled={pending || remaining === 0} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button><button type="button" className="btn sm ghost" disabled={pending || remaining === 0} title="The video goes to Recently deleted for 30 days." onClick={() => act(ipc.discardRecording)}>{s.pillDiscard}</button></>
+      <span className="tip">{stopped ? <>{closed && `${s.windowClosed.replace("{App}", closed)} `}Saving to your library in <span>{remaining ?? "…"}</span> s</> : paused ? "Not recording. Resume when you're ready." : `The screen · ${source}${micOff ? " · no mic" : ""}`}</span><span className="sp"/>
+      {stopped ? <><button type="button" className="btn sm primary" disabled={pending || remaining === 0} onClick={() => act(resume)}>{s.resume}</button><button type="button" className="btn sm ghost" disabled={pending || remaining === 0} title="The video goes to Recently deleted for 30 days." onClick={() => act(ipc.discardRecording)}>{s.pillDiscard}</button></>
         : paused ? <><button type="button" className="btn sm primary" disabled={pending} onClick={() => act(ipc.resumeRecording)}>{s.resume}</button><button type="button" className="btn sm rec" disabled={pending} onClick={() => act(ipc.stopRecording)}>{s.pillStop}</button></>
         : <><button type="button" className="btn sm ghost" disabled={pending} title={s.pauseTitle} onClick={() => act(ipc.pauseRecording)}>{s.pause}</button><button type="button" className="btn sm rec" disabled={pending} onClick={() => act(ipc.stopRecording)}>{s.pillStop}</button></>}</div>
-    <div className="clipbody"><div className={`clipstage live${paused || stopped ? " held" : ""}`}><div className="clipframe" style={frameStyle(f)}><div className="cliplive">{f?.source}</div><span className="cliprec">{paused || stopped ? "Paused" : "● REC"}</span></div></div>
+    <div className="clipbody"><div className={`clipstage live${paused || stopped ? " held" : ""}`}><div className="clipframe" style={frameStyle(f)}><div className="cliplive">{source}</div><span className="cliprec">{paused || stopped ? "Paused" : "● REC"}</span></div></div>
       <p className="tip clipnote"><MenuIcon name="lock"/> Motetto&apos;s own windows are never in the video. It stays on this {mac ? "Mac" : "PC"}.</p></div>
   </>;
 }
@@ -90,14 +96,22 @@ export function ClipRecording({ meeting, state, pending, act }: { meeting: Meeti
 /** Saved: the player (the meeting's one video element), click dots, the facts and the notes card. */
 export default function ScreenRecordingPage({ meeting, player, trimming, onTrim, onTrimCancel, onTrimSave, onWriteNotes, writingNotes }: { meeting: Meeting; player: Player; trimming: boolean; onTrim: () => void; onTrimCancel: () => void; onTrimSave: (fromMs: number, toMs: number) => void; onWriteNotes: () => void; writingNotes: boolean }) {
   const { media, position, playing, rate, setRate, scrub, togglePlay } = player;
-  const f = meeting.summary.facts;
+  // The mic and app sounds as recorded (the tracks on disk), not as set up at the start: either
+  // can be turned on or off between parts.
+  const set = meeting.summary.facts;
+  const f = set && { ...set, mic_off: !media.tracks.some(t => t.speaker === "You"), app_sounds: media.tracks.some(t => t.speaker === "Them") };
   const { video, current, error, setError } = useMeetingVideo(media, position, playing, rate);
   const box = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => { const changed = () => setFullscreen(document.fullscreenElement === box.current); document.addEventListener("fullscreenchange", changed); return () => document.removeEventListener("fullscreenchange", changed); }, []);
   // ⌘T opens and closes the trim strip on this page.
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "t") { e.preventDefault(); onTrim(); } };
+    const key = (e: KeyboardEvent) => {
+      // Not while typing: a rename or any other field keeps its own keys.
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.isContentEditable || t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(t.type)))) return;
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "t") { e.preventDefault(); onTrim(); }
+    };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, [onTrim]);
   const total = media.duration_ms || 1;
@@ -105,7 +119,7 @@ export default function ScreenRecordingPage({ meeting, player, trimming, onTrim,
   const mac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
   return <div className="clipbody">
     <div ref={box} className="clipplayer">
-      <div className="clipstage"><div className="clipframe" style={frameStyle(f)}><MeetingVideo video={video} setError={setError}/>{(!current || error) && <div className="vgap" role="status">{error || s.video_gap}</div>}
+      <div className="clipstage"><div className="clipframe" style={frameStyle(f)}><MeetingVideo video={video} setError={setError} audio={media.tracks.length > 0}/>{(!current || error) && <div className="vgap" role="status">{error || s.video_gap}</div>}
         <button type="button" className="vtoggle" aria-label={playing ? "Pause video" : "Play video"} onClick={togglePlay}>{!playing && <span className="vbig"><Play/></span>}</button></div></div>
       {trimming ? <TrimStrip media={media} reachMs={meeting.summary.reach_ms} onCancel={onTrimCancel} onSave={onTrimSave}/>
         : <div className="vctl clipctl"><button type="button" className="iconbtn" aria-label={playing ? "Pause" : "Play"} title="Play or pause (Space)" onClick={togglePlay}>{playing ? <PauseIcon/> : <Play/>}</button><span className="mono">{mmss(position / 1000)} / {mmss(media.duration_ms / 1000)}</span>
