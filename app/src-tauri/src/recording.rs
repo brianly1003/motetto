@@ -279,8 +279,13 @@ pub fn spawn(
                         recording = None;
                         let _ = app.emit("motetto://library-changed", ());
                         // The library comes back with the saved recording open (owner 2026-11-06):
-                        // the setup hid it, and the notice is shown there.
-                        if saved {
+                        // the setup hid it, and the notice is shown there. Not when a new
+                        // recording saved this one as it started: that one keeps the library away.
+                        let idle = app
+                            .state::<crate::controller::Controller>()
+                            .state()
+                            .is_ok_and(|s| s.state == motetto_core::events::SessionState::Idle);
+                        if saved && idle {
                             let _ = app.emit("motetto://open-meeting", id.clone());
                             crate::desktop::show(&app);
                         }
