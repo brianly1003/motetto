@@ -26,7 +26,7 @@ export function fromMemory(memory: CaptureMemory, mode: string | null, live: boo
   if (live && next === "audio") next = "window";
   const a = memory.area;
   return {
-    mode: next, mic: memory.mic, sys: memory.app_sounds, notes: next === "audio" || memory.notes,
+    mode: next, mic: memory.mic, sys: hears(memory.mic, memory.app_sounds, next === "audio" || memory.notes), notes: next === "audio" || memory.notes,
     timer: TIMERS.includes(memory.timer) ? memory.timer : 0, clicks: memory.clicks, remember: memory.remember,
     area: a ? { display: null, x: a.x, y: a.y, w: a.width, h: a.height } : { display: null, x: Math.round(view.w / 2 - 260), y: 150, w: 520, h: 320 },
     sel: null, screen: null, count: null,
@@ -48,8 +48,14 @@ export function capSet(cap: Cap, key: string, mic?: MicChoice): Cap {
   return next;
 }
 
-/** A new mode drops the chosen window; Audio only always writes notes. */
-export const capMode = (cap: Cap, mode: Mode): Cap => ({ ...cap, mode, sel: null, notes: mode === "audio" ? true : cap.notes });
+/** Notes need something to hear: with no mic, app sounds are on whenever notes are. */
+const hears = (mic: MicChoice, sys: boolean, notes: boolean) => sys || (notes && mic.kind === "Off");
+
+/** A new mode drops the chosen window; Audio only always writes notes, so it needs sound. */
+export const capMode = (cap: Cap, mode: Mode): Cap => {
+  const notes = mode === "audio" ? true : cap.notes;
+  return { ...cap, mode, sel: null, notes, sys: hears(cap.mic, cap.sys, notes) };
+};
 
 /** The front-most window under a point on this display. */
 export const windowAt = (windows: CaptureWindow[], display: number, x: number, y: number) =>

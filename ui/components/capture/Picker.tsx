@@ -56,7 +56,8 @@ export function Picker({ cap, display, mine, windows, hover, scale, highlight, a
       drag.current = null; areaEl.current?.classList.remove("drag");
       // A click without a drag keeps the old area; a tiny one grows to something usable.
       const now = area ?? d.from;
-      onArea(d.h === "new" && (now.w < 40 || now.h < 30) ? d.from : now, true);
+      // A click on another display leaves the area where it was.
+      onArea(d.h === "new" && (now.w < 40 || now.h < 30) ? (mine(cap.area.display) ? d.from : cap.area) : now, true);
     }}
     onClick={e => {
       if (counting || !outside(e.target)) return;

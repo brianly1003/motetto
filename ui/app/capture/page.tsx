@@ -27,6 +27,8 @@ function Setup() {
   const params = useSearchParams();
   const display = Number(params.get("display") ?? 0), kind: CaptureKind = params.get("kind") === "Call" ? "Call" : "Clip";
   const main = params.get("main") !== "0", modeParam = params.get("mode");
+  // The display holding the bar: an area drawn on no display in particular is on it.
+  const mainDisplay = Number(params.get("main_display") ?? display);
   const [cap, setCapState] = useState<Cap | null>(null);
   const capRef = useRef<Cap | null>(null);
   const [live, setLive] = useState(false);
@@ -54,7 +56,8 @@ function Setup() {
     const view = { w: innerWidth, h: innerHeight };
     void Promise.all([
       ipc.captureMemory(kind).catch(() => DEFAULTS[kind]),
-      ipc.getState().then(s => ["Recording", "Paused"].includes(s.state.type)).catch(() => false),
+      // A clip whose window closed is still under way: the window chosen here goes on with it.
+      ipc.getState().then(s => ["Recording", "Paused"].includes(s.state.type) || (s.state.type === "Stopped" && !!s.screen_closed)).catch(() => false),
     ]).then(([memory, recording]) => {
       if (!active) return;
       setLive(recording);
@@ -85,11 +88,16 @@ function Setup() {
   async function start(c: Cap) {
     if (started.current) return;
     started.current = true;
-    const pick = screenPick(c, display, scale, here());
+    const pick = screenPick(c, mainDisplay, scale, here());
     try {
-      if (live) { if (pick) await ipc.pickCapture(pick); }
+      if (live) { if (pick) await ipc.pickCapture(pick); else started.current = false; }
       else await ipc.startCapture(kind, recordSetup(c, pick), memoryOf(c));
-    } catch { started.current = false; }
+    } catch {
+      // Back to the setup: a countdown that ended must not try again every tick.
+      started.current = false;
+      const now = capRef.current;
+      if (now?.count) update({ ...now, count: null });
+    }
   }
 
   function go(skipTimer = false, chosen?: CaptureWindow | null, screen?: Screen) {

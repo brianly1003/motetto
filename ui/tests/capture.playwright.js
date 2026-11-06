@@ -238,6 +238,27 @@ async (page) => {
     if (!call || call.kind !== 'Call' || call.setup.screen !== null || call.setup.mic.kind !== 'Default' || !call.setup.notes) throw Error('call start ' + JSON.stringify(call));
     await c.close();
 
+    // A second display's overlay: a click there (no drag) keeps the area on the main display,
+    // and Return there records the main display's area.
+    const d = await ctx.newPage();
+    d.errors = []; d.on('pageerror', e => d.errors.push(e.message));
+    await d.addInitScript(fixture, {kind: 'Clip'});
+    await d.goto('http://127.0.0.1:3000/capture/?display=2&kind=Clip&main=0&main_display=1&mode=area');
+    await d.locator('#capture').waitFor();
+    await d.waitForFunction(() => window.calls.some(x => x.c === 'capture_memory'));
+    await d.waitForTimeout(150);
+    await d.mouse.click(300, 300);
+    await d.waitForTimeout(150);
+    const sentArea = await d.evaluate(() => window.calls.filter(x => x.c === 'plugin:event|emit' || x.c === 'send_capture_setup').map(x => x.a).at(-1));
+    const moved = JSON.stringify(sentArea ?? {}).match(/"area":\{"display":(\w+)/)?.[1];
+    if (moved !== undefined && moved !== 'null') throw Error('A click on another display moved the area there: ' + JSON.stringify(sentArea));
+    await d.keyboard.press('Alt+Enter');
+    await d.waitForFunction(() => window.calls.some(x => x.c === 'start_capture'));
+    const startArea = await d.evaluate(() => window.calls.find(x => x.c === 'start_capture').a.setup.screen.choice);
+    if (startArea.kind !== 'Area' || startArea.display !== 1) throw Error('Return on another display: ' + JSON.stringify(startArea));
+    if (d.errors.length) throw Error(d.errors.join());
+    await d.close();
+
     r.diffs = diffs;
     out.push(r);
     await ctx.close();
