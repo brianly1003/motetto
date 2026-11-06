@@ -20,6 +20,7 @@ import {strings as s} from '@/lib/strings';
 import {MenuIcon} from './MenuIcon';
 import {Alert} from './Alert';
 import { Kbd } from "@/components/ui/Kbd";
+import ScreenRecordingPage, {ClipActions, ClipRecording, FilmIcon, clipLength, trimmable} from "./ScreenRecordingPage";
 
 const TITLE_MAX=80;
 
@@ -41,6 +42,12 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   const liveType=session?.state?.meeting_id===meeting.summary.id?session.state.state.type:null;
   const live=liveType==='Recording'||liveType==='Paused'||liveType==='Stopped';
   const writing=!live&&(liveType==='Finishing'||meeting.summary.status==='Finishing');
+  // A screen recording kept as just the video has its own page (mockup clipHtml); writing its
+  // notes shows the usual steps, then it is a meeting.
+  const clip=meeting.summary.kind==='screen'&&!writing&&!rewriting;
+  const [trimming,setTrimming]=useState(false);
+  const canTrim=clip&&trimmable(meeting,live);
+  useEffect(()=>{if(!canTrim)setTrimming(false);},[canTrim]);
   // Rename (SPEC 7.6): one editor, this title. Enter saves, Esc or an empty title keeps the old one.
   const title=useRef<HTMLHeadingElement>(null);
   const [editing,setEditing]=useState(false);
@@ -119,17 +126,21 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   // is moving to Recently deleted or gone; the library closes the page. Reading it would fail.
   const wasLive=useRef(live);
   useEffect(()=>{
-    const ended=wasLive.current&&!live&&!writing;wasLive.current=live;
+    // A saved screen recording is Ready, not discarded: read its video.
+    const ended=wasLive.current&&!live&&!writing&&meeting.summary.status!=='Ready';wasLive.current=live;
     // The tracks are still being written while it records or its notes are written.
     if(live||writing||ended)return;
     let active=true;setMediaFailed(false);
     ipc.meetingMedia(meeting.summary.id).then(value=>{if(active){setMedia(value);if(!value.videos.length)setTab(tab=>tab==='Video'?'Audio':tab);}}).catch(error=>{if(active){setMediaFailed(true);onError(String(error));}});
     return()=>{active=false;};
-  },[meeting.summary.id,live,writing]);
+  // A trim, or its undo, changes the recording's length; a clip turns Ready once saved.
+  },[meeting.summary.id,live,writing,meeting.summary.duration_ms,meeting.summary.status]);
   // null until known: native audio (macOS) or the audio elements below.
   const [nativeAudio,setNativeAudio]=useState<boolean|null>(null);
   useEffect(()=>{
-    if(!media?.tracks.length)return;
+    if(!media)return;
+    // A screen recording without sound plays on the page's own clock.
+    if(!media.tracks.length){setNativeAudio(false);return()=>setNativeAudio(null);}
     const id=meeting.summary.id;let active=true;
     void ipc.playbackOpen(id).then(native=>{if(active)setNativeAudio(native);});
     return()=>{active=false;setNativeAudio(null);void ipc.playbackClose(id).catch(()=>{});};
@@ -232,6 +243,7 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   // 2026-10-30: "[09:47]" showed as text, then turned into a chip).
   const notesDuration=media?duration:meeting.summary.duration_ms??0;
   const tracks=media?.tracks??[];
+  const clipBytes=(media?.videos??[]).reduce((n,p)=>n+p.bytes,0);
   // One scale for both sides, set by the meeting's loudest moment, so a quietly recorded call
   // still shows its speech and You and Them stay comparable; the square root lifts quiet words.
   const loudest=Math.max(0,...tracks.flatMap(track=>track.waveform));
@@ -243,6 +255,16 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   }
   // Stopped after the call (mockup stopJob): nothing failed, so a quiet warning with one way back.
   const [writingNotes,setWritingNotes]=useState(false);
+  async function trim(fromMs:number,toMs:number){
+    const id=meeting.summary.id;
+    try{
+      setPlaying(false);
+      const summary=await ipc.trimVideo(id,fromMs,toMs);
+      setTrimming(false);cursor.current=0;seekRequested.current=true;setPosition(0);
+      onChange({...meeting,summary});
+      onToast?.(`Trimmed to ${clipLength((toMs-fromMs)/1000)}. The full video is in Recently deleted for 30 days.`,async()=>{await ipc.restoreTrim(id);await onChanged(false);});
+    }catch(error){onError(String(error));}
+  }
   async function writeStopped(){
     setWritingNotes(true);
     try{await ipc.meetingAction(meeting.summary.id,'regenerate');await onChanged(false);}
@@ -255,13 +277,15 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
       <div className="titlerow"><div className="tedit"><h1 key={titleKey} ref={title} contentEditable={editing} suppressContentEditableWarning spellCheck={false}
         onClick={()=>{if(!editing)startRename();}} onInput={capTitle} onBlur={()=>endRename(true)}
         onKeyDown={event=>{if(!editingNow.current)return;if(event.key==='Enter'){event.preventDefault();endRename(true);}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();endRename(false);}}}>{meetingTitle(meeting.summary)}</h1>
-        {!locked&&<button type="button" className="pen" aria-label={s.rename} title={s.rename} onClick={startRename}><MenuIcon name="rename"/></button>}</div>
+        {!locked&&!(clip&&live)&&<button type="button" className="pen" aria-label={s.rename} title={s.rename} onClick={startRename}><MenuIcon name="rename"/></button>}</div>
         {/* Copy and ••• have nothing to act on while the meeting records or its notes are written. */}
-        {deletable(meeting.summary.status)&&!rewriting&&<MeetingActions meeting={meeting} shown={tab==='Notes'?readIn.markdown??undefined:undefined} reading={tab==='Notes'?readIn.view:null} ask={writeIn} hasAudio={tracks.length>0} onToast={onToast} onError={onError} onChanged={onChanged} onRename={startRename} onDelete={onDelete} onLock={on=>void lock(on)}/>}</div>
+        {clip?canTrim&&<ClipActions id={meeting.summary.id} trimming={trimming} onTrim={()=>setTrimming(on=>!on)} onToast={onToast} onError={onError}/>:
+        deletable(meeting.summary.status)&&!rewriting&&<MeetingActions meeting={meeting} shown={tab==='Notes'?readIn.markdown??undefined:undefined} reading={tab==='Notes'?readIn.view:null} ask={writeIn} hasAudio={tracks.length>0} onToast={onToast} onError={onError} onChanged={onChanged} onRename={startRename} onDelete={onDelete} onLock={on=>void lock(on)}/>}</div>
       <div className="edithint" aria-live="polite"><span><Kbd>Enter</Kbd> {s.renameSave}</span><span><Kbd>Esc</Kbd> {s.renameCancel}</span><span className={`count${count>=72?' near':''}`}>{count>=60?`${count}/${TITLE_MAX}`:''}</span></div>
-      {live?<div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{session?.state?.app&&<><i className="sep"/><span>{session.state.app}</span></>}</div>:
+      {clip?<div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{!live&&duration>0&&<><i className="sep"/><span>{durationLabel(duration)}</span></>}<i className="sep"/><span className="cvid"><FilmIcon/>Screen recording</span>{!live&&clipBytes>0&&<><i className="sep"/><span>{fileSize(clipBytes)}</span></>}</div>:
+      live?<div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{session?.state?.app&&<><i className="sep"/><span>{session.state.app}</span></>}</div>:
       <div className="document-meta"><span>{meetingDate(meeting.summary.created_ms)}</span>{duration>0&&<><i className="sep"/><span>{durationLabel(duration)}</span></>}{(meeting.summary.apps??[]).length>0&&<><i className="sep"/><span>{meeting.summary.apps.join(', ')}</span></>}{meeting.summary.notes_ms!=null&&<><i className="sep"/><span>Notes in {notesTime(meeting.summary.notes_ms)}</span></>}{locked&&<><i className="sep"/><button type="button" className="locked-mark" title={s.unlockTitle} aria-label={s.unlockTitle} onClick={()=>void lock(false)}><MenuIcon name="lock"/>{s.locked}</button></>}<span className="sr-only" role="status">{lockMessage}</span></div>}
-      {!live&&!writing&&!rewriting&&<div className="tl">
+      {!clip&&!live&&!writing&&!rewriting&&<div className="tl">
         <div className="timeline-wave"><svg viewBox="0 0 1000 40" preserveAspectRatio="none" aria-label="Recorded audio: You above, Them below">
           {tracks.map(track=><path key={track.path} className={track.speaker==='You'?'tl-me':'tl-them'} d={envelope(track)}/>)}
           <line x1="0" x2="1000" y1="20" y2="20" className="tl-mid"/>
@@ -273,7 +297,10 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
         <div className="tl-legend"><span className="lm">You</span><span className="lt">Them</span><span>{duration?timeLabel(duration):'No saved audio'}</span></div>
       </div>}
     </header>
-    {live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage id={meeting.summary.id} stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage id={meeting.summary.id} stage={rewriting.stage}/>:rewriting?<RewritingPage id={meeting.summary.id} stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
+    {clip?(live&&session?.state?<ClipRecording meeting={meeting} state={session.state} pending={session.pending} act={session.act}/>
+      :media?<ScreenRecordingPage meeting={meeting} player={{media,position,playing,rate,setRate,seek,scrub,togglePlay}} trimming={trimming} onTrim={()=>{if(canTrim)setTrimming(on=>!on);}} onTrimCancel={()=>setTrimming(false)} onTrimSave={(from,to)=>void trim(from,to)} onWriteNotes={()=>void writeStopped()} writingNotes={writingNotes}/>
+      :<div className="clipbody"><p className="muted" role={mediaFailed?'alert':'status'}>{mediaFailed?s.video_load_failed:s.video_loading}</p></div>)
+    :live&&session?.state?<RecordingPage session={{state:session.state,gaps:session.gaps,pending:session.pending,act:session.act}} onToast={onToast}/>:writing?<ProcessingPage id={meeting.summary.id} stage={session?.stage??null} durationMs={meeting.summary.duration_ms??session?.state?.elapsed_ms??0}/>:rewriting?.transcribe?<RetranscribingPage id={meeting.summary.id} stage={rewriting.stage}/>:rewriting?<RewritingPage id={meeting.summary.id} stage={rewriting.stage} lines={meeting.transcript.split('\n').filter(line=>line.trim()).length}/>:<>
     <div className="doctools"><div className="tabs" role="tablist" aria-label={s.meetingViews}>{tabs.map((name,index)=><button key={name} id={`tab-${name}`} type="button" role="tab" aria-selected={tab===name} aria-controls="meeting-panel" tabIndex={tab===name?0:-1} onClick={()=>setTab(name)} onKeyDown={event=>{
       if(event.key===' ' && name===tab && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();event.stopPropagation();togglePlay();return;}
       const names=tabs;let next=index;
@@ -289,8 +316,8 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
       </aside>}
     </div>
     {tab!=='Video'&&(showPlayer||tab==='Transcript')&&duration>0&&<div className="player"><button className="doc-action" onClick={togglePlay}>{playing?'❚❚ Pause':'▶ Play'}</button><span className="mono">{timeLabel(position)}</span><input type="range" className="bar" aria-label="Position" min={0} max={duration} step={100} value={position} style={{'--p':`${position/duration*100}%`} as CSSProperties} onChange={e=>scrub(+e.currentTarget.value)}/><span className="tip">{tracks.some(t=>t.speaker==='You')&&tracks.some(t=>t.speaker==='Them')?'Both sides':'Audio'}</span></div>}
-    {nativeAudio===false&&tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
     </>}
+    {!busy&&nativeAudio===false&&tracks.map((track,index)=><audio key={track.path} ref={element=>{audio.current[index]=element;if(element&&element.playbackRate!==rate)element.playbackRate=rate;}} src={track.path} preload="metadata"/>)}
   </article>;
 }
 

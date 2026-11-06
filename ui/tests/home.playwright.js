@@ -114,7 +114,8 @@ async (page) => {
     await p.screenshot({path: `.playwright-out/empty-app-${theme}.png`});
     await ref.locator('.mainwin').screenshot({path: `.playwright-out/empty-ref-${theme}.png`});
     await p.getByRole('button', {name: 'Record now'}).click();
-    await p.waitForFunction(() => window.calls.some(c => c.c === 'start_recording'));
+    // On macOS Record now opens the screen setup (mic, timer and what to record first).
+    await p.waitForFunction(() => window.calls.some(c => c.c === 'open_capture' && c.a.kind === 'Call'));
     if (differences.length || errors.length) throw Error(JSON.stringify({theme, empty: true, differences, errors}));
     out.push({theme, empty: true, differences, errors});
     await p.close(); await ref.close();

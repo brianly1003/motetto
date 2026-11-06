@@ -6,7 +6,9 @@
     "companion",
     "settings",
     "prompter",
-    "onboarding"
+    "onboarding",
+    "capture-*",
+    "recframe"
   ],
   "permissions": [
     "core:event:allow-listen",

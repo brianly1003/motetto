@@ -27,6 +27,68 @@ pub fn configure(_window: &tauri::WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The screen setup overlay: above full-screen apps and on every Space, and never visible to a
+/// window or screen capture by any app, whatever the Shown switch says.
+#[cfg(target_os = "macos")]
+pub fn overlay(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let target = window.clone();
+    window.run_on_main_thread(move || {
+        use objc2::{msg_send, runtime::AnyObject};
+        let Ok(native) = target.ns_window() else {
+            return;
+        };
+        let native = native as *mut AnyObject;
+        // SAFETY: this closure runs on AppKit's main thread; ns_window is the live NSWindow owned
+        // by Tauri. Add CanJoinAllSpaces (1 << 0) and FullScreenAuxiliary (1 << 8) to its flags,
+        // use NSScreenSaverWindowLevel (1000) so it covers full-screen apps and the menu bar, and
+        // NSWindowSharingNone (0).
+        unsafe {
+            let behavior: usize = msg_send![native, collectionBehavior];
+            let _: () = msg_send![native, setCollectionBehavior: behavior | 1 | (1 << 8)];
+            let _: () = msg_send![native, setLevel: 1000isize];
+            let _: () = msg_send![native, setSharingType: 0usize];
+        }
+    })
+}
+#[cfg(not(target_os = "macos"))]
+pub fn overlay(_window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    Ok(())
+}
+
+/// Every active display as (id, x, y, width, height) in global points, top-left origin: the
+/// same space as window frames and `CGDisplayBounds`.
+#[cfg(target_os = "macos")]
+pub fn displays() -> Vec<(u32, f64, f64, f64, f64)> {
+    #[repr(C)]
+    struct CgRect {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    }
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+        fn CGDisplayBounds(display: u32) -> CgRect;
+    }
+    let mut ids = [0u32; 16];
+    let mut count = 0u32;
+    // SAFETY: the buffer holds `ids.len()` entries and CoreGraphics writes at most that many,
+    // then the count; both are plain queries that are safe on any thread.
+    let error = unsafe { CGGetActiveDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) };
+    if error != 0 {
+        return vec![];
+    }
+    ids.iter()
+        .take(count as usize)
+        .map(|&id| {
+            // SAFETY: a plain query by display id, with no pointers.
+            let b = unsafe { CGDisplayBounds(id) };
+            (id, b.x, b.y, b.width, b.height)
+        })
+        .collect()
+}
+
 /// What every window was last set to: 0 hidden, 1 shown, 2 unsure (a window refused), so the
 /// next change applies again.
 static SHOWN: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
@@ -75,6 +137,10 @@ pub fn follow_share_visible(app: &tauri::AppHandle, shown: bool) -> Result<(), S
         shown,
         app.webview_windows()
             .values()
+            // The screen setup overlay and the recording frame are never shown in a capture.
+            .filter(|window| {
+                !window.label().starts_with("capture-") && window.label() != "recframe"
+            })
             .map(|window| window.set_content_protected(!shown))
             .collect::<Vec<_>>(),
     )
@@ -119,6 +185,22 @@ pub fn activate_app(pid: i32) {
 }
 #[cfg(not(target_os = "macos"))]
 pub fn activate_app(_pid: i32) {}
+
+/// Brings Motetto forward, so a window it then focuses gets the keyboard even when another app
+/// was active (the tray and the global shortcut don't activate it).
+#[cfg(target_os = "macos")]
+pub fn activate_self(app: &tauri::AppHandle) {
+    let _ = app.run_on_main_thread(|| {
+        use objc2::{class, msg_send, runtime::AnyObject};
+        // SAFETY: on AppKit's main thread; the shared application exists for the app's lifetime.
+        unsafe {
+            let shared: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![shared, activateIgnoringOtherApps: true];
+        }
+    });
+}
+#[cfg(not(target_os = "macos"))]
+pub fn activate_self(_app: &tauri::AppHandle) {}
 
 /// Keep the logo a native template image while the recording dot and timer use recording red.
 #[cfg(target_os = "macos")]

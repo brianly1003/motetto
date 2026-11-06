@@ -70,7 +70,8 @@ async (page) => {
   const items = await menu.getByRole('menuitemradio').allInnerTexts();
   const checked = await menu.getByRole('menuitemradio', {checked: true}).allInnerTexts();
   out.items = items; out.checked = checked;
-  if (items.length !== 3 || items.filter(x => x.includes('MacBook Pro Microphone')).length !== 1 || !checked[0]?.startsWith('System default')) throw Error('#1 ' + JSON.stringify(out));
+  // None comes first during a recording (owner 2026-11-05).
+  if (items.length !== 4 || !items[0].startsWith('None') || items.filter(x => x.includes('MacBook Pro Microphone')).length !== 1 || !checked[0]?.startsWith('System default')) throw Error('#1 ' + JSON.stringify(out));
   await p.screenshot({path: '.playwright-out/recording-close-menu.png'});
   // #2: window blur, click outside, and Stop all close it.
   await p.evaluate(() => window.dispatchEvent(new Event('blur')));

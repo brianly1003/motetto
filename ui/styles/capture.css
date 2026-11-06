@@ -1,0 +1,127 @@
+/* The screen setup overlay (mockup "Screen capture picker"): the same rules and values. The page
+   is a transparent window over each display, so .capture fills it. The mic meter follows the real
+   level (no looping animation), and Tab reaches the close button last while it stays first. */
+html, body { background: transparent !important; overflow: hidden; }
+.capture { position: absolute; inset: 0; z-index: 70; cursor: default; --hud: rgba(30,32,28,.78); --hud-ink: #f3f4ef; --hud-ink-2: rgba(243,244,239,.62); --hud-line: rgba(255,255,255,.12); --hud-hover: rgba(255,255,255,.08); --hud-on: rgba(255,255,255,.16); --pick: #6a8cff; --pick-soft: rgba(106,140,255,.16); }
+.capture[hidden] { display: none; }
+.capture[data-mode="window"], .capture[data-mode="display"] { cursor: pointer; }
+.capture[data-mode="area"] { cursor: crosshair; }
+.capture .capveil { position: absolute; inset: 0; background: rgba(12,14,11,.0); transition: background .2s; }
+.capture[data-mode="display"] .capveil { background: rgba(106,140,255,.10); box-shadow: inset 0 0 0 3px var(--pick); }
+.capture[data-mode="window"] .capveil { background: rgba(12,14,11,.18); }
+.caphl { position: absolute; display: none; border-radius: 12px; background: var(--pick-soft); box-shadow: 0 0 0 3px var(--pick), 0 0 0 9999px rgba(12,14,11,.28); pointer-events: none; transition: left .12s, top .12s, width .12s, height .12s; }
+.caphl.own { background: repeating-linear-gradient(135deg, rgba(208,55,43,.10) 0 10px, transparent 10px 20px); box-shadow: 0 0 0 2px var(--rec), 0 0 0 9999px rgba(12,14,11,.28); }
+.capbadge { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); display: grid; justify-items: center; gap: 6px; padding: 14px 18px; border-radius: 14px; background: var(--hud); color: var(--hud-ink); -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5); border: 1px solid var(--hud-line); box-shadow: 0 18px 40px -16px rgba(0,0,0,.55); text-align: center; font-size: 13px; white-space: nowrap; pointer-events: none; }
+.capbadge .ico { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--pick); color: #fff; }
+.capbadge .ico svg { width: 22px; height: 22px; }
+.caphl.own .capbadge .ico { background: var(--rec); }
+.capbadge b { font-weight: 600; font-size: 14px; }
+.capbadge span { color: var(--hud-ink-2); font: 500 12px/1.3 var(--font-data); font-feature-settings: "tnum"; }
+.caparea { position: absolute; display: none; border: 1.5px dashed #fff; outline: 1px solid rgba(0,0,0,.35); box-shadow: 0 0 0 9999px rgba(12,14,11,.46); cursor: move; }
+.capture[data-mode="area"] .caparea { display: block; }
+.caparea .h { position: absolute; width: 10px; height: 10px; margin: -6px; border-radius: 50%; background: #fff; border: 1.5px solid var(--pick); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.caparea .h[data-h="nw"] { left: 0; top: 0; cursor: nwse-resize; } .caparea .h[data-h="n"] { left: 50%; top: 0; cursor: ns-resize; } .caparea .h[data-h="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.caparea .h[data-h="e"] { left: 100%; top: 50%; cursor: ew-resize; } .caparea .h[data-h="se"] { left: 100%; top: 100%; cursor: nwse-resize; } .caparea .h[data-h="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.caparea .h[data-h="sw"] { left: 0; top: 100%; cursor: nesw-resize; } .caparea .h[data-h="w"] { left: 0; top: 50%; cursor: ew-resize; }
+.caparea .thirds { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .15s; background: linear-gradient(90deg, transparent calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% - .5px) calc(33.33% + .5px), transparent calc(33.33% + .5px) calc(66.66% - .5px), rgba(255,255,255,.45) calc(66.66% - .5px) calc(66.66% + .5px), transparent calc(66.66% + .5px)), linear-gradient(180deg, transparent calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% - .5px) calc(33.33% + .5px), transparent calc(33.33% + .5px) calc(66.66% - .5px), rgba(255,255,255,.45) calc(66.66% - .5px) calc(66.66% + .5px), transparent calc(66.66% + .5px)); }
+.caparea.drag .thirds { opacity: 1; }
+.caparea .size { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: var(--hud); color: var(--hud-ink); font: 600 11.5px/1.4 var(--font-data); font-feature-settings: "tnum"; white-space: nowrap; -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.caparea .size.below { bottom: auto; top: calc(100% + 8px); }
+.capbar { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 16px; background: var(--hud); color: var(--hud-ink); border: 1px solid var(--hud-line); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6); box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 24px 48px -18px rgba(0,0,0,.6), 0 2px 8px rgba(0,0,0,.25); cursor: default; font-size: 12.5px; animation: capin .28s cubic-bezier(.2,.8,.2,1); }
+@keyframes capin { from { opacity: 0; transform: translate(-50%, 10px) scale(.98); } }
+.capbar .vr { width: 1px; height: 30px; margin: 0 4px; background: var(--hud-line); }
+.capbar button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
+.capbar button:hover { background: var(--hud-hover); }
+.capbar button:focus-visible { box-shadow: inset 0 0 0 2px var(--pick); }
+.capbar .capx { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.1); }
+.capbar .capx svg { width: 13px; height: 13px; }
+.capbar .modes { display: flex; gap: 2px; }
+.capbar .mode { display: grid; justify-items: center; gap: 3px; min-width: 66px; padding: 6px 8px 5px; color: var(--hud-ink-2); }
+.capbar .mode svg { width: 22px; height: 22px; }
+.capbar .mode span { font-size: 11px; font-weight: 500; }
+.capbar .mode[aria-checked="true"] { background: var(--hud-on); color: var(--hud-ink); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+.capbar .mode[aria-checked="true"] svg { color: var(--pick); filter: drop-shadow(0 0 6px rgba(106,140,255,.45)); }
+.capbar .chipb { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; max-width: 210px; }
+.capbar .chipb svg:not(.chv) { width: 16px; height: 16px; flex: none; }
+.capbar .chipb .chv { width: 11px; height: 11px; opacity: .7; flex: none; }
+.capbar .chipb .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capbar .chipb.off { color: #ffb4ac; }
+.capbar .chipb .meta { color: var(--hud-ink-2); font: 500 11px/1 var(--font-data); font-feature-settings: "tnum"; }
+.capbar .rec { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 12px; margin-left: 2px; background: var(--rec); color: #fff; font-weight: 600; border-radius: 10px; box-shadow: 0 6px 16px -6px rgba(208,55,43,.7); }
+.capbar .rec:hover { background: #e0463a; }
+.capbar .rec i { width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.28); }
+.capbar .rec .meta { font: 500 11px/1 var(--font-data); opacity: .85; font-feature-settings: "tnum"; }
+.capbar .rec[disabled] { opacity: .45; cursor: default; box-shadow: none; }
+.caphint { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: var(--hud); color: var(--hud-ink); font-size: 12px; white-space: nowrap; -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border: 1px solid var(--hud-line); pointer-events: none; }
+.caphint kbd { font: 600 10.5px/1 var(--font-data); padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,.14); margin: 0 2px; }
+.capmenu { position: absolute; z-index: 72; width: 270px; padding: 5px; border-radius: 12px; background: rgba(30,32,28,.9); color: var(--hud-ink, #f3f4ef); border: 1px solid rgba(255,255,255,.12); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6); box-shadow: 0 24px 48px -18px rgba(0,0,0,.6); display: grid; gap: 1px; font-size: 13px; }
+.capmenu .mh { padding: 7px 10px 3px; font-size: 11px; font-weight: 600; color: rgba(243,244,239,.55); }
+.capmenu .sep { height: 1px; margin: 4px 6px; background: rgba(255,255,255,.12); }
+.capmenu button { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.capmenu button:hover, .capmenu button:focus-visible { background: #3f63d9; color: #fff; outline: none; }
+.capmenu button svg { width: 15px; height: 15px; }
+.capmenu button .sub { display: block; font-size: 11.5px; color: rgba(243,244,239,.6); }
+.capmenu button:hover .sub, .capmenu button:focus-visible .sub { color: rgba(255,255,255,.8); }
+.capmenu .ck { width: 14px; height: 14px; color: #8fa8ff; }
+.capmenu button:hover .ck { color: #fff; }
+.capmenu .note { padding: 6px 10px; font-size: 11.5px; line-height: 1.4; color: rgba(243,244,239,.6); background: none; border: 0; border-radius: 0; }
+/* The start timer (owner 2026-11-05): part of the Record button, so when it starts is decided
+   next to where you start it. Now, 3, 5 or 10 s; a small dial says how long at a glance. */
+.recsplit { display: inline-flex; align-items: stretch; margin-left: 2px; border-radius: 10px; box-shadow: 0 6px 16px -6px rgba(208,55,43,.7); }
+.recsplit .rec { margin: 0; border-radius: 10px 0 0 10px; box-shadow: none; }
+.recsplit .rec:only-child { border-radius: 10px; }
+.capbar .rectime { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 9px 0 8px; background: #b52c22; color: #fff; border-radius: 0 10px 10px 0; border-left: 1px solid rgba(255,255,255,.22); font: 600 12px/1 var(--font-data); font-feature-settings: "tnum"; }
+.capbar .rectime:hover { background: #c3352a; }
+.capbar .rectime svg:not(.chv) { width: 15px; height: 15px; }
+.capbar .rectime .chv { width: 10px; height: 10px; opacity: .8; }
+.recsplit.off { opacity: .45; box-shadow: none; }
+.capmenu .dial { width: 18px; height: 18px; }
+.capmenu .keys { display: grid; gap: 4px; padding: 6px 10px 4px; font-size: 11.5px; color: rgba(243,244,239,.62); }
+.capmenu .keys span { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.capmenu kbd { font: 600 10.5px/1 var(--font-data); padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,.14); color: #fff; border: 0; box-shadow: none; white-space: nowrap; }
+/* The countdown sits on what will be recorded, so you see it once more before the first frame;
+   it can start now, add 5 s, or go back to the setup with your choices kept. */
+.capture[data-counting] :is(.capbadge, .caphov) { display: none; }
+.capture[data-counting] :is(.capbar, .caphint) { opacity: 0; pointer-events: none; transition: opacity .2s; }
+.capture[data-counting] .caphl, .capture[data-counting] .caparea { animation: arming 1s ease-in-out infinite; }
+@keyframes arming { 50% { box-shadow: 0 0 0 3px var(--rec), 0 0 0 10px rgba(208,55,43,.22), 0 0 0 9999px rgba(12,14,11,.38); } }
+.capcd { position: absolute; z-index: 73; width: 264px; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 10px; padding: 18px 16px 14px; border-radius: 20px; background: rgba(30,32,28,.86); color: #f3f4ef; border: 1px solid rgba(255,255,255,.12); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6); box-shadow: 0 30px 60px -24px rgba(0,0,0,.7); text-align: center; animation: capin2 .22s cubic-bezier(.2,.8,.2,1); cursor: default; }
+@keyframes capin2 { from { opacity: 0; transform: translate(-50%, -46%) scale(.97); } }
+.capcd .ring { position: relative; width: 104px; height: 104px; display: grid; place-items: center; }
+.capcd .ring svg { position: absolute; inset: 0; width: 104px; height: 104px; transform: rotate(-90deg); }
+.capcd .ring circle { fill: none; stroke-width: 5; }
+.capcd .ring .track { stroke: rgba(255,255,255,.12); }
+.capcd .ring .prog { stroke: var(--rec); stroke-linecap: round; stroke-dasharray: 295.3; transition: stroke-dashoffset 1s linear; }
+.capcd .cdnum { font: 600 46px/1 var(--font-data); font-feature-settings: "tnum"; }
+.capcd .cdnum.tick { animation: cdpop .22s ease-out; }
+@keyframes cdpop { from { transform: scale(1.18); opacity: .6; } }
+.capcd .what { font-size: 12.5px; line-height: 1.4; color: rgba(243,244,239,.75); }
+.capcd .what b { color: #fff; font-weight: 600; }
+.capcd .acts { display: flex; gap: 6px; width: 100%; }
+.capcd .acts button { flex: 1; height: 30px; border: 0; border-radius: 9px; font: 600 12px var(--font-ui); cursor: pointer; background: rgba(255,255,255,.1); color: #fff; }
+.capcd .acts button:hover { background: rgba(255,255,255,.18); }
+.capcd .acts .go { background: var(--rec); }
+.capcd .acts .go:hover { background: #e0463a; }
+.capcd .acts button:focus-visible { outline: 2px solid #8fa8ff; outline-offset: 1px; }
+.capcd small { font-size: 11px; color: rgba(243,244,239,.5); }
+.capmenu .note svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
+.capbar .mode span { white-space: nowrap; }
+.caphint kbd { color: inherit; background: rgba(255,255,255,.18); border: 0; box-shadow: none; }
+.capbar .rec .meta { color: rgba(255,255,255,.9); opacity: 1; }
+.capbar .vr.thin { height: 34px; margin: 0 3px; align-self: center; }
+.caphl.chosen { background: rgba(106,140,255,.10); box-shadow: 0 0 0 3px var(--pick), 0 0 0 7px rgba(106,140,255,.28), 0 0 0 9999px rgba(12,14,11,.34); }
+.capbadge .ico.sel { background: #2f9e5b; }
+.caphov { position: absolute; display: none; border-radius: 12px; border: 2px dashed rgba(255,255,255,.85); pointer-events: none; }
+.caphov.own { border-color: var(--rec); }
+.capture[data-mode="audio"] { pointer-events: none; }
+.capture[data-mode="audio"] :is(.capbar, .capmenu, .caphint) { pointer-events: auto; }
+.capture[data-mode="audio"] .capveil { background: transparent; }
+.caphint b { font-weight: 600; }
+.caplvl { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-left: 2px; }
+.caplvl i { width: 3px; border-radius: 1px; background: #7ee2a0; transform-origin: bottom; transform: scaleY(var(--lvl, .15)); transition: transform .15s linear; }
+.caplvl i:nth-child(1) { height: 40%; } .caplvl i:nth-child(2) { height: 75%; } .caplvl i:nth-child(3) { height: 100%; } .caplvl i:nth-child(4) { height: 60%; } .caplvl i:nth-child(5) { height: 30%; opacity: .5; }
+@media (prefers-reduced-motion: reduce) { .caplvl i { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .capbar, .capcd, .capcd .cdnum.tick, .capture[data-counting] .caphl, .capture[data-counting] .caparea { animation: none; } .caphl, .capcd .ring .prog { transition: none; } }
+.capbar > .lead { order: -1; }
+/* Audio only lets clicks through the page; the countdown card must still take its buttons. */
+.capture[data-mode="audio"] .capcd { pointer-events: auto; }

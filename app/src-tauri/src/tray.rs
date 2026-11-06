@@ -13,11 +13,14 @@ enum Action {
     Paused,
     Resume,
     Asking,
+    /// A call question over a clip that goes on recording: answer it, or stop the clip.
+    AskingOverClip,
     None,
 }
-fn action(state: &SessionState, importing: bool) -> Action {
+fn action(state: &SessionState, held_clip: bool, importing: bool) -> Action {
     match state {
         SessionState::Recording => Action::Stop,
+        SessionState::Asking { .. } if held_clip => Action::AskingOverClip,
         SessionState::Paused => Action::Paused,
         SessionState::Stopped { .. } => Action::Resume,
         SessionState::Asking { .. } => Action::Asking,
@@ -89,7 +92,15 @@ fn header_text(state: &AppState) -> String {
             seconds / 60,
             seconds % 60
         ),
+        SessionState::Asking { app, .. } if state.held_clip.is_some() => format!(
+            "Recording · {:02}:{:02} · {app} call asked",
+            seconds / 60,
+            seconds % 60
+        ),
         SessionState::Asking { app, .. } => format!("{app} call · not recording"),
+        SessionState::Stopped { .. } if state.setup.as_ref().is_some_and(|s| s.video_only()) => {
+            "Stopped · saving soon".into()
+        }
         SessionState::Stopped { .. } => "Stopped · notes start soon".into(),
         SessionState::Finishing { .. } => "Writing notes".into(),
         _ => "Motetto · ready for calls".into(),
@@ -118,6 +129,11 @@ fn menu(
     for (id, label, shortcut) in match action {
         Action::Record => vec![("record", "Record now", "Ctrl+Alt+S")],
         Action::Asking => vec![
+            ("ask-record", "Record this call", ""),
+            ("ask-no", "Not for this call", ""),
+        ],
+        Action::AskingOverClip => vec![
+            ("stop", "Stop recording", "Ctrl+Alt+S"),
             ("ask-record", "Record this call", ""),
             ("ask-no", "Not for this call", ""),
         ],
@@ -154,6 +170,10 @@ fn menu(
             item.accelerator(shortcut)
         };
         builder = builder.item(&item.build(app)?);
+    }
+    if action == Action::Record && cfg!(target_os = "macos") {
+        builder = builder
+            .item(&MenuItemBuilder::with_id("record-screen", "Record the screen…").build(app)?);
     }
     if action == Action::Stop && cfg!(target_os = "macos") {
         builder = builder.item(
@@ -230,7 +250,7 @@ pub fn update(app: &tauri::AppHandle, state: &AppState, importing: bool) -> Resu
         .0
         .lock()
         .map_err(|_| "Tray menu state is unavailable")?;
-    let next = action(&state.state, importing);
+    let next = action(&state.state, state.held_clip.is_some(), importing);
     let changed = previous.stale
         || previous.built.as_ref().is_none_or(|b| {
             b.action != next
@@ -254,8 +274,11 @@ pub fn update(app: &tauri::AppHandle, state: &AppState, importing: bool) -> Resu
         .map_err(|e| e.to_string())?;
         previous.header = Some(header);
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-        tray.set_icon(Some(icon(next == Action::Stop)))
-            .map_err(|e| e.to_string())?;
+        tray.set_icon(Some(icon(matches!(
+            next,
+            Action::Stop | Action::AskingOverClip
+        ))))
+        .map_err(|e| e.to_string())?;
         tray.set_icon_as_template(true).map_err(|e| e.to_string())?;
         previous.built = Some(Built {
             screen: state.screen.is_some(),
@@ -283,14 +306,15 @@ mod tests {
     use super::*;
     #[test]
     fn only_the_action_for_the_current_state_is_offered() {
-        assert_eq!(action(&SessionState::Idle, false), Action::Record);
-        assert_eq!(action(&SessionState::Recording, false), Action::Stop);
-        assert_eq!(action(&SessionState::Paused, false), Action::Paused);
+        assert_eq!(action(&SessionState::Idle, false, false), Action::Record);
+        assert_eq!(action(&SessionState::Recording, false, false), Action::Stop);
+        assert_eq!(action(&SessionState::Paused, false, false), Action::Paused);
         assert_eq!(
             action(
                 &SessionState::Stopped {
                     resume_until_ms: 10_000
                 },
+                false,
                 false
             ),
             Action::Resume
@@ -300,20 +324,53 @@ mod tests {
                 &SessionState::Finishing {
                     meeting_id: "1".into()
                 },
+                false,
                 false
             ),
             Action::None
         );
-        assert_eq!(action(&SessionState::Idle, true), Action::None);
+        assert_eq!(action(&SessionState::Idle, false, true), Action::None);
         assert_eq!(
             action(
                 &SessionState::Asking {
                     call_id: "1".into(),
                     app: "Call".into()
                 },
+                false,
                 false
             ),
             Action::Asking
         );
+    }
+    #[test]
+    fn a_clip_behind_a_call_question_still_reads_as_recording() {
+        let asking = SessionState::Asking {
+            call_id: "1".into(),
+            app: "Zoom".into(),
+        };
+        assert_eq!(action(&asking, true, false), Action::AskingOverClip);
+        let state = AppState {
+            state: asking,
+            elapsed_ms: 75_000,
+            held_clip: Some(SessionState::Recording),
+            ..AppState::default()
+        };
+        assert_eq!(header_text(&state), "Recording · 01:15 · Zoom call asked");
+        // A clip has no notes to start.
+        let stopped = AppState {
+            state: SessionState::Stopped { resume_until_ms: 1 },
+            setup: Some(motetto_core::events::RecordSetup {
+                mic: motetto_core::events::MicChoice::Off,
+                app_sounds: true,
+                notes: false,
+                clicks: true,
+                screen: Some(motetto_core::events::ScreenPick {
+                    choice: motetto_core::events::ScreenChoice::Display { id: 1 },
+                    name: "Display".into(),
+                }),
+            }),
+            ..AppState::default()
+        };
+        assert_eq!(header_text(&stopped), "Stopped · saving soon");
     }
 }

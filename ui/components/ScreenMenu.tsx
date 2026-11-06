@@ -11,18 +11,21 @@ import {pillLabel,sizeLabel,shareEnded} from '@/lib/screen';
 import {elapsedLabel} from '@/lib/session';
 import {strings as s} from '@/lib/strings';
 
-export function ScreenMenu({live,current,options,onPick,onClose,preset='sharp',style}: {live:boolean;current:ScreenPick|null;options:ScreenOption[];onPick:(pick:ScreenPick|null)=>void;onClose:()=>void;preset?:string;style?:CSSProperties}) {
+export function ScreenMenu({live,current,options,onPick,onChoose,onClose,preset='sharp',style,audioOnly=true}: {live:boolean;current:ScreenPick|null;options:ScreenOption[];onPick:(pick:ScreenPick|null)=>void;onChoose?:(mode:'window'|'area')=>void;onClose:()=>void;preset?:string;style?:CSSProperties;audioOnly?:boolean}) {
   const ref=useRef<HTMLDivElement>(null);
   useEffect(()=>{(ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')??ref.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]'))?.focus();},[]);
   return <div ref={ref} className="gmenu dropdown micmenu scrmenu" role="menu" aria-label="Screen" style={style} onKeyDown={e=>{
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();onClose();}
     if(!['ArrowUp','ArrowDown','Home','End'].includes(e.key))return;e.preventDefault();
-    const buttons=Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')??[]);const at=buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const buttons=Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"],[role="menuitem"]')??[]);const at=buttons.indexOf(document.activeElement as HTMLButtonElement);
     buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(at+(e.key==='ArrowUp'?-1:1)+buttons.length)%buttons.length]?.focus();
   }}>
     <div className="mhead">{live?s.scr_menu_title:s.scr_record_from}</div>
-    {live&&<button type="button" role="menuitemradio" className="mic" aria-checked={!current} onClick={()=>onPick(null)}><MicIcon/><span className="t"><b>{s.scr_audio_only}</b><span>{current?'Stop the video. The audio goes on.':'Recording now.'}</span></span><span className="ck">{!current&&<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 8.4 3 3 6-6.8"/></svg>}</span></button>}
+    {live&&audioOnly&&<button type="button" role="menuitemradio" className="mic" aria-checked={!current} onClick={()=>onPick(null)}><MicIcon/><span className="t"><b>{s.scr_audio_only}</b><span>{current?'Stop the video. The audio goes on.':'Recording now.'}</span></span><span className="ck">{!current&&<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 8.4 3 3 6-6.8"/></svg>}</span></button>}
     {options.map(option=><button type="button" key={JSON.stringify(option.pick.choice)} role="menuitemradio" className="mic" aria-checked={JSON.stringify(current?.choice)===JSON.stringify(option.pick.choice)} onClick={()=>onPick(option.pick)}><MenuIcon name={option.pick.choice.kind==='CallWindow'?'window':'screen'}/><span className="t"><b>{option.pick.name}</b><span>{option.sub}</span></span><span className="ck">{JSON.stringify(current?.choice)===JSON.stringify(option.pick.choice)&&<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 8.4 3 3 6-6.8"/></svg>}</span></button>)}
+    {onChoose&&<><div className="sep"/>
+      <button type="button" role="menuitem" className="mic" onClick={()=>onChoose('window')}><MenuIcon name="window"/><span className="t"><b>{s.scr_choose_window}</b><span>{s.scr_choose_window_sub}</span></span><span className="ck"/></button>
+      <button type="button" role="menuitem" className="mic" onClick={()=>onChoose('area')}><MenuIcon name="area"/><span className="t"><b>{s.scr_choose_area}</b><span>{s.scr_choose_area_sub}</span></span><span className="ck"/></button></>}
     <div className="sep"/><p className="scrfoot"><MenuIcon name="lock"/><span>{s.scr_foot.replace('{size}',sizeLabel(preset))}</span></p>
   </div>;
 }
@@ -33,6 +36,8 @@ export function ScreenControl({state,chip=false,companion=false,onToast}: {state
   const [toast,setToast]=useState<{text:string;undo:()=>Promise<void>}|null>(null);
   const anchor=useRef<HTMLButtonElement>(null);
   const pick=state.screen?.while_sharing??state.screen?.pick??null;
+  // A clip is its picture: it has no Audio only to switch to.
+  const clip=!!state.setup?.screen&&!state.setup.notes;
   useEffect(()=>{let active=true;Promise.all([ipc.listScreenSources(),ipc.getSettings()]).then(([options,settings])=>{if(active){setOptions(options);setPreset(settings.screen_preset);}}).catch(()=>{});return()=>{active=false;};},[state.meeting_id,menu!==null]);
   useEffect(()=>{if(!menu)return;const outside=(e:PointerEvent)=>{if(!(e.target as Element)?.closest('.scrmenu,[data-scrmenu]'))setMenu(null);};document.addEventListener('pointerdown',outside);if(companion)void ipc.companionMenu(true,400).catch(()=>{});return()=>{document.removeEventListener('pointerdown',outside);if(companion)void ipc.companionMenu(false).catch(()=>{});};},[menu,companion]);
   useEffect(()=>{if(!menu||!companion)return;let active=true,off:(()=>void)|undefined;void ipc.onCompanionFocus(focused=>{if(active&&!focused)setMenu(null);}).then(fn=>{if(active)off=fn;else fn();}).catch(()=>{});return()=>{active=false;off?.();};},[menu,companion]);
@@ -42,10 +47,16 @@ export function ScreenControl({state,chip=false,companion=false,onToast}: {state
     try {await ipc.setScreen(next);setMenu(null);const text=next?(pick?s.scr_switched:s.scr_added).replace('{source}',next.name).replace('{mm:ss}',elapsedLabel(state.elapsed_ms)):s.scr_stopped;const undo=()=>ipc.setScreen(pick);if(onToast)onToast(text,undo);else setToast({text,undo});}
     catch(e){setError(String(e));}
   }
+  // A new window or area is pointed at on the screen setup, which sets it on this recording.
+  async function chooseOnScreen(mode:'window'|'area'){
+    setError('');
+    try {setMenu(null);await ipc.openCapture(state.setup?.notes===false?'Clip':'Call',mode);}
+    catch(e){setError(String(e));}
+  }
   if(!options.length&&!pick)return null;
   const on=!!state.screen&&!state.screen.waiting&&state.state.type==='Recording';
   return <><button ref={anchor} type="button" className={chip?`micchip${on?' scron':''}`:`iconbtn scrbtn${on?' on':''}`} data-scrmenu aria-label={pillLabel(state.screen)} title={pillLabel(state.screen)} aria-haspopup="menu" aria-expanded={!!menu} onClick={e=>{if(menu)setMenu(null);else{const b=e.currentTarget.getBoundingClientRect();setMenu({left:Math.max(6,Math.min(b.left,innerWidth-306)),top:b.bottom+6});}}}><MenuIcon name={chip&&pick?.choice.kind==='CallWindow'?'window':'screen'}/>{chip&&<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m5 6.5 3 3 3-3"/></svg>}</button>
-    {menu&&createPortal(<ScreenMenu live current={pick} options={options} preset={preset} onPick={next=>void choose(next)} onClose={()=>{setMenu(null);anchor.current?.focus();}} style={{position:'fixed',...menu,zIndex:65}}/>,document.body)}
+    {menu&&createPortal(<ScreenMenu live audioOnly={!clip} current={pick} options={options} preset={preset} onPick={next=>void choose(next)} onChoose={mode=>void chooseOnScreen(mode)} onClose={()=>{setMenu(null);anchor.current?.focus();}} style={{position:'fixed',...menu,zIndex:65}}/>,document.body)}
     {(toast||error)&&createPortal(<div className="screen-undo" role={error?'alert':'status'}>{error||toast?.text}{toast&&!error&&<button type="button" className="quiet" onClick={()=>void toast.undo().then(()=>setToast(null)).catch(e=>setError(String(e)))}>Undo</button>}<button type="button" className="quiet" aria-label="Dismiss notification" onClick={()=>{setError('');setToast(null);}}>✕</button></div>,document.body)}
   </>;
 }

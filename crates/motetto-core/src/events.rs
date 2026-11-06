@@ -28,7 +28,7 @@ pub enum SessionState {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct AppState {
     pub state: SessionState,
     pub meeting_id: Option<String>,
@@ -58,22 +58,70 @@ pub struct AppState {
     /// After Discard in the Stopped Pill: the meeting went to Recently deleted; the Pill offers
     /// Undo until `until_ms` (owner, 2026-10-20).
     pub discarded: Option<Discarded>,
+    /// What the user chose before recording; None for the old shape (a call, notes, mic as is).
+    pub setup: Option<RecordSetup>,
+    /// App name of a clip's window that closed and stopped the recording, for the Stopped Pill.
+    pub screen_closed: Option<String>,
+    /// A clip that goes on recording (or stays paused) behind an open call question: the state it
+    /// returns to, so the Pill and the tray still show it as recording and offer Stop.
+    pub held_clip: Option<SessionState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind")]
+pub enum ScreenChoice {
+    CallWindow {
+        app_id: String,
+    },
+    Display {
+        id: u32,
+    },
+    Window {
+        window_id: u32,
+        app: String,
+    },
+    /// Points, relative to the display's own origin.
+    Area {
+        display: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind")]
-pub enum ScreenChoice {
-    CallWindow { app_id: String },
-    Display { id: u32 },
+pub enum MicChoice {
+    Default,
+    Device { id: String },
+    Off,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+/// The choices made on the setup screen before a recording starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RecordSetup {
+    pub mic: MicChoice,
+    pub app_sounds: bool,
+    pub notes: bool,
+    pub clicks: bool,
+    pub screen: Option<ScreenPick>,
+}
+
+impl RecordSetup {
+    /// A picture without notes: no transcript, no mic rules, saved as a clip.
+    pub fn video_only(&self) -> bool {
+        self.screen.is_some() && !self.notes
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ScreenPick {
     pub choice: ScreenChoice,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ScreenState {
     pub pick: ScreenPick,
     pub while_sharing: Option<ScreenPick>,
@@ -125,6 +173,9 @@ impl Default for AppState {
             ask_off_pending: None,
             stops_at_ms: None,
             discarded: None,
+            setup: None,
+            screen_closed: None,
+            held_clip: None,
         }
     }
 }
@@ -443,11 +494,12 @@ pub struct Readiness {
 }
 
 /// Inputs handled by the M1 reducer. Meeting ids are allocated by its caller.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     StartManual {
         meeting_id: String,
         notes_only: bool,
+        setup: Option<RecordSetup>,
     },
     CallDetected {
         call: Call,
@@ -471,6 +523,8 @@ pub enum Command {
     ResumeRecording,
     /// The user picked another microphone: the current part ends and the next one records from it.
     SwitchMicrophone,
+    /// The setup's microphone changed while recording: the next part records from it.
+    SetMic(MicChoice),
     SetScreen(Option<ScreenPick>),
     AnswerShareVideo {
         display: Option<ScreenPick>,

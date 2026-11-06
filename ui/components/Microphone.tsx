@@ -9,6 +9,7 @@ import type { MicReport } from "@/lib/bindings/MicReport";
 
 const svg = (d: ReactNode, width = 1.4) => <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
 export const MicIcon = () => svg(<><rect x="6" y="1.8" width="4" height="8" rx="2"/><path d="M3.6 7.6a4.4 4.4 0 0 0 8.8 0M8 12v2.2"/></>);
+export const MicOffIcon = () => svg(<><rect x="6" y="1.8" width="4" height="8" rx="2"/><path d="M3.6 7.6a4.4 4.4 0 0 0 8.8 0M8 12v2.2M2.4 2.4l11.2 11.2"/></>);
 export const WarnIcon = () => svg(<><path d="M8 2.2 14.2 13H1.8z"/><path d="M8 6.4v3M8 11.1v.1"/></>, 1.5);
 const CheckIcon = () => svg(<path d="m3.5 8.4 3 3 6-6.8"/>, 1.7);
 const CloseIcon = () => svg(<path d="m4 4 8 8m0-8-8 8"/>, 1.6);
@@ -48,12 +49,21 @@ export function useMicReport(enabled = true) {
 
 type Done = (text: string, undo?: () => Promise<void>) => void;
 
-/** Switches the mic and says so, with Undo back to the previous choice. */
-export async function pickMic(report: MicReport, id: string | null, done: Done, recording: boolean) {
+/** Switches the mic and says so, with Undo back to the previous choice. `off`: the recording's
+ *  mic is None now; a mic picked from here brings it back. */
+export async function pickMic(report: MicReport, id: string | null, done: Done, recording: boolean, off = false) {
   const before = report.chosen;
   const next = await ipc.setMicrophone(id);
   const name = next.active?.name ?? "the system default";
-  done(recording ? `Recording from ${name} now. It's still one meeting.` : `Motetto records from ${name}.`, async () => { await ipc.setMicrophone(before); });
+  done(recording ? `Recording from ${name} now. It's still one meeting.` : `Motetto records from ${name}.`, async () => { if (off) await ipc.setMicChoice({ kind: "Off" }); else await ipc.setMicrophone(before); });
+  return next;
+}
+
+/** None during a recording (owner 2026-11-05): the next part records no mic, so no Me track. */
+export async function pickNoMic(report: MicReport, done: Done) {
+  const before = report.chosen;
+  const next = await ipc.setMicChoice({ kind: "Off" });
+  done("Your mic is off. Only the other side is recorded now.", async () => { await ipc.setMicrophone(before); });
   return next;
 }
 
@@ -90,25 +100,31 @@ export function MicNote({ report, done, onError = done, onHide, className = "mic
 }
 
 /** The recording page's chip: the mic's name, its level and ▾; amber only while it clips. */
-export function MicChip({ report, open, onToggle }: { report: MicReport | null; open: boolean; onToggle: (button: HTMLButtonElement) => void }) {
+export function MicChip({ report, open, onToggle, off = false }: { report: MicReport | null; open: boolean; onToggle: (button: HTMLButtonElement) => void; off?: boolean }) {
   const mic = report?.active;
   if (!mic) return null;
-  return <button type="button" className={`micchip${report.issue ? " warn" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Microphone: ${mic.name}${report.issue ? ", needs attention" : ""}. Change`} title={mic.name} onClick={e => onToggle(e.currentTarget)}>
-    {report.issue ? <WarnIcon/> : <MicIcon/>}<span className="nm">{mic.name}</span><MicLevel hot={report.issue === "TooLoud"}/><Chevron/>
+  const name = off ? "No microphone" : mic.name, issue = off ? null : report.issue;
+  return <button type="button" className={`micchip${issue ? " warn" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Microphone: ${name}${issue ? ", needs attention" : ""}. Change`} title={name} onClick={e => onToggle(e.currentTarget)}>
+    {issue ? <WarnIcon/> : <MicIcon/>}<span className="nm">{name}</span><MicLevel hot={issue === "TooLoud"}/><Chevron/>
   </button>;
 }
 
 /** Record from: system default, each mic (its kind and quality), input volume, Sound settings. */
-export function MicMenu({ report, recording, done, onError = done, onClose, style, settingsLink = true }: { report: MicReport; recording: boolean; done: Done; onError?: (error: string) => void; onClose: () => void; style?: CSSProperties; settingsLink?: boolean }) {
+/** `recording` offers None first (outside a recording the setup bar owns that choice); `off`:
+ *  this recording's mic is None. */
+export function MicMenu({ report, recording, off = false, done, onError = done, onClose, style, settingsLink = true }: { report: MicReport; recording: boolean; off?: boolean; done: Done; onError?: (error: string) => void; onClose: () => void; style?: CSSProperties; settingsLink?: boolean }) {
   const menu = useRef<HTMLDivElement>(null);
   const [volume, setVolume] = useState(report.active?.volume ?? null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => { menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(); }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
   const { system, others, chosen } = micChoices(report);
-  const pick = (id: string | null) => { onClose(); void pickMic(report, id, done, recording).catch(e => onError(String(e))); };
-  const option = (id: string | null, mic: Mic, label: string) => <button key={id ?? "system"} type="button" role="menuitemradio" className="mic" aria-checked={chosen === id} onClick={() => pick(id)}>
-    <MicIcon/><span className="t"><b>{label}</b><span>{micSub(mic)}</span></span><span className="ck">{chosen === id && <CheckIcon/>}</span>
+  const pick = (id: string | null) => { onClose(); void pickMic(report, id, done, recording, off).catch(e => onError(String(e))); };
+  const option = (id: string | null, mic: Mic, label: string) => <button key={id ?? "system"} type="button" role="menuitemradio" className="mic" aria-checked={!off && chosen === id} onClick={() => pick(id)}>
+    <MicIcon/><span className="t"><b>{label}</b><span>{micSub(mic)}</span></span><span className="ck">{!off && chosen === id && <CheckIcon/>}</span>
+  </button>;
+  const none = <button key="off" type="button" role="menuitemradio" className="mic" aria-checked={off} onClick={() => { onClose(); if (!off) void pickNoMic(report, done).catch(e => onError(String(e))); }}>
+    <MicOffIcon/><span className="t"><b>None</b><span>Your voice isn&apos;t recorded</span></span><span className="ck">{off && <CheckIcon/>}</span>
   </button>;
   const active = report.active;
   return <div ref={menu} className="gmenu dropdown micmenu" role="menu" aria-label="Microphone" style={style} onKeyDown={e => {
@@ -120,6 +136,7 @@ export function MicMenu({ report, recording, done, onError = done, onClose, styl
     items[(at + (e.key === "ArrowUp" ? -1 : 1) + items.length) % items.length]?.focus();
   }}>
     <div className="mhead">Record from</div>
+    {recording && none}
     {system && option(null, system, `System default (${system.name})`)}
     {others.map(m => option(m.id, m, m.name))}
     <div className="sep"/>

@@ -1111,32 +1111,93 @@ input.sp-name:hover { background: var(--surface-2); }
 .vplayer:fullscreen { display: block; width: 100%; height: 100%; background: #111412; color: #fff; }
 .vplayer:fullscreen .vframe { position: absolute; inset: 0; border-radius: 0; aspect-ratio: auto; min-height: 0; box-shadow: none; }
 .vplayer:fullscreen .vframe > .vscene { width: 100%; height: 100%; aspect-ratio: auto; }
-.vplayer:fullscreen .vctl { position: absolute; z-index: 2; inset: auto 0 0; display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto auto; gap: 4px 12px; padding: 44px 28px 20px; border: 0; border-radius: 0; background: linear-gradient(transparent,rgba(0,0,0,.88)); opacity: 1; transition: opacity 180ms ease; }
-.vplayer:fullscreen .vscrub { grid-column: 1 / -1; grid-row: 1; height: 24px; min-width: 0; }
-.vplayer:fullscreen .vscrub::before { top: 10px; background: rgba(255,255,255,.3); }
-.vplayer:fullscreen .vscrub i { top: 10px; background: #a6cfa0; }
-.vplayer:fullscreen .vscrub i::after { content: ""; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #a6cfa0; }
-.vplayer:fullscreen .vscrub b { top: 17px; background: #c9c0ff; }
-.vplayer:fullscreen .vscrub .tick { top: 7px; background: #fff; }
-.vplayer:fullscreen .vctl .mono { color: #fff; font-size: 13px; }
-.vplayer:fullscreen .vctl .iconbtn { width: 40px; height: 40px; color: #fff; background: transparent; border-radius: 8px; }
-.vplayer:fullscreen .vctl .iconbtn:hover { background: rgba(255,255,255,.16); }
-.vplayer:fullscreen .vctl .iconbtn svg { width: 20px; height: 20px; }
-.vplayer:fullscreen .vctl .cc { border: 1px solid rgba(255,255,255,.45); height: 30px; }
-.vplayer:fullscreen .vctl .cc[aria-pressed="true"] { color: #111412; background: #fff; border-color: #fff; }
-.vplayer:fullscreen .vctl .cc[aria-pressed="true"]:hover { background: #e7ebe5; }
-.vplayer:fullscreen .vctl select { color: #fff; background: #242724; border: 0; outline: none; box-shadow: none; height: 32px; padding: 0 8px; color-scheme: dark; }
-.vplayer:fullscreen .vctl select:focus-visible { background: #353b34; }
-.vplayer:fullscreen .vctl :not(select):focus-visible { outline: 2px solid #a6cfa0; outline-offset: 3px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl { position: absolute; z-index: 2; inset: auto 0 0; display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto auto; gap: 4px 12px; padding: 44px 28px 20px; border: 0; border-radius: 0; background: linear-gradient(transparent,rgba(0,0,0,.88)); opacity: 1; transition: opacity 180ms ease; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub { grid-column: 1 / -1; grid-row: 1; height: 24px; min-width: 0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub::before { top: 10px; background: rgba(255,255,255,.3); }
+:is(.vplayer, .clipplayer):fullscreen .vscrub i { top: 10px; background: #a6cfa0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub i::after { content: ""; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #a6cfa0; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub b { top: 17px; background: #c9c0ff; }
+:is(.vplayer, .clipplayer):fullscreen .vscrub .tick { top: 7px; background: #fff; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .mono { color: #fff; font-size: 13px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn { width: 40px; height: 40px; color: #fff; background: transparent; border-radius: 8px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn:hover { background: rgba(255,255,255,.16); }
+:is(.vplayer, .clipplayer):fullscreen .vctl .iconbtn svg { width: 20px; height: 20px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc { border: 1px solid rgba(255,255,255,.45); height: 30px; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc[aria-pressed="true"] { color: #111412; background: #fff; border-color: #fff; }
+:is(.vplayer, .clipplayer):fullscreen .vctl .cc[aria-pressed="true"]:hover { background: #e7ebe5; }
+:is(.vplayer, .clipplayer):fullscreen .vctl select { color: #fff; background: #242724; border: 0; outline: none; box-shadow: none; height: 32px; padding: 0 8px; color-scheme: dark; }
+:is(.vplayer, .clipplayer):fullscreen .vctl select:focus-visible { background: #353b34; }
+:is(.vplayer, .clipplayer):fullscreen .vctl :not(select):focus-visible { outline: 2px solid #a6cfa0; outline-offset: 3px; }
 .vplayer:fullscreen .vcap { bottom: 132px; font-size: clamp(15px,1.6vw,22px); max-width: min(86%,960px); transition: bottom 180ms ease; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vctl { opacity: 0; pointer-events: none; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vframe { cursor: none; }
-.vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vtoggle { cursor: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vctl { opacity: 0; pointer-events: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) :is(.vframe, .clipframe) { cursor: none; }
+:is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vtoggle { cursor: none; }
 .vplayer:fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vcap { bottom: 32px; }
-@media (max-width: 780px) { .vplayer:fullscreen .vctl { padding: 32px 16px 12px; gap: 4px 8px; } .vplayer:fullscreen .vcap { bottom: 120px; } }
-@media (prefers-reduced-motion: reduce) { .vplayer:fullscreen .vctl, .vplayer:fullscreen .vcap { transition: none; } }
+@media (max-width: 780px) { :is(.vplayer, .clipplayer):fullscreen .vctl { padding: 32px 16px 12px; gap: 4px 8px; } .vplayer:fullscreen .vcap { bottom: 120px; } }
+@media (prefers-reduced-motion: reduce) { :is(.vplayer, .clipplayer):fullscreen .vctl, .vplayer:fullscreen .vcap { transition: none; } }
 
 .meeting-row .mwhen { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meeting-row .mflags { display: inline-flex; align-items: center; gap: 7px; flex: none; }
 .media-video { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; color: var(--ink-2); }
 .media-video svg { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* A screen recording in the library (mockup clipHtml, trimHtml; owner 2026-11-05): the meeting
+   page's head, then the player, its facts and what notes need. Trim swaps the controls for the
+   trim strip. */
+.cvid { display: inline-flex; align-items: center; gap: 5px; }
+.cvid svg { width: 14px; height: 14px; color: var(--rec); }
+.clipbody { overflow: auto; padding: 14px 28px 40px; display: grid; grid-auto-rows: max-content; gap: 12px; align-content: start; justify-items: stretch; flex: 1; }
+.clipstage { display: flex; justify-content: center; align-items: center; padding: 18px; border-radius: 14px; background: radial-gradient(120% 140% at 50% 0%, #2a2f2b, #121513 70%); box-shadow: 0 0 0 1px var(--line); min-height: 220px; }
+.clipstage.live { box-shadow: 0 0 0 1px var(--line), inset 0 0 0 2px color-mix(in srgb, var(--rec) 55%, transparent); }
+.clipstage.held .clipframe { filter: saturate(.4) brightness(.8); }
+.clipframe { position: relative; flex: none; width: min(100%, 640px, calc(360px * var(--ar))); border-radius: 8px; overflow: hidden; background: #1a1d1b; box-shadow: 0 20px 40px -18px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.06); display: grid; }
+.clipframe .vbig { z-index: 2; }
+.cliprec { position: absolute; right: 10px; top: 28px; padding: 2px 8px; border-radius: 6px; background: var(--rec); color: #fff; font: 600 11px/1.6 var(--font-data); font-feature-settings: "tnum"; }
+.clipctl { max-width: none; }
+.clipctl .vscrub .cdot { position: absolute; top: 6px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: #6a8cff; box-shadow: 0 0 0 2px var(--surface); }
+.cfacts { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfact { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); font: 500 12px/1.5 var(--font-ui); font-feature-settings: "tnum"; }
+.cfact svg { width: 13px; height: 13px; color: var(--ink-3); }
+.clipcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.clipcard .cic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--me-soft); color: var(--me); }
+.clipcard .cic svg { width: 17px; height: 17px; }
+.clipcard.quiet .cic { background: var(--surface-3); color: var(--ink-3); }
+.clipcard > div { flex: 1; min-width: 0; } .clipcard b { font-size: 13.5px; } .clipcard p { margin: 2px 0 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.clipnote { display: flex; align-items: center; gap: 6px; margin: 0; } .clipnote svg { width: 13px; height: 13px; }
+.headacts .btn svg { width: 14px; height: 14px; }
+.headacts .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trimbar { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.tstrip { position: relative; height: 52px; border-radius: 8px; touch-action: none; }
+.tfilm { position: absolute; inset: 4px 0; display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; border-radius: 6px; overflow: hidden; }
+.tfilm i { background: linear-gradient(#eceee9 0 18%, transparent 18%), linear-gradient(90deg, #f6f8f5 0 22%, transparent 22%), linear-gradient(#cfd3c9, #cfd3c9) 34% 42% / 50% 10% no-repeat, linear-gradient(#0a6f8c, #0a6f8c) 34% 64% / calc(14% + var(--k) * 2%) 9% no-repeat, #fff; filter: brightness(calc(.96 + var(--k) * .004)); }
+.tdim { position: absolute; top: 4px; bottom: 4px; background: rgba(12,14,11,.62); pointer-events: none; }
+.treach { position: absolute; top: 4px; bottom: 4px; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 4px, color-mix(in srgb, var(--rec) 45%, transparent) 4px 6px); pointer-events: none; }
+.twin { position: absolute; top: 0; bottom: 0; border: 3px solid var(--accent); border-left-width: 0; border-right-width: 0; border-radius: 8px; pointer-events: none; }
+.twin .th { position: absolute; top: -3px; bottom: -3px; width: 14px; background: var(--accent); display: grid; place-items: center; cursor: ew-resize; pointer-events: auto; outline: none; }
+.twin .th::before { content: ""; width: 2px; height: 16px; border-radius: 1px; background: rgba(0,0,0,.45); }
+.twin .th.a { left: -11px; border-radius: 8px 0 0 8px; } .twin .th.b { right: -11px; border-radius: 0 8px 8px 0; }
+.twin .th:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+.twin .th b { position: absolute; bottom: calc(100% + 6px); padding: 1px 6px; border-radius: 5px; background: var(--ink); color: var(--surface); font: 600 11px/1.6 var(--font-data); font-feature-settings: "tnum"; white-space: nowrap; opacity: 0; transition: opacity 150ms ease; pointer-events: none; }
+.twin .th.a b { left: 0; } .twin .th.b b { right: 0; }
+.twin .th:is(:hover, :focus-visible, .drag) b { opacity: 1; }
+.trow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trimbar .trow .mono { font-size: 12px; color: var(--ink-2); font-feature-settings: "tnum"; } .trimbar .trow .mono b { color: var(--ink); font-weight: 600; }
+.tsug { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px dashed var(--accent); background: var(--accent-soft); color: var(--accent-ink); font: 500 12px var(--font-ui); cursor: pointer; }
+.tsug svg { width: 13px; height: 13px; }
+.tkeys { color: var(--ink-3); font-size: 11.5px; display: inline-flex; gap: 3px; align-items: center; }
+@media (prefers-reduced-motion: reduce) { .twin .th b { transition: none; } }
+/* The app plays the real video where the mockup draws a scene, and the strip shows real frames. */
+.clipframe video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.clipframe .vgap { z-index: 1; }
+.clipframe .vtoggle { z-index: 2; }
+.cliplive { display: grid; place-items: center; padding: 20px; color: rgba(243,244,239,.72); font: 500 13px/1.4 var(--font-ui); text-align: center; }
+.clipplayer { display: grid; gap: 12px; min-width: 0; }
+/* Full screen as the meeting video (.vplayer:fullscreen): the picture fills it, the controls lie on it. */
+.clipplayer:fullscreen { display: block; width: 100%; height: 100%; background: #111412; color: #fff; }
+.clipplayer:fullscreen .clipstage { position: absolute; inset: 0; border-radius: 0; box-shadow: none; padding: 0; min-height: 0; background: none; }
+.clipplayer:fullscreen .clipframe { width: 100%; height: 100%; max-width: none; border-radius: 0; box-shadow: none; background: none; }
+.clipplayer:fullscreen .clipctl { grid-template-columns: 40px minmax(0,1fr) auto auto; }
+.clipplayer:fullscreen .vscrub .cdot { top: 8px; box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
+.cdot { pointer-events: none; }
+.tfilm i { position: relative; overflow: hidden; background: #16191c; filter: none; }
+.tfilm i video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

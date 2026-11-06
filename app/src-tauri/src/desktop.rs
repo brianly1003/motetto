@@ -101,6 +101,7 @@ pub fn run() {
             crate::live::get_levels,
             crate::microphone::microphones,
             crate::microphone::set_microphone,
+            crate::microphone::set_mic_choice,
             crate::microphone::set_mic_volume,
             crate::microphone::open_sound_settings,
             crate::permissions::open_permission_settings,
@@ -113,11 +114,24 @@ pub fn run() {
             list_screen_sources,
             crate::meeting_actions::delete_video,
             crate::meeting_actions::restore_video,
+            crate::trim::trim_video,
+            crate::trim::restore_trim,
+            crate::video_export::export_video,
             dont_ask_for_app,
             undo_dont_ask,
             hold_ask,
             set_ask_on_call,
             set_share_visible,
+            crate::capture_overlay::open_capture,
+            crate::capture_overlay::close_capture,
+            crate::capture_overlay::capture_windows,
+            crate::capture_overlay::capture_memory,
+            crate::capture_overlay::start_capture,
+            crate::capture_overlay::pick_capture,
+            crate::capture_overlay::capture_esc_ack,
+            crate::capture_overlay::capture_controls,
+            crate::mic_preview::capture_mic_preview,
+            crate::mic_preview::capture_level,
             crate::settings::open_settings,
             crate::setup::open_setup,
             crate::settings::get_settings,
@@ -256,6 +270,7 @@ pub fn run() {
             // After the companion exists: a detected call shows its Ask card there.
             crate::calls::spawn(app.handle().clone(), sender)?;
             crate::screen::watch(app.handle().clone())?;
+            crate::rec_frame::follow(app.handle().clone())?;
             let saved = app.state::<crate::settings::Store>().get()?;
             dispatch(
                 app.handle().clone(),
@@ -292,10 +307,20 @@ pub fn run() {
                             let _ = app.emit("motetto://notice", error);
                         }
                     }
-                    "record" => dispatch(app.clone(), Action::Start),
+                    "record" => dispatch(
+                        app.clone(),
+                        Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
+                    ),
+                    "record-screen" => dispatch(
+                        app.clone(),
+                        Action::OpenCapture(crate::capture_overlay::CaptureKind::Clip),
+                    ),
                     "resume" => dispatch(app.clone(), Action::Resume),
                     "pause" => dispatch(app.clone(), Action::Pause),
-                    "stop" => dispatch(app.clone(), Action::Stop),
+                    "stop" => dispatch(
+                        app.clone(),
+                        Action::Stop(crate::controller::StopSource::Mouse),
+                    ),
                     "screen" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || {
@@ -474,11 +499,12 @@ async fn start_recording(app: tauri::AppHandle, notes_only: Option<bool>) -> Res
     if notes_only == Some(true) {
         return Err("Notes-only sessions are not implemented yet".into());
     }
-    act(app, Action::Start).await
+    act(app, Action::Start(None)).await
 }
 #[tauri::command]
 async fn stop_recording(app: tauri::AppHandle) -> Result<(), String> {
-    act(app, Action::Stop).await
+    // The Pill's and the meeting page's Stop buttons.
+    act(app, Action::Stop(crate::controller::StopSource::Mouse)).await
 }
 #[tauri::command]
 async fn pause_recording(app: tauri::AppHandle) -> Result<(), String> {
@@ -764,6 +790,15 @@ impl Host for Desktop {
         }
         show(&self.app);
         let _ = self.app.emit("motetto://notice", message);
+    }
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind, mode: Option<&'static str>) {
+        // Off the session thread: building windows waits on the main thread.
+        let app = self.app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) = crate::capture_overlay::open(&app, kind, mode) {
+                let _ = app.emit("motetto://notice", error);
+            }
+        });
     }
     fn cant_record(&self, body: &str) {
         // Mid-call, nobody pressed anything: never pull a window forward, even if this fails.

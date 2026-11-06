@@ -89,13 +89,31 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
                 };
                 ScreenTarget::Window(id)
             }
+            ScreenChoice::Window { window_id, .. } => ScreenTarget::Window(*window_id),
+            ScreenChoice::Area {
+                display,
+                x,
+                y,
+                width,
+                height,
+            } => ScreenTarget::Area {
+                display: *display,
+                rect: video::AreaRect {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                },
+            },
         };
         // Unknown backing scales use 1x; source enumeration populates the native display cache.
         let scale = DISPLAYS
             .lock()
             .ok()
             .and_then(|d| match target {
-                ScreenTarget::Display(id) => d.iter().find(|d| d.0 == id).map(|d| d.2),
+                ScreenTarget::Display(id) | ScreenTarget::Area { display: id, .. } => {
+                    d.iter().find(|d| d.0 == id).map(|d| d.2)
+                }
                 ScreenTarget::Window(id) => motetto_core::capture::window_display(id)
                     .and_then(|id| d.iter().find(|d| d.0 == id).map(|d| d.2)),
             })
@@ -104,6 +122,7 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
             target,
             preset: video::Preset::parse(&settings.screen_preset),
             cursor: settings.screen_cursor,
+            clicks: false,
             path: path.into(),
             scale,
             progress: None,
@@ -114,6 +133,24 @@ pub fn resolve(pick: &ScreenPick, settings: &Settings, path: &str, dir: &Path) -
         let _ = (pick, settings, path);
         Resolved::NoWindow
     }
+}
+
+/// The displays as (id, name, backing scale), read on the main thread; they also fill the scale
+/// cache a picture's size is resolved with. None when the main thread doesn't answer in 2 s.
+#[cfg(target_os = "macos")]
+pub fn refresh_displays(app: &tauri::AppHandle) -> Option<Vec<(u32, String, f64)>> {
+    let (tx, rx) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let _ = tx.send(motetto_core::capture::displays(mtm));
+        }
+    })
+    .ok()?;
+    let displays = rx.recv_timeout(Duration::from_secs(2)).ok()?;
+    if let Ok(mut cache) = DISPLAYS.lock() {
+        *cache = displays.clone();
+    }
+    Some(displays)
 }
 
 pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
@@ -131,9 +168,10 @@ pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
             _ => s.app.as_deref(),
         });
         let rules = watch::rules();
+        // Only a detected call offers its window; any other window is chosen on the screen setup.
         let mut options: Vec<_> = rules
             .iter()
-            .filter(|rule| active.is_none_or(|name| name == rule.name))
+            .filter(|rule| active.is_some_and(|name| name == rule.name))
             .filter(|rule| video::pick_window(&windows, rule, &rules).is_some())
             .map(|rule| ScreenOption {
                 pick: ScreenPick {
@@ -145,19 +183,7 @@ pub fn sources(app: &tauri::AppHandle) -> Vec<ScreenOption> {
                 sub: "Only the call, with whatever people share. Recommended.".into(),
             })
             .collect();
-        let (tx, rx) = mpsc::channel();
-        if app
-            .run_on_main_thread(move || {
-                if let Some(mtm) = objc2::MainThreadMarker::new() {
-                    let _ = tx.send(motetto_core::capture::displays(mtm));
-                }
-            })
-            .is_ok()
-            && let Ok(displays) = rx.recv_timeout(Duration::from_secs(2))
-        {
-            if let Ok(mut cache) = DISPLAYS.lock() {
-                *cache = displays.clone();
-            }
+        if let Some(displays) = refresh_displays(app) {
             options.extend(displays.into_iter().map(|(id, name, _)| ScreenOption {
                 pick: ScreenPick {
                     choice: ScreenChoice::Display { id },
@@ -180,12 +206,14 @@ fn watch_decision(
     if state.current().is_some() && free < 2_000_000_000 {
         return Some(Action::ScreenDiskLow);
     }
+    // A picked window is watched for loss like the call window, but is never re-picked by a rule.
+    let picked = matches!(state.pick.choice, ScreenChoice::Window { .. });
     if state.while_sharing.is_some()
-        || !matches!(state.pick.choice, ScreenChoice::CallWindow { .. })
+        || !(picked || matches!(state.pick.choice, ScreenChoice::CallWindow { .. }))
     {
         return None;
     }
-    if state.waiting {
+    if state.waiting && !picked {
         return found.map(|_| Action::ScreenFound);
     }
     // A minimized/covered window still exists; its last frame remains the picture.
@@ -291,6 +319,21 @@ mod tests {
             watch_decision(&state, None, false, 1, 0),
             Some(Action::ScreenDiskLow)
         ));
+    }
+    #[test]
+    fn a_picked_window_is_lost_when_gone_but_never_re_picked() {
+        let mut state = window();
+        state.pick.choice = ScreenChoice::Window {
+            window_id: 7,
+            app: "Notes".into(),
+        };
+        assert!(watch_decision(&state, None, true, 7, u64::MAX).is_none());
+        assert!(matches!(
+            watch_decision(&state, None, false, 7, u64::MAX),
+            Some(Action::ScreenLost)
+        ));
+        state.waiting = true;
+        assert!(watch_decision(&state, Some(2), false, 0, u64::MAX).is_none());
     }
     #[test]
     fn export_bindings() {

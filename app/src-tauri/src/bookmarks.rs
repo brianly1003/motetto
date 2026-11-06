@@ -31,6 +31,7 @@ pub fn save(root: &Path, value: &MeetingSummary) -> Result<(), String> {
             value.title_source = saved.title_source;
         }
         value.locked = saved.locked;
+        value.reach_ms = saved.reach_ms;
     }
     write(root, &value)
 }
@@ -80,6 +81,36 @@ pub fn mark(root: &Path, id: &str, at_ms: u64) -> Result<(), String> {
         write(root, &value)?;
     }
     Ok(())
+}
+
+/// Keep how long before Stop the pointer left the screen; 0 means nothing to suggest and clears
+/// an earlier part's value. An unchanged value is not written again.
+pub fn set_reach(root: &Path, id: &str, reach_ms: u64) -> Result<(), String> {
+    let _guard = WRITER
+        .lock()
+        .map_err(|_| "Meeting storage is unavailable")?;
+    let mut value = library::summary(root, id)?;
+    let reach = (reach_ms > 0).then_some(reach_ms);
+    if value.reach_ms == reach {
+        return Ok(());
+    }
+    value.reach_ms = reach;
+    write(root, &value)
+}
+
+/// Changes the saved summary as a whole, marks and reach included (a trim moves them).
+pub fn update(
+    root: &Path,
+    id: &str,
+    change: impl FnOnce(&mut MeetingSummary),
+) -> Result<MeetingSummary, String> {
+    let _guard = WRITER
+        .lock()
+        .map_err(|_| "Meeting storage is unavailable")?;
+    let mut value = library::summary(root, id)?;
+    change(&mut value);
+    write(root, &value)?;
+    Ok(value)
 }
 
 pub const LOCKED: &str = "These notes are locked. Unlock them to edit.";
@@ -207,6 +238,31 @@ mod tests {
             fs::read_to_string(root.join("123/meeting.json")).unwrap(),
             "damaged metadata"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn zero_reach_only_clears_and_a_reach_survives_a_stale_save() {
+        let root = std::env::temp_dir().join(format!(
+            "motetto-reach-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("123")).unwrap();
+        let json = r#"{"id":"123","title":"Call","created_ms":0,"status":"Recording"}"#;
+        fs::write(root.join("123/meeting.json"), json).unwrap();
+        let stale = library::summary(&root, "123").unwrap();
+        set_reach(&root, "123", 0).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("123/meeting.json")).unwrap(),
+            json
+        );
+        set_reach(&root, "123", 800).unwrap();
+        save(&root, &stale).unwrap();
+        assert_eq!(library::summary(&root, "123").unwrap().reach_ms, Some(800));
+        // A later part that ended without a Stop click clears it.
+        set_reach(&root, "123", 0).unwrap();
+        assert_eq!(library::summary(&root, "123").unwrap().reach_ms, None);
         fs::remove_dir_all(root).unwrap();
     }
 
