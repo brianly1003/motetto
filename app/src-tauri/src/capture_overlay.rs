@@ -12,7 +12,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -213,6 +213,27 @@ type Controls = (bool, Vec<[f64; 4]>);
 /// Each open starts one watcher; a newer open or a close ends the older one.
 static WATCHER: AtomicU64 = AtomicU64::new(0);
 
+/// The setup hid the library window to keep it out of the way: it comes back unless a recording
+/// started (owner 2026-11-06).
+static HID_MAIN: AtomicBool = AtomicBool::new(false);
+
+fn hide_main(app: &tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main")
+        && main.is_visible().unwrap_or(false)
+        && !main.is_minimized().unwrap_or(false)
+        && main.hide().is_ok()
+    {
+        HID_MAIN.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Brings the library back if the setup hid it; `false` once a recording started.
+fn restore_main(app: &tauri::AppHandle, show: bool) {
+    if HID_MAIN.swap(false, Ordering::SeqCst) && show {
+        crate::desktop::show(app);
+    }
+}
+
 /// Whether an overlay takes the mouse: always while picking; in Audio only, over its controls.
 fn takes_mouse(through: bool, hit: Hit) -> bool {
     !through || hit == Hit::Control
@@ -263,6 +284,7 @@ fn escape(app: &tauri::AppHandle) {
     std::thread::sleep(ESC_WAIT);
     if unanswered(sent, ESC_ANSWERED.load(Ordering::SeqCst)) {
         close(app);
+        restore_main(app, true);
     }
 }
 
@@ -278,6 +300,9 @@ pub fn open(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Re
     let result = build(app, kind, mode);
     if result.is_err() {
         close_all(app);
+        restore_main(app, true);
+    } else {
+        hide_main(app);
     }
     result
 }
@@ -397,6 +422,7 @@ pub async fn open_capture(
 pub async fn close_capture(app: tauri::AppHandle) -> Result<(), String> {
     blocking(move || {
         close(&app);
+        restore_main(&app, true);
         Ok(())
     })
     .await
@@ -476,6 +502,8 @@ pub async fn start_capture(
             }
         }
         let result = app.state::<Controller>().action(Action::Start(Some(setup)));
+        // Recording: the Pill shows it, the library stays out of the way.
+        restore_main(&app, false);
         // The page that asked is closed: say why nothing started where it can be seen.
         if let Err(error) = &result {
             crate::desktop::show(&app);
@@ -492,6 +520,7 @@ pub async fn start_capture(
 pub async fn pick_capture(app: tauri::AppHandle, screen: ScreenPick) -> Result<(), String> {
     blocking(move || {
         close(&app);
+        restore_main(&app, true);
         app.state::<Controller>()
             .action(Action::SetScreen(Some(screen)))
     })
@@ -513,6 +542,7 @@ mod tests {
             height: 600.0,
             app: "Notes".into(),
             layer: 0,
+            level: 0,
             on_screen: true,
             own,
         }
