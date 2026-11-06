@@ -264,10 +264,13 @@ pub fn spawn(
                         let failed = recording
                             .as_ref()
                             .is_some_and(|r| r.id == id && r.failure.is_some());
+                        let mut saved = false;
                         if (!failed || has_picture(&root, &id)) && root.join(&id).is_dir() {
+                            let result = save_clip(&root, &id);
+                            saved = result.is_ok();
                             let _ = app.emit(
                                 "motetto://notice",
-                                match save_clip(&root, &id) {
+                                match result {
                                     Ok(()) => CLIP_SAVED.into(),
                                     Err(e) => format!("Couldn't save the screen recording: {e}"),
                                 },
@@ -275,6 +278,12 @@ pub fn spawn(
                         }
                         recording = None;
                         let _ = app.emit("motetto://library-changed", ());
+                        // The library comes back with the saved recording open (owner 2026-11-06):
+                        // the setup hid it, and the notice is shown there.
+                        if saved {
+                            let _ = app.emit("motetto://open-meeting", id.clone());
+                            crate::desktop::show(&app);
+                        }
                     }
                     Job::Finish { id, apps } => {
                         let mut result = match recording.as_ref().filter(|r| r.id == id) {
