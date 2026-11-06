@@ -98,6 +98,7 @@ pub fn screen_windows() -> Result<Vec<video::WindowInfo>, Box<dyn Error>> {
                     .map(|a| a.application_name())
                     .unwrap_or_default(),
                 layer: 0,
+                level: w.window_layer(),
                 on_screen: w.is_on_screen(),
                 own: app.is_some_and(|a| a.process_id() as u32 == std::process::id()),
             }

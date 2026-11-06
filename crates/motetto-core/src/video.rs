@@ -65,15 +65,19 @@ pub struct WindowInfo {
     pub app: String,
     /// Front-to-back order index; 0 is the front-most window.
     pub layer: i64,
+    /// Window Server level: 0 for app windows; the Dock, menu bar and wallpaper are not 0.
+    pub level: i32,
     pub on_screen: bool,
     pub own: bool,
 }
 
-/// Windows a person can point at: on screen, not ours, at least 200 by 150, in the order given.
+/// Windows a person can point at: app windows on screen, not ours, at least 200 by 150, in the
+/// order given.
 pub fn pickable(all: &[WindowInfo]) -> Vec<WindowInfo> {
     all.iter()
         .filter(|w| {
             w.on_screen
+                && w.level == 0
                 && !w.own
                 && w.width.is_finite()
                 && w.height.is_finite()
@@ -378,6 +382,7 @@ mod tests {
             height,
             app: String::new(),
             layer: 0,
+            level: 0,
             on_screen: true,
             own: false,
         }
@@ -390,9 +395,12 @@ mod tests {
         let small = window(2, "com.example.a", "Small", 150.0, 100.0);
         let mut hidden = window(3, "com.example.b", "Hidden", 800.0, 600.0);
         hidden.on_screen = false;
+        // The Dock's full-screen window, as macOS lists it.
+        let mut dock = window(6, "com.apple.dock", "Dock", 1728.0, 1117.0);
+        dock.level = 20;
         let good_a = window(4, "com.example.c", "A", 800.0, 600.0);
         let good_b = window(5, "com.example.d", "B", 200.0, 150.0);
-        let ids: Vec<u32> = pickable(&[own, small, hidden, good_a, good_b])
+        let ids: Vec<u32> = pickable(&[own, small, hidden, dock, good_a, good_b])
             .iter()
             .map(|w| w.id)
             .collect();
