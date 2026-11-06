@@ -28,6 +28,8 @@ pub(crate) const FULL: &str = "-full";
 /// The original while it is being moved; never listed or expired.
 const STAGING: &str = ".partial";
 const TMP: &str = ".trim-tmp";
+const NOTES_WRITTEN: &str =
+    "Notes were written for the trimmed video, so the full video can't come back.";
 const VIDEO: &str = "part-0000.screen.mp4";
 /// The manifests that place parts on the recording's timeline; a trim rewrites them.
 const MANIFESTS: [&str; 4] = [
@@ -61,6 +63,11 @@ pub(crate) const NATIVE: Media = Media {
 pub(crate) fn original_of(entry: &str) -> Option<&str> {
     let id = entry.strip_suffix(FULL)?;
     (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())).then_some(id)
+}
+
+/// The meeting a crash's staged original `<id>-full.partial` belongs to.
+pub(crate) fn staged_of(entry: &str) -> Option<&str> {
+    original_of(entry.strip_suffix(STAGING)?)
 }
 
 /// The meeting's own folder, never a link to one elsewhere.
@@ -177,11 +184,12 @@ fn unstage(root: &Path, id: &str, dir: &Path, staged: &Path) -> Result<(), Strin
     Ok(())
 }
 
-/// Finishes what a crash interrupted: a staged original goes back into its meeting.
-fn recover(root: &Path, id: &str, dir: &Path) -> Result<(), String> {
+/// Finishes what a crash interrupted: a staged original goes back into its meeting. True when
+/// one did.
+fn recover(root: &Path, id: &str, dir: &Path) -> Result<bool, String> {
     match in_bin(root, id, STAGING)? {
-        (staged, true) => unstage(root, id, dir, &staged),
-        _ => Ok(()),
+        (staged, true) => unstage(root, id, dir, &staged).map(|()| true),
+        _ => Ok(false),
     }
 }
 
@@ -527,7 +535,15 @@ fn rewrite(
 /// The original is staged first, so a crash midway is finished by the next trim or restore.
 pub(crate) fn restore(root: &Path, id: &str) -> Result<MeetingSummary, String> {
     let dir = own_folder(root, id)?;
-    recover(root, id, &dir)?;
+    // Write notes made it a meeting whose transcript follows the trimmed video.
+    if library::summary(root, id)?.kind != MeetingKind::Screen {
+        return Err(NOTES_WRITTEN.into());
+    }
+    // A restore that stopped after staging finishes here: the original is already back.
+    if recover(root, id, &dir)? && original(root, id)?.is_none() {
+        clear(&dir.join(TMP), true);
+        return library::summary(root, id);
+    }
     let whole = original(root, id)?.ok_or("There is no full video to restore")?;
     originals(&whole)?;
     let current = parts(&dir)?;
@@ -554,10 +570,12 @@ pub(crate) fn listed(root: &Path, id: &str) -> Option<MeetingSummary> {
     let folder = root.join(".deleted").join(format!("{id}{FULL}"));
     let mut row: MeetingSummary =
         serde_json::from_str(&library::text(&folder.join(SUMMARY)).ok()?).ok()?;
+    // The page offers Restore only while the item is still a screen recording.
     if let Ok(now) =
         library::summary(root, id).or_else(|_| library::summary(&root.join(".deleted"), id))
     {
         row.title = now.title;
+        row.kind = now.kind;
     }
     row.id = format!("{id}{FULL}");
     row.deleted_kind = DeletedKind::TrimmedOriginal;
@@ -824,9 +842,32 @@ mod tests {
         for name in ["part-0001.screen.mp4", "screen.json"] {
             fs::rename(dir.join(name), staged.join(name)).unwrap();
         }
-        assert!(restore(&root, "1").unwrap_err().contains("no full video"));
+        // The original is back in its meeting: that is the restore, and .trim-tmp goes.
+        fs::create_dir_all(dir.join(TMP).join("old")).unwrap();
+        restore(&root, "1").unwrap();
         assert_eq!(snapshot(&dir), before);
-        assert!(!staged.exists());
+        assert!(!staged.exists() && !dir.join(TMP).exists());
+        assert!(restore(&root, "1").unwrap_err().contains("no full video"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_full_video_never_comes_back_under_written_notes() {
+        let root = root("notes");
+        let dir = meeting(&root, "screen");
+        trim_with(&root, "1", 1000, 4000, &FAKE).unwrap();
+        let trimmed = snapshot(&dir);
+        // Write notes made it a meeting: its transcript follows the trimmed video.
+        crate::bookmarks::update(&root, "1", |s| s.kind = MeetingKind::Meeting).unwrap();
+        assert!(
+            restore(&root, "1")
+                .unwrap_err()
+                .contains("Notes were written")
+        );
+        assert_eq!(snapshot(&dir), trimmed);
+        assert!(root.join(".deleted/1-full").exists());
+        // Its Recently deleted row says so, for the page to hide Restore.
+        assert_eq!(listed(&root, "1").unwrap().kind, MeetingKind::Meeting);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -66,7 +66,11 @@ pub(crate) fn purge_expired(root: &Path, now: u128) -> Result<(), String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let id = entry.file_name().to_string_lossy().into_owned();
         let meeting = !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit());
-        if !meeting && crate::trim::original_of(&id).is_none() {
+        if !meeting
+            && crate::trim::original_of(&id)
+                .or_else(|| crate::trim::staged_of(&id))
+                .is_none()
+        {
             continue;
         }
         let stamp = entry.path().join(DELETED_AT);
@@ -112,8 +116,12 @@ fn purge_meeting(root: &Path, id: &str) -> Result<(), String> {
     {
         return Err("Invalid deleted meetings folder".into());
     }
-    // A trimmed original (`<id>-full`) sits beside the meetings, checked the same way.
-    let folder = if crate::trim::original_of(id).is_some() {
+    // A trimmed original (`<id>-full`, or a crash's `<id>-full.partial`) sits beside the
+    // meetings, checked the same way.
+    let folder = if crate::trim::original_of(id)
+        .or_else(|| crate::trim::staged_of(id))
+        .is_some()
+    {
         let folder = deleted.join(id).canonicalize().map_err(|e| e.to_string())?;
         if folder.parent() != Some(deleted.canonicalize().map_err(|e| e.to_string())?.as_path()) {
             return Err("Deleted video is outside the library".into());
@@ -204,12 +212,15 @@ fn run(root: &Path, id: &str, action: &str) -> Result<(), String> {
         "restore" => move_meeting(root, id, true),
         // A trimmed original can't come back without its meeting, so it goes too.
         "purge" => purge_meeting(root, id).and_then(|()| {
-            let full = format!("{id}{}", crate::trim::FULL);
-            if root.join(".deleted").join(&full).symlink_metadata().is_ok() {
-                purge_meeting(root, &full)
-            } else {
-                Ok(())
+            for full in [
+                format!("{id}{}", crate::trim::FULL),
+                format!("{id}{}.partial", crate::trim::FULL),
+            ] {
+                if root.join(".deleted").join(&full).symlink_metadata().is_ok() {
+                    purge_meeting(root, &full)?;
+                }
             }
+            Ok(())
         }),
         "reveal" => {
             let folder = library::folder(root, id)?;
@@ -437,16 +448,27 @@ mod tests {
     fn full_videos_expire_and_go_with_their_meeting() {
         let root = std::env::temp_dir().join(format!("motetto-full-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        for name in ["1-full", "2-full", "2", "3-full"] {
+        for name in [
+            "1-full",
+            "2-full",
+            "2",
+            "3-full",
+            "2-full.partial",
+            "4-full.partial",
+        ] {
             fs::create_dir_all(root.join(".deleted").join(name)).unwrap();
         }
         fs::write(root.join(".deleted/1-full").join(DELETED_AT), "0").unwrap();
+        fs::write(root.join(".deleted/4-full.partial").join(DELETED_AT), "0").unwrap();
         purge_expired(&root, KEEP_DELETED_MS).unwrap();
         assert!(!root.join(".deleted/1-full").exists());
+        // A crash's staged original expires the same way.
+        assert!(!root.join(".deleted/4-full.partial").exists());
         // Unstamped: its 30 days start now.
         assert!(root.join(".deleted/3-full").join(DELETED_AT).exists());
         run(&root, "2", "purge").unwrap();
         assert!(!root.join(".deleted/2").exists() && !root.join(".deleted/2-full").exists());
+        assert!(!root.join(".deleted/2-full.partial").exists());
         assert!(purge_meeting(&root, "../3-full").is_err());
         fs::remove_dir_all(root).unwrap();
     }
