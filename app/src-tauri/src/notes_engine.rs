@@ -205,6 +205,11 @@ fn start(model: &str) -> Result<Server, Failure> {
     let mut child =
         tools::spawn(&mut command).map_err(|e| format!("The notes engine could not start: {e}"))?;
     remember_pid(child.id());
+    // Also stopped if Motetto dies without quitting (crash, Force Quit); the pid file is the
+    // fallback for the next launch.
+    if let Err(e) = tools::stop_with_parent(child.id(), Path::new(command.get_program())) {
+        eprintln!("Motetto: no watcher for the notes engine: {e}");
+    }
     let (sender, ports) = std::sync::mpsc::channel();
     for stream in [
         child

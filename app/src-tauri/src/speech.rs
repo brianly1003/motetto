@@ -73,6 +73,13 @@ impl Server {
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped()),
         )?;
+        // Also stopped if Motetto dies without quitting (crash, Force Quit).
+        if let Err(e) = motetto_core::tools::stop_with_parent(
+            child.id(),
+            std::path::Path::new(command.get_program()),
+        ) {
+            eprintln!("Motetto: no watcher for the speech server: {e}");
+        }
         let empty_vad = Arc::new(AtomicBool::new(false));
         let detected = empty_vad.clone();
         let stderr = child
