@@ -108,7 +108,7 @@ fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<
             return Err("invalid audio sample rate or channels".into());
         }
         if resample.is_none() {
-            resample = Some(Mono::new(rate)?);
+            resample = Some(Mono::new(rate, 16_000)?);
         }
         let mono = resample.as_mut().ok_or("missing resampler")?;
         if mono.rate != rate {
@@ -187,8 +187,11 @@ fn ffmpeg(source: &Path, destination: &Path, why: &dyn Error) -> Result<(), Box<
     }
 }
 
+/// A mono stream at `rate` written at `to`, block by block, with the filter's delay removed and
+/// exactly as many samples as the input's length at `to`.
 struct Mono {
     rate: u32,
+    to: u32,
     filter: Option<FftFixedIn<f32>>,
     pending: Vec<f32>,
     skip: usize,
@@ -197,15 +200,16 @@ struct Mono {
 }
 
 impl Mono {
-    fn new(rate: u32) -> Result<Self, Box<dyn Error>> {
-        let filter = if rate == 16_000 {
+    fn new(rate: u32, to: u32) -> Result<Self, Box<dyn Error>> {
+        let filter = if rate == to {
             None
         } else {
-            Some(FftFixedIn::new(rate as usize, 16_000, 1024, 1, 1)?)
+            Some(FftFixedIn::new(rate as usize, to as usize, 1024, 1, 1)?)
         };
         let skip = filter.as_ref().map_or(0, |f| f.output_delay());
         Ok(Self {
             rate,
+            to,
             filter,
             pending: Vec::with_capacity(1024),
             skip,
@@ -232,7 +236,7 @@ impl Mono {
         self.pending.resize(1024, 0.0);
         if let Some(filter) = &mut self.filter {
             let output = filter.process(&[&self.pending], None)?;
-            let target = self.input * 16_000 / u64::from(self.rate);
+            let target = self.input * u64::from(self.to) / u64::from(self.rate);
             for &sample in &output[0] {
                 if self.skip > 0 {
                     self.skip -= 1;
@@ -250,12 +254,35 @@ impl Mono {
         if self.input == 0 {
             return Err("file contains no audio samples".into());
         }
-        let target = self.input * 16_000 / u64::from(self.rate);
+        let target = self.input * u64::from(self.to) / u64::from(self.rate);
         while self.written < target {
             self.block(writer)?;
         }
         Ok(())
     }
+}
+
+/// A mono 32-bit float WAV (as capture writes) at another rate, streamed in blocks.
+pub(crate) fn resample(source: &Path, destination: &Path, to: u32) -> Result<(), Box<dyn Error>> {
+    let mut reader = hound::WavReader::open(source)?;
+    let spec = reader.spec();
+    if spec.channels != 1 || spec.sample_format != hound::SampleFormat::Float {
+        return Err("only mono float audio can be resampled".into());
+    }
+    let mut writer = hound::WavWriter::create(
+        destination,
+        hound::WavSpec {
+            sample_rate: to,
+            ..spec
+        },
+    )?;
+    let mut mono = Mono::new(spec.sample_rate, to)?;
+    for sample in reader.samples::<f32>() {
+        mono.push(sample?, &mut writer)?;
+    }
+    mono.finish(&mut writer)?;
+    writer.finalize()?;
+    Ok(())
 }
 
 #[cfg(test)]

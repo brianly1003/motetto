@@ -48,7 +48,7 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
     stop(); setFresh(false);
     const t = setTimeout(async () => {
       try { const facts = await ipc.clipPreview(id, track, from, to); const src = await ipc.clipAudioSrc(facts.path); if (live) { setPreview({ facts, src }); setFresh(true); } }
-      catch (error) { if (live) onError(String(error)); }
+      catch (error) { if (live) { setPreview(null); onError(String(error)); } }
     }, 250);
     return () => { live = false; clearTimeout(t); };
   }, [id, track, from, to]);
