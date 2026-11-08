@@ -12,7 +12,7 @@ async (page) => {
       transformCallback: cb => { callbacks[++next] = cb; return next; }, unregisterCallback: id => delete callbacks[id],
       invoke: async (c, a) => { window.testCalls.push({ command: c, args: a });
         if (c === 'plugin:event|listen') { listeners[a.event] = a.handler; return next; }
-        if (c === 'get_state') return state; if (c === 'get_levels') return [0, 0]; if (c === 'live_transcript') return ['fixture', '', ''];
+        if (c === 'get_state') return state; if (c === 'list_screen_sources') return []; if (c === 'get_levels') return [0, 0]; if (c === 'live_transcript') return ['fixture', '', ''];
         if (c === 'get_my_notes') return notes; if (c === 'save_my_notes') { notes = { ...notes, text: a.text, version: notes.version + 1 }; return notes; }
         if (c === 'resume_remaining_ms') return 8000; return null; } };
   });
