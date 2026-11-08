@@ -11,7 +11,8 @@ pub const MIN_MS: u64 = 500;
 pub const MAX_MS: u64 = 10 * 60 * 1000;
 pub const MAX_BINS: usize = 400;
 pub const NOTHING: &str = "Nothing was recorded on this track here.";
-pub const RATES_DIFFER: &str = "You and Them were recorded at different rates, so they can't be mixed. Save them one at a time.";
+pub const CANT_MIX: &str =
+    "You and Them were recorded in formats that can't be mixed. Save them one at a time.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Track {
@@ -119,12 +120,28 @@ pub fn write(
     }
 }
 
-/// The two tracks summed frame by frame; they must share rate and format (no resampling, so the
-/// samples stay as recorded). Float sums are not clamped: a float WAV holds values over 1.0.
+/// The two tracks summed frame by frame. A track at a lower rate (a Bluetooth headset mic at
+/// 16 or 24 kHz beside 48 kHz call audio) is first resampled to the higher one; a single track
+/// is never resampled, so it stays as recorded. Float sums are not clamped: a float WAV holds
+/// values over 1.0.
 fn mix(a: &Path, b: &Path, dst: &Path) -> Result<(), String> {
+    let (rate_a, rate_b) = (open(a)?.spec().sample_rate, open(b)?.spec().sample_rate);
+    if rate_a != rate_b {
+        let (low, high) = if rate_a < rate_b {
+            (a, rate_b)
+        } else {
+            (b, rate_a)
+        };
+        let raised = low.with_extension("rate.tmp");
+        let result = crate::decode::resample(low, &raised, high)
+            .map_err(|_| CANT_MIX.to_string())
+            .and_then(|()| fs::rename(&raised, low).map_err(|e| e.to_string()));
+        let _ = fs::remove_file(&raised);
+        result?;
+    }
     let (mut ra, mut rb) = (open(a)?, open(b)?);
     if ra.spec() != rb.spec() {
-        return Err(RATES_DIFFER.into());
+        return Err(CANT_MIX.into());
     }
     let spec = ra.spec();
     let mut writer = hound::WavWriter::create(dst, spec).map_err(|e| e.to_string())?;
@@ -396,10 +413,11 @@ mod tests {
     }
 
     #[test]
-    fn both_refuses_different_rates_and_writes_nothing() {
+    fn both_raises_a_lower_rate_mic_to_the_call_rate() {
         let dir = temp("rates");
-        wav(&dir.join("m.wav"), 48_000, 48_000, |_| 0.1);
-        wav(&dir.join("s.wav"), 16_000, 16_000, |_| 0.1);
+        // A 24 kHz headset mic beside 48 kHz call audio, 1 s each.
+        wav(&dir.join("m.wav"), 24_000, 24_000, |_| 0.25);
+        wav(&dir.join("s.wav"), 48_000, 48_000, |_| 0.5);
         let parts = [Part {
             offset_ms: 0,
             duration_ms: 1000,
@@ -407,12 +425,20 @@ mod tests {
             system: Some(dir.join("s.wav")),
         }];
         let dst = dir.join("out.wav");
+        write(&parts, Track::Both, 0, 1000, &dst).unwrap();
+        let spec = open(&dst).unwrap().spec();
+        assert_eq!(spec.sample_rate, 48_000);
+        let mixed = samples(&dst);
+        assert_eq!(mixed.len(), 48_000);
+        // Away from the edges the sum is both levels; the filter only rings at the ends.
+        assert!(mixed[1_000..47_000].iter().all(|v| (v - 0.75).abs() < 0.01));
+        // The mic alone stays as recorded, and no temporary file is left behind.
+        write(&parts, Track::Me, 0, 1000, &dir.join("me.wav")).unwrap();
         assert_eq!(
-            write(&parts, Track::Both, 0, 1000, &dst),
-            Err(RATES_DIFFER.to_string())
+            open(&dir.join("me.wav")).unwrap().spec().sample_rate,
+            24_000
         );
-        assert!(!dst.exists());
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 4);
     }
 
     #[test]
