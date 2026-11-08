@@ -14,27 +14,25 @@
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --rec-soft: #3d1714; color-scheme: dark; }
  } :root[data-theme="dark"] { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --rec-soft: #3d1714; color-scheme: dark; }
 
+/* No focus rings anywhere, mouse or keyboard: no outline, ring shadow or
+   focus border. Keyboard focus may still show as a background or text colour. */
 * { box-sizing: border-box; outline: none; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--surface-1); color: var(--ink-1); font: 14px/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .45; cursor: not-allowed; }
-:root :is(button, a, input, select, textarea, summary, [role="button"], [role="tab"], [role="menuitem"]):focus-visible { box-shadow: inset 0 0 0 2px var(--attention); }
 svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100dvh; min-height: 0; }
 .sidebar { border-right: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; }
 .search { margin: 10px 10px 4px; display: flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--ink-3); font-size: 13px; }
 .search svg { width: 13px; height: 13px; flex: none; }
 .search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--ink-1); min-width: 0; padding: 1px 2px; }
-:root :is(.search, .palette) input:focus-visible { box-shadow: none; }
-.search:has(input:focus-visible) { border-color: var(--ink-3); }
 .list-heading { padding: 10px 14px 3px; font: 600 11.5px var(--font-ui); color: var(--ink-3); display: flex; justify-content: space-between; }
 .meeting-list { overflow: auto; flex: 1; padding: 0 6px 8px; }
 .meeting-row { text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 7px 9px; display: grid; gap: 1px; width: 100%; margin-bottom: 1px; }
 .meeting-row:hover { background: var(--surface-3); }
 .meeting-row.selected { background: var(--surface-1); box-shadow: 0 0 0 1px var(--line); }
-:root .sidebar :is(.homerow, .meeting-row, .trash, .scripts-entry):focus-visible { box-shadow: inset 0 0 0 1px var(--ink-3); }
 /* A long title fades out instead of ending in "…" (owner 2026-10-23); pointing at the row slides
    the fade left so the words vanish behind the "⋮". --fade animates only because it is registered. */
 @property --fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
@@ -301,8 +299,6 @@ svg.duet path.them { stroke: var(--voice-them); } svg.duet circle.them { fill: v
 button.owner { cursor: pointer; font-family: inherit; line-height: inherit; }
 .owner[aria-pressed="true"] { box-shadow: 0 0 0 1.5px currentColor inset; }
 input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height: inherit; border: 0; outline: none; cursor: text; box-shadow: 0 0 0 1.5px currentColor inset; }
-/* The pill's own edge is its focus mark (mockup); the global amber ring would draw a second one. */
-:root input.ownerin:focus-visible { box-shadow: 0 0 0 1.5px currentColor inset; }
 .notes .show-all { font-size: 12px; padding: 1px 8px; }
 .mention > .tip { margin: 6px 10px; }
 /* Lock notes (SPEC 7.11): a switch in the ••• menu; a quiet Locked mark in the meta line unlocks. */
@@ -331,7 +327,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .player .bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity var(--duration-fade); }
 .player .bar:is(:hover, :active, :focus-visible)::-webkit-slider-thumb { opacity: 1; }
 .player .bar:focus-visible { outline: none; box-shadow: none; }
-.player .bar:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--attention); }
 .tl { margin-top: 8px; display: grid; gap: 2px; cursor: pointer; }
 .tl svg { width: 100%; height: 40px; display: block; }
 /* Owner direction 2026-10-19: stronger than the mockup's .55 so the wave reads at a glance. */
@@ -351,12 +346,12 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .panel .tip, .player .tip { font-size: 12px; color: var(--ink-3); margin: 0; overflow-wrap: anywhere; }
 .timeline-wave { position: relative; }
 .timeline-wave input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.timeline-wave:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--attention); }
 /* Cited moments (DESIGN 2.0): a 9 px ring on the centre line, drawn in HTML so the wave's stretch
    never makes it an ellipse; it fills and grows a little on hover or focus, and plays from there. */
 .tl-dots { position: absolute; inset: 0; pointer-events: none; }
 .tl-dot { position: absolute; top: 50%; width: 9px; height: 9px; padding: 0; border: 1.5px solid var(--ink-1); border-radius: 50%; background: var(--surface-1); transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; transition: transform .12s, background-color .12s; }
-.tl-dot:hover, .tl-dot:focus-visible { background: var(--ink-1); transform: translate(-50%, -50%) scale(1.3); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention) 35%, transparent); }
+.tl-dot:hover, .tl-dot:focus-visible { background: var(--ink-1); transform: translate(-50%, -50%) scale(1.3); }
+.tl-dot:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention) 35%, transparent); }
 .tl svg path { stroke: none; }
 .tline button.ts { border: 0; background: transparent; padding: 0; text-align: left; align-self: start; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 /* Transcript editing (SPEC 7.11, DESIGN 4.9): the time plays; the words are edited in place on one
@@ -573,9 +568,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .settabs { display: flex; justify-content: center; gap: 4px; border-bottom: 1px solid var(--line); background: var(--surface-2); padding: 6px; flex: none; flex-wrap: wrap; }
 .settabs button { border: 0; background: transparent; border-radius: 7px; padding: 4px 12px; color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
 .settabs button[aria-selected="true"] { background: var(--surface-1); color: var(--ink-1); box-shadow: 0 0 0 1px var(--line); }
-:root [role="tab"]:focus-visible { outline: none; box-shadow: none; }
-.tabs [role="tab"]:focus-visible { border-bottom-color: currentColor; }
-.settabs [role="tab"]:focus-visible { text-decoration: underline; text-underline-offset: 4px; }
 
 .setpane { overflow: auto; padding: 20px 30px; display: grid; gap: 16px; align-content: start; flex: 1; }
 .formrow { display: grid; grid-template-columns: 200px minmax(0,1fr); gap: 16px; align-items: start; }
@@ -622,12 +614,11 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .settings-window .btn:hover { background: var(--surface-2); }
 .settings-window .btn.primary:hover { background: var(--ink-1); }
 .settings-window .btn.rec:hover { background: var(--rec); }
-.settings-window .switch input:focus-visible + span { box-shadow: inset 0 0 0 2px var(--attention); }
 .settings-window .kv { margin: 0; }
 .settings-shortcuts, .settings-storage { max-width: 340px; }
 .settings-shortcuts > div { display: contents; }
 .settings-shortcuts input { font: inherit; width: 145px; text-align: right; border: 1px solid transparent; background: transparent; border-radius: 4px; }
-.settings-shortcuts input:focus { background: var(--surface-1); border-color: var(--line-2); }
+.settings-shortcuts input:focus { background: var(--surface-1); }
 .settings-add { margin-top: 8px; }
 .settings-add .help { margin: 0; }
 .settings-intro { margin: 0; color: var(--ink-2); }
@@ -646,13 +637,10 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .findbar { display: flex; align-items: center; gap: 4px; width: min(100%, 280px); padding: 2px 6px 2px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-1); font: 12px/18px var(--font-ui); }
 .findbar > svg { width: 14px; height: 14px; color: var(--ink-3); flex: none; }
 .findbar input { width: 0; min-width: 40px; flex: 1; border: 0; padding: 3px 4px; background: transparent; color: var(--ink-1); font: inherit; }
-:root .findbar input:focus-visible { box-shadow: none; }
-.findbar:focus-within { border-color: var(--ink-3); }
 .findbar output { color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; padding: 0 5px; font-size: 11px; }
 .findbar button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); }
 .findbar button:hover { background: var(--surface-3); }
 .findbar button svg { width: 14px; height: 14px; }
-:root .findbar button:focus-visible { box-shadow: inset 0 0 0 1px var(--ink-3); }
 @media (max-width: 900px) {
   .doctools { padding: 0 14px; gap: 8px; }
   .doctools .tabs { gap: 12px; }
@@ -704,9 +692,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 :is(.micmenu .vol, .volrow) input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--voice-me) calc(10px + (100% - 20px) * var(--v, 0)), var(--line-2) 0); }
 :is(.micmenu .vol, .volrow) input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 15px; margin-top: -4.5px; border-radius: 99px; background: #fff; border: .5px solid rgba(0,0,0,.14); box-shadow: 0 1px 3px rgba(0,0,0,.28); transition: background-color 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
 :is(.micmenu .vol, .volrow) input[type=range]:active::-webkit-slider-thumb { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.75); box-shadow: inset 0 1px 1px rgba(255,255,255,.7), inset 0 -1px 2px rgba(0,0,0,.18), 0 3px 10px rgba(0,0,0,.22); }
-:is(.micmenu .vol, .volrow) input[type=range]:focus-visible { box-shadow: none; }
-/* WebKit counts a clicked slider as focus-visible, so the ring is thin and gone while held. */
-:is(.micmenu .vol, .volrow) input[type=range]:focus-visible:not(:active)::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--voice-me), 0 1px 3px rgba(0,0,0,.28); }
 @media (prefers-reduced-motion: reduce) { :is(.micmenu .vol, .volrow) input[type=range]::-webkit-slider-thumb { transition: none; } }
 .micmenu .vol output, .volrow output { font: 500 12px var(--font-data); font-feature-settings: "tnum"; text-align: right; }
 .volrow { display: grid; grid-template-columns: 220px 40px; gap: 10px; align-items: center; }
@@ -773,8 +758,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .readin-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--voice-me) var(--done, 0%), color-mix(in srgb, var(--voice-me) 30%, transparent) var(--done, 0%) var(--next, 100%), transparent var(--next, 100%)); }
 .readin-progress::after { content: ""; position: absolute; inset: 0; width: 30%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--voice-me) 80%, transparent), transparent); animation: working 1.4s ease-in-out infinite; transform: translateX(-100%); }
 @media (prefers-reduced-motion: reduce) { .readin-spin, .readin-bar.running > svg, .readin-progress::after { animation: none; } }
-:root .readin-search input:focus-visible { box-shadow: none; }
-.readin-pop:has(input:focus-visible) .readin-search { border-bottom-color: var(--ink-3); }
 /* While Find is open the language button keeps only its icon, so Find keeps its compact width. */
 .doctools:has(.findrow) .readin-label, .doctools:has(.findrow) .readin-button .chev { display: none; }
 /* Write the notes again's language (mockup .writein): one field in the question, the chevron drawn
@@ -784,7 +767,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .writein > span { font-weight: 500; white-space: nowrap; }
 .writein select { flex: 1; min-width: 0; height: 100%; appearance: none; border: 0; background: transparent; padding: 0 28px 0 4px; font: 600 13px var(--font-ui); color: var(--ink-1); text-overflow: ellipsis; outline: none; }
 .writein::after { content: ""; position: absolute; right: 12px; top: calc(50% - 5px); width: 6px; height: 6px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: rotate(45deg); pointer-events: none; }
-.writein:focus-within { border-color: var(--ink-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-1) 8%, transparent); }
 .writein:has(select:disabled) { opacity: .6; }
 .writein-help { display: block; margin-top: 6px; font-size: 12px; color: var(--ink-3); }
 /* The question with a language keeps its buttons under the field, so the field gets the width. */
@@ -820,7 +802,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .vcap { position: absolute; left: 50%; bottom: 4%; transform: translateX(-50%); width: max-content; max-width: 86%; padding: 5px 10px; border-radius: 6px; background: rgba(0,0,0,.74); color: #fff; font: 500 13px/1.4 var(--font-ui); text-align: center; text-wrap: balance; }
 .vcap b { font-weight: 600; margin-right: .45em; color: #c9c0ff; } .vcap b.them { color: #8fe0f2; }
 .vtoggle { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; cursor: pointer; }
-.vtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .vbig { position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; }
 /* The triangle's centroid (x 7.3 of 16) sits on the circle's centre; filled like the mockup's
    icons, against the app-wide outline default for svg. */
@@ -851,7 +832,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .vthumb.on { box-shadow: 0 0 0 2px var(--accent); }
 .vthumb .seen { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent); }
 .vthumb:not(.on) .seen { display: none; }
-:root .vthumb:focus-visible { box-shadow: 0 0 0 2px var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .vscrub .tick { position: absolute; top: 5px; width: 2px; height: 10px; margin-left: -1px; border-radius: 1px; background: var(--ink-3); opacity: .55; pointer-events: none; }
 .vside { display: grid; gap: 12px; align-content: start; position: sticky; top: 0; max-height: 100%; overflow: auto; }
 .vlines { position: relative; max-height: 290px; overflow: auto; display: grid; gap: 1px; margin: 0 -6px; }
@@ -865,7 +845,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .vscene video { width:100%; height:100%; object-fit:contain; }
 .vgap { display:grid; place-items:center; position:absolute; inset:0; color:#e9ece6; padding:20px; text-align:center; }
 .vscrub input { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer; }
-.vscrub:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
 .screen-undo { position:fixed; left:8px; right:8px; bottom:6px; z-index:70; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:6px 8px; display:flex; gap:8px; align-items:center; font-size:12px; }
 .scrswap { padding:12px; display:grid; gap:6px; background:var(--surface); border:1px solid var(--line); border-radius:12px; font-size:12px; margin:8px; }
 @media(max-width:780px) { .docbody:has(> .vid) {grid-template-columns:minmax(0,1fr); grid-template-rows:none;} .vframe {flex:none;} .vside {position:static; max-height:none;} }
@@ -884,7 +863,6 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .appearance-option { display: grid; gap: 8px; cursor: pointer; text-align: center; font-size: 12.5px; }
 .appearance-preview { position: relative; display: block; height: 72px; padding: 9px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); }
 .appearance-option:has(input:checked) .appearance-preview { outline: 2px solid var(--voice-me); outline-offset: 2px; }
-.appearance-option:has(input:focus-visible) .appearance-preview { box-shadow: 0 0 0 4px var(--me-soft); }
 .appearance-caption { display: flex; justify-content: center; align-items: center; gap: 5px; }
 .appearance-caption input { margin: 0; accent-color: var(--voice-me); }
 .appearance-mini { position: absolute; inset: 9px; display: grid; grid-template-columns: 28% 1fr; overflow: hidden; border: 1px solid var(--preview-line); border-radius: 4px; background: var(--preview-surface); }
@@ -953,7 +931,6 @@ input.sp-name:hover { background: var(--surface-2); }
 .sp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 248px; }
 .sp-editor { display: flex; flex-direction: column; min-height: 0; padding: 16px 22px 12px; gap: 10px; }
 .sp-editor textarea, .sp-paste textarea { flex: 1; min-height: 0; resize: none; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: 15px/1.6 var(--font-doc); padding: 14px 16px; outline: none; }
-.sp-editor textarea:focus, .sp-paste textarea:focus { border-color: var(--line-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--me) 14%, transparent); }
 .sp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--ink-3); }
 /* New script while this one is still empty (owner 2026-10-30): the editor glows once in your
    colour and a quiet line says why nothing new appeared. Two names so each press replays it. */
@@ -1031,7 +1008,6 @@ input.sp-name:hover { background: var(--surface-2); }
 .ptrep .player .bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity var(--duration-fade); }
 .ptrep .player .bar:is(:hover, :active, :focus-visible)::-webkit-slider-thumb { opacity: 1; }
 .ptrep .player .bar:focus-visible { outline: none; box-shadow: none; }
-.ptrep .player .bar:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--attention); }
 
 /* Library sidebar toggle and its tooltip follow the approved library chrome. */
 .shell { transition: grid-template-columns 180ms cubic-bezier(.2, 0, 0, 1); }
@@ -1043,7 +1019,7 @@ input.sp-name:hover { background: var(--surface-2); }
 .window-titlebar[data-platform="win"] .sidebar-control { position: relative; left: auto; top: auto; }
 .sidebar-toggle { display: grid; place-items: center; width: 28px; height: 26px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .sidebar-toggle:hover { background: var(--surface-3); color: var(--ink-1); }
-:root .sidebar-toggle:focus-visible { box-shadow: none; outline: 2px solid var(--voice-me); outline-offset: 1px; background: var(--surface-3); }
+.sidebar-toggle:focus-visible { background: var(--surface-3); }
 .sidebar-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar-toggle .sidebar-pane { fill: currentColor; stroke: none; opacity: .18; }
 .sidebar-toggle[aria-expanded="false"] .sidebar-pane { opacity: 0; }
@@ -1127,7 +1103,6 @@ input.sp-name:hover { background: var(--surface-2); }
 :is(.vplayer, .clipplayer):fullscreen .vctl .cc[aria-pressed="true"]:hover { background: #e7ebe5; }
 :is(.vplayer, .clipplayer):fullscreen .vctl select { color: #fff; background: #242724; border: 0; outline: none; box-shadow: none; height: 32px; padding: 0 8px; color-scheme: dark; }
 :is(.vplayer, .clipplayer):fullscreen .vctl select:focus-visible { background: #353b34; }
-:is(.vplayer, .clipplayer):fullscreen .vctl :not(select):focus-visible { outline: 2px solid #a6cfa0; outline-offset: 3px; }
 .vplayer:fullscreen .vcap { bottom: 132px; font-size: clamp(15px,1.6vw,22px); max-width: min(86%,960px); transition: bottom 180ms ease; }
 :is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) .vctl { opacity: 0; pointer-events: none; }
 :is(.vplayer, .clipplayer):fullscreen.controls-hidden[data-playing="true"]:not(:has(.vctl:hover, .vctl :focus-visible, .vctl :active)) :is(.vframe, .clipframe) { cursor: none; }
@@ -1176,7 +1151,6 @@ input.sp-name:hover { background: var(--surface-2); }
 .twin .th { position: absolute; top: -3px; bottom: -3px; width: 14px; background: var(--accent); display: grid; place-items: center; cursor: ew-resize; pointer-events: auto; outline: none; }
 .twin .th::before { content: ""; width: 2px; height: 16px; border-radius: 1px; background: rgba(0,0,0,.45); }
 .twin .th.a { left: -11px; border-radius: 8px 0 0 8px; } .twin .th.b { right: -11px; border-radius: 0 8px 8px 0; }
-.twin .th:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
 .twin .th b { position: absolute; bottom: calc(100% + 6px); padding: 1px 6px; border-radius: 5px; background: var(--ink); color: var(--surface); font: 600 11px/1.6 var(--font-data); font-feature-settings: "tnum"; white-space: nowrap; opacity: 0; transition: opacity 150ms ease; pointer-events: none; }
 .twin .th.a b { left: 0; } .twin .th.b b { right: 0; }
 .twin .th:is(:hover, :focus-visible, .drag) b { opacity: 1; }

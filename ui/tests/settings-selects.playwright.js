@@ -58,7 +58,7 @@ async(page)=>{
   await p.getByRole('status').filter({hasText:'Saved'}).waitFor();
   await p.keyboard.press('Tab');await p.getByRole('combobox',{name:'Call language',exact:true}).focus();
   const focus=await p.getByRole('combobox',{name:'Call language',exact:true}).evaluate(el=>({outline:getComputedStyle(el).outlineStyle,shadow:getComputedStyle(el).boxShadow}));
-  if(focus.outline!=='none'||focus.shadow==='none')throw Error('Dropdown lost keyboard focus feedback');
+  if(focus.outline!=='none'||focus.shadow!=='none')throw Error('Dropdown draws a focus ring: '+JSON.stringify(focus));
   await p.setViewportSize({width:960,height:760});
   for(const tab of ['General','Calls','Models','Spellings','Privacy','About']){
    await p.getByRole('tab',{name:tab,exact:true}).click();
