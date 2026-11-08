@@ -31,7 +31,7 @@ async (page) => {
       Object.defineProperty(navigator, 'platform', {value: 'MacIntel'});
       const mics = [{id: 'builtin', name: 'MacBook Pro Microphone', transport: 'BuiltIn', rate_hz: 48000, volume: .5, is_default: true}];
       const report = () => ({mics, chosen: null, active: mics[0], issue: null});
-      const settings = {version: 1, notes_folder: '~/Documents/Motetto', open_at_login: true, notes_language: 'same_as_call', ask_on_call: true, app_modes: {}, apps: [], idle_stop_s: 30, discard_short_s: 20, speech_model: '', notes_model: '', call_language: 'detect', part_chars: 24000, keep_audio: '30_days', recording_reminder: true, mic_device: null, sounds: true, companion: {default_size: 'pill', captions: true}, spellings: [], shortcuts: {S: 'Ctrl+Alt+S', M: 'Ctrl+Alt+M', J: 'Ctrl+Alt+J', N: 'Ctrl+Alt+N', Space: 'Ctrl+Alt+Space', H: 'Ctrl+Alt+H', P: 'Ctrl+Alt+P'}};
+      const settings = {version: 1, notes_folder: '~/Documents/Motetto', open_at_login: true, notes_language: 'same_as_call', ask_on_call: true, app_modes: {}, apps: [], idle_stop_s: 30, speech_model: '', notes_model: '', call_language: 'detect', part_chars: 24000, keep_audio: '30_days', recording_reminder: true, mic_device: null, sounds: true, companion: {default_size: 'pill', captions: true}, spellings: [], shortcuts: {S: 'Ctrl+Alt+S', M: 'Ctrl+Alt+M', J: 'Ctrl+Alt+J', N: 'Ctrl+Alt+N', Space: 'Ctrl+Alt+Space', H: 'Ctrl+Alt+H', P: 'Ctrl+Alt+P'}};
       let next = 0; window.volumes = [];
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {unregisterListener: () => {}};
       window.__TAURI_INTERNALS__ = {metadata: {currentWindow: {label: 'settings'}, currentWebview: {windowLabel: 'settings', label: 'settings'}}, convertFileSrc: p => p,

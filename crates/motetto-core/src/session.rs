@@ -32,9 +32,6 @@ pub enum Effect {
     CantRecord {
         problem: Problem,
     },
-    NotifyShort {
-        seconds: u32,
-    },
     NotifyStillPaused,
     StartCapture {
         meeting_id: String,
@@ -48,9 +45,6 @@ pub enum Effect {
     Finish {
         meeting_id: String,
         notes_only: bool,
-    },
-    Discard {
-        meeting_id: String,
     },
     /// Discard chosen in the Pill: move the meeting to Recently deleted (recoverable), no notes.
     Trash {
@@ -97,7 +91,6 @@ struct PendingAsk {
 #[derive(Debug, Clone)]
 pub struct Session {
     pub app: AppState,
-    pub discard_short_s: u32,
     pub idle_stop_s: u32,
     readiness: Readiness,
     ask: Option<PendingAsk>,
@@ -126,7 +119,6 @@ impl Session {
     pub fn new(readiness: Readiness) -> Self {
         Self {
             app: AppState::default(),
-            discard_short_s: 20,
             idle_stop_s: 30,
             readiness,
             ask: None,
@@ -504,21 +496,8 @@ impl Session {
         if let SessionState::Stopped { resume_until_ms } = self.app.state
             && now >= resume_until_ms
         {
-            if self.app.elapsed_ms < u64::from(self.discard_short_s) * 1000 && !self.video_only() {
-                if let Some(meeting_id) = self.app.meeting_id.clone() {
-                    effects.push(Effect::Discard { meeting_id });
-                }
-                effects.push(Effect::NotifyShort {
-                    seconds: self.discard_short_s,
-                });
-                self.idle();
-                if self.app.quit_pending {
-                    effects.push(Effect::PauseDownload);
-                    effects.push(Effect::Exit);
-                }
-            } else {
-                self.finish(effects);
-            }
+            // Every length is kept, a 3 s voice sample too: Discard in the Pill drops a mistake.
+            self.finish(effects);
         }
     }
 }

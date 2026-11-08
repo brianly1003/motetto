@@ -332,35 +332,6 @@ pub fn spawn(
                         let _ = results.send(Message::Finished { id, result });
                         recording = None;
                     }
-                    Job::Discard { id } => {
-                        // Never delete partial audio after a capture/write failure.
-                        if recording
-                            .as_ref()
-                            .is_some_and(|r| r.id == id && r.failure.is_none())
-                        {
-                            let result = library::folder(&root, &id).and_then(|dir| {
-                                let notes = dir.join("my-notes.md");
-                                if notes.exists() && !library::text(&notes)?.trim().is_empty() {
-                                    status(&root, &id, "NeedsAttention")?;
-                                    let _ = app.emit(
-                                        "motetto://notice",
-                                        "The short recording was kept with your notes.",
-                                    );
-                                    Ok(())
-                                } else {
-                                    fs::remove_dir_all(dir).map_err(|e| e.to_string())
-                                }
-                            });
-                            if let Err(e) = result {
-                                let _ = app.emit(
-                                    "motetto://notice",
-                                    format!("Couldn't discard the short recording: {e}"),
-                                );
-                            }
-                        }
-                        recording = None;
-                        let _ = app.emit("motetto://library-changed", ());
-                    }
                     Job::Trash { id } => {
                         // Recoverable: Recently deleted keeps the audio and parts.json, and Write the
                         // notes again transcribes them later. It still needs its notes, hence the status.

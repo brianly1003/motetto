@@ -6,13 +6,13 @@ struct Fake {
     screens: Arc<Mutex<Vec<Option<ScreenPick>>>>,
     allowed: Arc<AtomicBool>,
     announce_ok: bool,
-    preferences: (u32, u32, bool),
+    preferences: (u32, bool),
     mode: Mode,
     modes: Arc<Mutex<Vec<String>>>,
     requests: Arc<Mutex<Vec<bool>>>,
 }
 impl Host for Fake {
-    fn preferences(&self) -> (u32, u32, bool) {
+    fn preferences(&self) -> (u32, bool) {
         self.preferences
     }
     fn mark(&self, id: &str, at_ms: u64) -> Result<(), String> {
@@ -62,7 +62,6 @@ impl Host for Fake {
             }
             Job::SaveClip { id } => format!("save-clip:{id}"),
             Job::Finish { .. } => "finish".into(),
-            Job::Discard { .. } => "discard".into(),
             Job::Trash { id } => format!("trash:{id}"),
             Job::Exit => "exit-job".into(),
         };
@@ -110,7 +109,7 @@ fn engine() -> Engine<Fake> {
             screens: Arc::default(),
             allowed: Arc::new(AtomicBool::new(true)),
             announce_ok: true,
-            preferences: (30, 20, false),
+            preferences: (30, false),
             mode: Mode::Ask,
             modes: Arc::default(),
             requests: Arc::default(),
@@ -173,15 +172,15 @@ fn deadline_wins_over_resume_and_processing_only_runs_once() {
     );
 }
 #[test]
-fn short_recording_discards_after_grace_and_releases_import_gate() {
+fn short_recording_finishes_after_grace() {
     let mut e = engine();
     e.action(Action::Start(None), 0).unwrap();
     e.action(Action::Stop(StopSource::Mouse), 2_000).unwrap();
     e.apply(Command::Tick, 11_999);
-    assert!(e.busy.load(Ordering::SeqCst));
+    assert!(!e.host.log.lock().unwrap().contains(&"finish".into()));
     e.apply(Command::Tick, 12_000);
-    assert!(!e.busy.load(Ordering::SeqCst));
-    assert!(e.host.log.lock().unwrap().contains(&"discard".into()));
+    assert!(e.busy.load(Ordering::SeqCst));
+    assert!(e.host.log.lock().unwrap().contains(&"finish".into()));
 }
 #[test]
 fn discard_in_the_pill_trashes_without_notes_and_releases_the_gate() {
@@ -564,12 +563,11 @@ fn record_now_while_asking_records_the_asked_call_or_releases_the_gate() {
 }
 
 #[test]
-fn saved_preferences_set_timers_discard_and_initial_size() {
+fn saved_preferences_set_timers_and_initial_size() {
     let mut e = engine();
-    e.host.preferences = (10, 0, true);
+    e.host.preferences = (10, true);
     e.action(Action::Start(None), 0).unwrap();
     assert_eq!(e.session.idle_stop_s, 10);
-    assert_eq!(e.session.discard_short_s, 0);
     assert_eq!(e.session.app.companion.size, CompanionSize::Dot);
     e.action(Action::Size(CompanionSize::Sidecar), 100).unwrap();
     e.action(Action::Pause, 200).unwrap();
@@ -578,7 +576,6 @@ fn saved_preferences_set_timers_discard_and_initial_size() {
     e.action(Action::Stop(StopSource::Mouse), 1000).unwrap();
     e.apply(Command::Tick, 11000);
     assert!(e.host.log.lock().unwrap().contains(&"finish".into()));
-    assert!(!e.host.log.lock().unwrap().contains(&"discard".into()));
 }
 
 #[test]
