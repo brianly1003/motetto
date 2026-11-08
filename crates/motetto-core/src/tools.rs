@@ -97,6 +97,41 @@ pub fn spawn(command: &mut Command) -> io::Result<Child> {
     command.spawn().map_err(|error| explain(command, error))
 }
 
+/// Stops a long-running child (the notes and speech servers) as soon as this process is gone,
+/// however it ended: a Quit cleans up itself, but a crash, Force Quit or `kill` leaves the child
+/// running with no owner until the next launch finds its pid file. A small `sh` loop outlives
+/// us to do it. It stops watching once the child is gone, and kills only while the pid still
+/// runs `program`, so a pid reused by another program is never touched.
+/// Windows: not yet; a job object with KILL_ON_JOB_CLOSE would do the same.
+pub fn stop_with_parent(child: u32, program: &Path) -> io::Result<()> {
+    if cfg!(windows) {
+        return Ok(());
+    }
+    let mut watcher = watcher(std::process::id(), child, program).spawn()?;
+    // Reaped here, so a watcher that ends while we run doesn't stay a zombie.
+    std::thread::spawn(move || {
+        let _ = watcher.wait();
+    });
+    Ok(())
+}
+
+fn watcher(parent: u32, child: u32, program: &Path) -> Command {
+    // $1 parent, $2 child, $3 program: arguments, never spliced into the script.
+    const WATCH: &str = r#"while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 1; done
+kill -0 "$1" 2>/dev/null && exit 0
+[ "$(ps -o comm= -p "$2")" = "$3" ] && kill "$2""#;
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", WATCH, "motetto-watch"])
+        .arg(parent.to_string())
+        .arg(child.to_string())
+        .arg(program)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
 /// The `resolve` message for a bundled program `command` could not start; else `error` as is.
 pub fn explain(command: &Command, error: io::Error) -> io::Error {
     explain_in(BUNDLED_DIR.get().map(PathBuf::as_path), command, error)
@@ -225,6 +260,72 @@ fn wait(child: &mut Child, cancel: &AtomicBool) -> io::Result<ExitStatus> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A stand-in "server" (`sleep`) watched for a stand-in "app" (another `sleep`).
+    #[cfg(unix)]
+    fn watched(app_secs: &str, program: &str) -> (Child, Child, Child) {
+        let app = Command::new("/bin/sleep").arg(app_secs).spawn().unwrap();
+        let server = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let watch = watcher(app.id(), server.id(), Path::new(program))
+            .spawn()
+            .unwrap();
+        (app, server, watch)
+    }
+
+    #[cfg(unix)]
+    fn ends_within(child: &mut Child, limit: Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < limit {
+            if child.try_wait().unwrap().is_some() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_server_stops_when_the_app_is_killed() {
+        let (mut app, mut server, mut watch) = watched("30", "/bin/sleep");
+        app.kill().unwrap(); // like Force Quit: no cleanup runs
+        app.wait().unwrap();
+        assert!(
+            ends_within(&mut server, Duration::from_secs(4)),
+            "server still running"
+        );
+        assert!(ends_within(&mut watch, Duration::from_secs(2)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_program_on_the_pid_is_never_killed() {
+        let (mut app, mut server, mut watch) = watched(
+            "30",
+            "/Applications/Motetto.app/Contents/MacOS/llama-server",
+        );
+        app.kill().unwrap();
+        app.wait().unwrap();
+        assert!(ends_within(&mut watch, Duration::from_secs(4)));
+        assert!(
+            server.try_wait().unwrap().is_none(),
+            "killed a program it doesn't own"
+        );
+        server.kill().unwrap();
+        server.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watcher_ends_with_the_server_while_the_app_runs() {
+        let (mut app, mut server, mut watch) = watched("30", "/bin/sleep");
+        server.kill().unwrap(); // the idle stop
+        server.wait().unwrap();
+        assert!(ends_within(&mut watch, Duration::from_secs(3)));
+        assert!(app.try_wait().unwrap().is_none());
+        app.kill().unwrap();
+        app.wait().unwrap();
+    }
     use super::*;
     use std::fs;
     fn missing_error() -> io::Error {
