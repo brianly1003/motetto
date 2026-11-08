@@ -340,32 +340,20 @@ fn grace_expiry_finishes_at_threshold_and_rejects_late_resume() {
 }
 
 #[test]
-fn short_recording_is_kept_through_grace_then_discarded_once() {
-    let (s, _) = step(start(fresh(), false), 19_999, Command::StopRecording);
-    assert!(work(step(s.clone(), 29_998, Command::Tick).1).is_empty());
-    let (s, effects) = step(s, 29_999, Command::Tick);
-    assert_eq!(s.app.state, SessionState::Idle);
-    assert_eq!(
-        work(effects),
-        vec![
-            Effect::Discard {
-                meeting_id: "m1".into()
-            },
-            Effect::NotifyShort { seconds: 20 }
-        ]
-    );
-    assert!(step(s, 30_000, Command::Tick).1.is_empty());
-}
-
-#[test]
-fn zero_discard_setting_keeps_even_zero_length_recordings() {
-    let mut s = fresh();
-    s.discard_short_s = 0;
-    let (s, _) = step(start(s, false), 0, Command::StopRecording);
-    assert!(matches!(
-        step(s, 10_000, Command::Tick).0.app.state,
-        SessionState::Finishing { .. }
-    ));
+fn short_recording_is_kept_and_finished_after_grace() {
+    for length in [0, 3_000, 10_000] {
+        let (s, _) = step(start(fresh(), false), length, Command::StopRecording);
+        assert!(work(step(s.clone(), length + 9_999, Command::Tick).1).is_empty());
+        let (s, effects) = step(s, length + 10_000, Command::Tick);
+        assert!(matches!(s.app.state, SessionState::Finishing { .. }));
+        assert_eq!(
+            work(effects),
+            vec![Effect::Finish {
+                meeting_id: "m1".into(),
+                notes_only: false
+            }]
+        );
+    }
 }
 
 #[test]
@@ -555,7 +543,7 @@ fn notes_only_needs_no_audio_permissions_ignores_idle_and_skips_grace() {
 }
 
 #[test]
-fn quit_question_cancel_and_stop_and_save_bypass_short_discard() {
+fn quit_question_cancel_and_stop_and_save_finish_the_call() {
     for stopped in [false, true] {
         let mut s = start(fresh(), false);
         if stopped {
@@ -979,14 +967,14 @@ fn cancelling_quit_during_finishing_hides_companion_again() {
 }
 
 #[test]
-fn quit_pending_short_expiry_discards_and_exits() {
+fn quit_pending_short_expiry_finishes_then_exits() {
     let s = step(start(fresh(), false), 1, Command::StopRecording).0;
     let s = step(s, 2, Command::RequestQuit).0;
     let (s, effects) = step(s, 10_001, Command::Tick);
+    assert!(matches!(s.app.state, SessionState::Finishing { .. }));
+    assert!(!effects.contains(&Effect::Exit));
+    let (s, effects) = step(s, 10_100, finished());
     assert_eq!(s.app.state, SessionState::Idle);
-    assert!(effects.contains(&Effect::Discard {
-        meeting_id: "m1".into()
-    }));
     assert!(effects.contains(&Effect::Exit));
 }
 
@@ -1064,13 +1052,20 @@ fn expiry_that_exits_cannot_start_another_recording() {
             setup: None,
         },
     );
-    assert_eq!(s.app.state, SessionState::Idle);
-    assert!(effects.contains(&Effect::Exit));
+    // The expired call finishes and the quit waits for its notes; m2 never records.
+    assert_eq!(
+        s.app.state,
+        SessionState::Finishing {
+            meeting_id: "m1".into()
+        }
+    );
+    assert!(s.app.quit_pending);
     assert!(
         !effects
             .iter()
             .any(|effect| matches!(effect, Effect::StartCapture { .. }))
     );
+    assert!(step(s, 10_100, finished()).1.contains(&Effect::Exit));
 }
 
 #[test]

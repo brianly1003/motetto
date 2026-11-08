@@ -121,9 +121,6 @@ pub enum Job {
         /// Call apps heard in the meeting (Zoom, Microsoft Teams...), saved in meeting.json.
         apps: Vec<String>,
     },
-    Discard {
-        id: String,
-    },
     /// Discard from the Stopped Pill: into Recently deleted, no notes.
     Trash {
         id: String,
@@ -132,8 +129,8 @@ pub enum Job {
 
 /// Native effects are injected so controller ordering can be tested without opening a microphone.
 pub trait Host: Send + 'static {
-    fn preferences(&self) -> (u32, u32, bool) {
-        (30, 20, false)
+    fn preferences(&self) -> (u32, bool) {
+        (30, false)
     }
     fn mark(&self, id: &str, at_ms: u64) -> Result<(), String>;
     /// `request` may show the OS permission prompts; `false` only queries (a detected call).
@@ -680,9 +677,7 @@ impl<H: Host> Engine<H> {
         let now = self
             .clock
             .map_or(now, |origin| (origin.elapsed().as_millis() as u64).max(now));
-        let (idle, discard, _) = self.host.preferences();
-        self.session.idle_stop_s = idle;
-        self.session.discard_short_s = discard;
+        self.session.idle_stop_s = self.host.preferences().0;
         let starting = matches!(
             self.session.app.state,
             SessionState::Idle | SessionState::Asking { .. }
@@ -702,7 +697,7 @@ impl<H: Host> Engine<H> {
         self.effects(effects, now);
         if starting
             && self.session.app.state == SessionState::Recording
-            && self.host.preferences().2
+            && self.host.preferences().1
         {
             self.apply(Command::SetCompanionSize(CompanionSize::Dot), now);
         }
@@ -780,14 +775,7 @@ impl<H: Host> Engine<H> {
                     apps: self.session.app_names(),
                 }),
                 Effect::SaveClip { meeting_id } => self.host.job(Job::SaveClip { id: meeting_id }),
-                Effect::Discard { meeting_id } => self.host.job(Job::Discard { id: meeting_id }),
                 Effect::Trash { meeting_id } => self.host.job(Job::Trash { id: meeting_id }),
-                Effect::NotifyShort { seconds } => {
-                    self.host.notice(&format!(
-                        "Recording under {seconds} seconds discarded unless capture failed."
-                    ));
-                    Ok(())
-                }
                 Effect::NotifyStillPaused => {
                     self.host.notice(STILL_PAUSED);
                     Ok(())

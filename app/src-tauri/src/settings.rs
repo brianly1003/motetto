@@ -99,7 +99,6 @@ pub struct Settings {
     pub app_modes: BTreeMap<String, Mode>,
     pub apps: Vec<AppRule>,
     pub idle_stop_s: u32,
-    pub discard_short_s: u32,
     /// Catalog ids (empty until chosen); the `*_path` fields are what the engines read.
     pub speech_model: String,
     pub notes_model: String,
@@ -157,7 +156,6 @@ impl Default for Settings {
             app_modes: BTreeMap::new(),
             apps: Vec::new(),
             idle_stop_s: 30,
-            discard_short_s: 20,
             speech_model: String::new(),
             notes_model: String::new(),
             onboarding_done: false,
@@ -343,10 +341,9 @@ impl Settings {
         }
         if self.version != 1
             || !(10..=300).contains(&self.idle_stop_s)
-            || self.discard_short_s > 120
             || !(8000..=48000).contains(&self.part_chars)
         {
-            return Err("Use 10-300 idle seconds, 0-120 discard seconds and 8000-48000 characters per part.".into());
+            return Err("Use 10-300 idle seconds and 8000-48000 characters per part.".into());
         }
         if self
             .mic_device

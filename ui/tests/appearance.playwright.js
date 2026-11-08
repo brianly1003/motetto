@@ -15,7 +15,7 @@ async page => {
     await ref.getByRole('button', { name: 'Settings', exact: true }).click();
     await ref.getByRole('tab', { name: 'General', exact: true }).click();
     await p.addInitScript(() => {
-      const defaults = { version: 1, appearance: 'system', notes_folder: '~/Documents/Motetto', open_at_login: false, notes_language: 'same_as_call', ask_on_call: true, apps: [], app_modes: {}, idle_stop_s: 30, discard_short_s: 20, sounds: true, companion: { default_size: 'pill', captions: true }, shortcuts: Object.fromEntries(['S', 'M', 'J', 'N', 'Space', 'H', 'P'].map(k => [k, `Ctrl+Alt+${k}`])) };
+      const defaults = { version: 1, appearance: 'system', notes_folder: '~/Documents/Motetto', open_at_login: false, notes_language: 'same_as_call', ask_on_call: true, apps: [], app_modes: {}, idle_stop_s: 30, sounds: true, companion: { default_size: 'pill', captions: true }, shortcuts: Object.fromEntries(['S', 'M', 'J', 'N', 'Space', 'H', 'P'].map(k => [k, `Ctrl+Alt+${k}`])) };
       const callbacks = {}, listeners = {};
       let next = 0;
       window.emit = (event, payload) => (listeners[event] || []).forEach(id => callbacks[id]?.({ event, id, payload }));

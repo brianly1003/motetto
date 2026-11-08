@@ -645,18 +645,12 @@ struct Desktop {
     jobs: mpsc::Sender<Job>,
 }
 impl Host for Desktop {
-    fn preferences(&self) -> (u32, u32, bool) {
+    fn preferences(&self) -> (u32, bool) {
         self.app
             .state::<crate::settings::Store>()
             .get()
-            .map(|s| {
-                (
-                    s.idle_stop_s,
-                    s.discard_short_s,
-                    s.companion.default_size == "dot",
-                )
-            })
-            .unwrap_or((30, 20, false))
+            .map(|s| (s.idle_stop_s, s.companion.default_size == "dot"))
+            .unwrap_or((30, false))
     }
 
     fn mark(&self, id: &str, at_ms: u64) -> Result<(), String> {
