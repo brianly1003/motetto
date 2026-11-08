@@ -32,7 +32,6 @@ html, body { background: transparent !important; overflow: hidden; }
 .capbar .vr { width: 1px; height: 30px; margin: 0 4px; background: var(--hud-line); }
 .capbar button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
 .capbar button:hover { background: var(--hud-hover); }
-.capbar button:focus-visible { box-shadow: inset 0 0 0 2px var(--pick); }
 .capbar .capx { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.1); }
 .capbar .capx svg { width: 13px; height: 13px; }
 .capbar .modes { display: flex; gap: 2px; }
@@ -102,7 +101,6 @@ html, body { background: transparent !important; overflow: hidden; }
 .capcd .acts button:hover { background: rgba(255,255,255,.18); }
 .capcd .acts .go { background: var(--rec); }
 .capcd .acts .go:hover { background: #e0463a; }
-.capcd .acts button:focus-visible { outline: 2px solid #8fa8ff; outline-offset: 1px; }
 .capcd small { font-size: 11px; color: rgba(243,244,239,.5); }
 .capmenu .note svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
 .capbar .mode span { white-space: nowrap; }

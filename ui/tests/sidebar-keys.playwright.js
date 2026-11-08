@@ -39,7 +39,7 @@ async (page) => {
     };
     await target.keyboard.press('ArrowUp');await check(0);
     await target.keyboard.press('ArrowDown');await check(1);
-    if(!await rows.nth(1).evaluate(e=>getComputedStyle(e).boxShadow.includes('1px')))throw Error('Sidebar focus should use a neutral hairline');
+    if(await rows.nth(1).evaluate(e=>getComputedStyle(e).boxShadow.includes('inset')))throw Error('Sidebar focus draws a ring');
     const title=await rows.nth(1).locator('strong,.mt').innerText();
     if(!(await target.locator(target===p?'.workspace':'#doc').innerText()).includes(title))throw Error('Detail did not open: '+title);
     await target.keyboard.press('ArrowDown');await check(2);

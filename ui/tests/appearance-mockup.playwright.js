@@ -59,7 +59,7 @@ async (page) => {
   await p.keyboard.press('ArrowRight');
   if (!await radio('Light').isChecked()) throw Error('Arrow key did not choose Light');
   const focus = await p.locator('.appearance-option').filter({ has: p.getByRole('radio', { name: 'Light', exact: true }) }).locator('.appearance-preview').evaluate(e => getComputedStyle(e).boxShadow);
-  if (focus === 'none') throw Error('Keyboard focus has no preview indicator');
+  if (focus !== 'none') throw Error('Keyboard focus draws a ring on the preview: ' + focus);
   // Check the control at the minimum settings width without changing the desktop demo framing.
   await p.locator('.set').evaluate(e => { e.style.width = '720px'; });
   if (await group.evaluate(e => e.scrollWidth > e.clientWidth)) throw Error('Appearance choices overflow');

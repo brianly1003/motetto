@@ -53,10 +53,10 @@ async (page) => {
     // The chip opens the script menu (▾) only when presenting: a rehearsal belongs to one script.
     for (const [who, p] of [['mockup', m], ['app', a]])
       if (/▾/.test(await p.locator('.ptchip').first().innerText()) === rehearsing) diff.push(`${who}: chip ▾ ${rehearsing ? 'while rehearsing' : 'missing'}`);
-    // One focus ring, the app-wide one; the editor has none (the editing strip is outlined).
+    // No focus rings anywhere, the mockup's included.
     const ring = p => p.locator('.ptnav button').first().evaluate(b => { b.disabled = false; b.focus({ focusVisible: true }); const cs = getComputedStyle(b); return `${cs.boxShadow} | outline ${cs.outlineStyle}`; });
     const [mockRing, appRing] = [await ring(m), await ring(a)];
-    if (mockRing !== appRing) diff.push(`focus ring: mockup ${mockRing}, app ${appRing}`);
+    for (const [who, r] of [['mockup', mockRing], ['app', appRing]]) if (r !== 'none | outline none') diff.push(`${who}: focus ring ${r}`);
     await m.locator('#ptEdit').click();
     await a.evaluate(() => window.emit('motetto://prompter-editing', true));
     for (const [who, p] of [['mockup', m], ['app', a]]) {
