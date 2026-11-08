@@ -34,7 +34,7 @@ export const deletable = (status: string) => status !== "Recording" && status !=
 
 /** `shown`: the notes as on screen (a Read in translation), which Copy copies. `reading`: its
  *  language, which Write the notes again offers first; `ask` opens that question in a language. */
-export default function MeetingActions({ meeting, shown, reading, ask, hasAudio, onChanged, onError, onToast, onRename, onDelete, onLock }: { meeting: Meeting; shown?: string; reading?: string | null; ask?: { code: string } | null; hasAudio: boolean; onChanged: (deleted: boolean) => Promise<void>; onError: (message: string) => void; onToast?: (text: string) => void; onRename: () => void; onDelete: () => void; onLock: (locked: boolean) => void }) {
+export default function MeetingActions({ meeting, shown, reading, ask, hasAudio, clip, onChanged, onError, onToast, onRename, onDelete, onLock }: { meeting: Meeting; /** Save a clip: why it is unavailable (a string), or how to open it. */ clip?: { blocked: string | null; open: () => void }; shown?: string; reading?: string | null; ask?: { code: string } | null; hasAudio: boolean; onChanged: (deleted: boolean) => Promise<void>; onError: (message: string) => void; onToast?: (text: string) => void; onRename: () => void; onDelete: () => void; onLock: (locked: boolean) => void }) {
   const locked = meeting.summary.locked;
   const [menu, setMenu] = useState<"copy" | "more" | null>(null);
   const [confirm, setConfirm] = useState<"regenerate" | "retranscribe" | null>(null);
@@ -99,6 +99,7 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       <MenuItem icon="rename" label={s.rename} disabled={locked} title={locked ? s.lockedHint : undefined} onClick={() => { setMenu(null); onRename(); }}/>
       <MenuItem icon="again" label={s.regenerate} disabled={locked} title={locked ? s.lockedHint : undefined} onClick={() => askRegenerate()}/>
       <MenuItem icon="wave" label={s.retranscribe} disabled={locked || !hasAudio} title={locked ? s.lockedHint : !hasAudio ? s.noAudio : undefined} onClick={() => { setConfirm("retranscribe"); setMenu(null); }}/>
+      {clip && <MenuItem icon="cut" label={s.clipMenu} disabled={!!clip.blocked} title={clip.blocked ?? undefined} onClick={() => { setMenu(null); clip.open(); }}/>}
       <MenuItem icon="folder" label={s.reveal} onClick={() => run("reveal")}/>
       <div className="sep"/>
       <MenuSwitch icon="lock" label={s.lockNotes} checked={locked} onChange={onLock}/>

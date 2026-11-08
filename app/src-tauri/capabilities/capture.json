@@ -1,0 +1,10 @@
+{
+  "identifier": "capture",
+  "description": "The screen setup overlays keep one setup across displays by sending it to each other.",
+  "windows": [
+    "capture-*"
+  ],
+  "permissions": [
+    "core:event:allow-emit"
+  ]
+}

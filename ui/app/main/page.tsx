@@ -223,7 +223,7 @@ export default function Main(){
   },[liveId]);
   // The live meeting's page follows the session: Stopped, then Writing the notes, then Ready.
   useEffect(()=>{if(openId.current&&openId.current===live?.meeting_id)void reread(openId.current);},[live?.state.type]);
-  async function recordNow(){setTrashOpen(false);setScriptsOpen(false);await session.act(ipc.startRecording);}
+  async function recordNow(){setTrashOpen(false);setScriptsOpen(false);await session.act(ipc.recordNow);}
   // Recover = Write the notes again on the saved parts (it transcribes them first), one meeting at a
   // time on its own progress page; Discard = Recently deleted, with Undo.
   async function recover(ids:string[]){for(const id of ids){await select(id);notify(s.recovered);try{await ipc.meetingAction(id,"regenerate");}catch(e){setError(String(e));break;}finally{await refresh();}}}
@@ -258,7 +258,7 @@ export default function Main(){
           <span><span className="mwhen">{meetingDate(meeting.created_ms)}</span>{meeting.has_video&&<VideoAvailable/>}{snippet&&<b className="where">{s.matchedIn[snippet.source]}{snippet.at_ms!=null&&<> · {timeLabel(snippet.at_ms)}</>}</b>}</span></button>;})}</div>
         :GROUPS.map(group=>{const items=shown.filter(meeting=>meetingGroup(meeting.created_ms)===group);return items.length?<div key={group}><div className="list-heading">{group}<span>{items.length}</span></div>{items.map(meeting=>{const current=!trashOpen&&selected?.summary.id===meeting.id;return <div key={meeting.id} className={`mrow${rowMenu?.id===meeting.id?" open":""}`} onContextMenu={event=>{event.preventDefault();setRowMenu({id:meeting.id,left:event.clientX,top:event.clientY});}}>
           <button className={`meeting-row ${current?"selected":""}`} aria-current={current?"page":undefined} onClick={()=>select(meeting.id)}><strong title={meetingTitle(meeting)}>{meetingTitle(meeting)}</strong><span><span className="mwhen" title={`${meetingDate(meeting.created_ms)}${meeting.duration_ms!=null?` · ${durationLabel(meeting.duration_ms)}`:""}`}>{meetingDate(meeting.created_ms)}{meeting.duration_ms!=null?` · ${durationLabel(meeting.duration_ms)}`:""}</span><span className="mflags">{meeting.has_video&&<VideoAvailable/>}{(()=>{const type=live?.meeting_id===meeting.id?live.state.type:null;
-            const [cls,label]=type==="Recording"?["rec",s.chipRecording]:type==="Paused"?["plain",s.paused]:type==="Stopped"?["plain",s.chipStopped]:job?.id===meeting.id?["attention",job.transcribe?s.chipTranscribing:s.finishing]:meeting.status==="Ready"?["ready",s.ready]:meeting.status==="Finishing"||type==="Finishing"?["attention",s.finishing]:["attention",s.failed];
+            const [cls,label]=type==="Recording"?["rec",s.chipRecording]:type==="Paused"?["plain",s.paused]:type==="Stopped"?["plain",s.chipStopped]:job?.id===meeting.id?["attention",job.transcribe?s.chipTranscribing:s.finishing]:meeting.status==="Ready"?(meeting.kind==="screen"?["plain",s.videoOnly]:["ready",s.ready]):meeting.status==="Finishing"||type==="Finishing"?["attention",s.finishing]:["attention",s.failed];
             return <i className={cls}>{label}</i>;})()}</span></span></button>
           <button className="rowmore" aria-label={`${s.rowActions} ${meetingTitle(meeting)}`} aria-haspopup="menu" aria-expanded={rowMenu?.id===meeting.id} onClick={event=>{
             if(rowMenu?.id===meeting.id){setRowMenu(null);return;}

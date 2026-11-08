@@ -6,14 +6,16 @@ use crate::watch::{AppRule, title_matches};
 pub enum Preset {
     Sharp,
     Smaller,
+    /// Crisp text and smooth scrolling; several times the size (owner 2026-11-07).
+    High,
 }
 
 impl Preset {
     pub fn parse(value: &str) -> Self {
-        if value == "smaller" {
-            Self::Smaller
-        } else {
-            Self::Sharp
+        match value {
+            "smaller" => Self::Smaller,
+            "high" => Self::High,
+            _ => Self::Sharp,
         }
     }
 
@@ -21,6 +23,7 @@ impl Preset {
         match self {
             Self::Sharp => (1920, 1080),
             Self::Smaller => (1280, 720),
+            Self::High => (2560, 1440),
         }
     }
 
@@ -28,6 +31,7 @@ impl Preset {
         match self {
             Self::Sharp => 15,
             Self::Smaller => 10,
+            Self::High => 30,
         }
     }
 
@@ -35,6 +39,7 @@ impl Preset {
         match self {
             Self::Sharp => 350_000,
             Self::Smaller => 200_000,
+            Self::High => 2_500_000,
         }
     }
 }
@@ -53,14 +58,39 @@ pub fn fit_size(width: f64, height: f64, preset: Preset) -> (u32, u32) {
     )
 }
 
+#[derive(Debug, Clone)]
 pub struct WindowInfo {
     pub id: u32,
     pub bundle_id: String,
     pub title: String,
+    pub x: f64,
+    pub y: f64,
     pub width: f64,
     pub height: f64,
+    pub app: String,
+    /// Front-to-back order index; 0 is the front-most window.
+    pub layer: i64,
+    /// Window Server level: 0 for app windows; the Dock, menu bar and wallpaper are not 0.
+    pub level: i32,
     pub on_screen: bool,
     pub own: bool,
+}
+
+/// Windows a person can point at: app windows on screen, not ours, at least 200 by 150, in the
+/// order given.
+pub fn pickable(all: &[WindowInfo]) -> Vec<WindowInfo> {
+    all.iter()
+        .filter(|w| {
+            w.on_screen
+                && w.level == 0
+                && !w.own
+                && w.width.is_finite()
+                && w.height.is_finite()
+                && w.width >= 200.0
+                && w.height >= 150.0
+        })
+        .cloned()
+        .collect()
 }
 
 pub fn pick_window(windows: &[WindowInfo], rule: &AppRule, rules: &[AppRule]) -> Option<u32> {
@@ -156,16 +186,72 @@ impl Moments {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A rectangle in points, relative to its display's origin.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+pub struct AreaRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScreenTarget {
     Window(u32),
     Display(u32),
+    Area { display: u32, rect: AreaRect },
+}
+
+/// Clamp an area to its display (points) and size its picture: the clamped rect, then the
+/// output pixels, never upscaled past `rect * scale`. Areas under 32 by 32 points are refused.
+pub fn area_rect(
+    rect: AreaRect,
+    display_w: f64,
+    display_h: f64,
+    scale: f64,
+    preset: Preset,
+) -> Result<(AreaRect, u32, u32), String> {
+    if ![
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        display_w,
+        display_h,
+        scale,
+    ]
+    .iter()
+    .all(|v| v.is_finite())
+        || scale <= 0.0
+    {
+        return Err("the area isn't a valid rectangle".into());
+    }
+    let x = rect.x.clamp(0.0, display_w.max(0.0));
+    let y = rect.y.clamp(0.0, display_h.max(0.0));
+    let width = (rect.x + rect.width).min(display_w) - x;
+    let height = (rect.y + rect.height).min(display_h) - y;
+    if width < 32.0 || height < 32.0 {
+        return Err("the area is too small; pick at least 32 by 32 points".into());
+    }
+    let (out_w, out_h) = fit_size(width * scale, height * scale, preset);
+    Ok((
+        AreaRect {
+            x,
+            y,
+            width,
+            height,
+        },
+        out_w,
+        out_h,
+    ))
 }
 
 pub struct ScreenCapture {
     pub target: ScreenTarget,
     pub preset: Preset,
     pub cursor: bool,
+    /// Draw a ring where the mouse clicks (macOS 15 and later).
+    pub clicks: bool,
     pub path: String,
     pub scale: f64,
     pub progress: Option<std::sync::mpsc::SyncSender<VideoOutcome>>,
@@ -230,6 +316,67 @@ mod tests {
         }
         assert_eq!(Preset::parse("other"), Preset::Sharp);
         assert_eq!(Preset::parse("smaller").video_bps(), 200_000);
+        assert_eq!(fit_size(3456.0, 2234.0, Preset::High), (2226, 1440));
+        let high = Preset::parse("high");
+        assert_eq!((high.fps(), high.video_bps()), (30, 2_500_000));
+    }
+
+    fn area(x: f64, y: f64, width: f64, height: f64) -> AreaRect {
+        AreaRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn area_inside_keeps_rect() {
+        let rect = area(100.0, 100.0, 800.0, 500.0);
+        assert_eq!(
+            area_rect(rect, 1512.0, 982.0, 2.0, Preset::Sharp),
+            Ok((rect, 1600, 1000))
+        );
+    }
+
+    #[test]
+    fn area_past_edge_is_clamped() {
+        let (rect, _, _) = area_rect(
+            area(1400.0, 900.0, 400.0, 300.0),
+            1512.0,
+            982.0,
+            2.0,
+            Preset::Sharp,
+        )
+        .unwrap();
+        assert_eq!((rect.width, rect.height), (112.0, 82.0));
+    }
+
+    #[test]
+    fn tiny_area_is_refused() {
+        assert!(
+            area_rect(
+                area(0.0, 0.0, 20.0, 20.0),
+                1512.0,
+                982.0,
+                2.0,
+                Preset::Sharp
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn area_never_upscales_and_is_even() {
+        let (_, width, height) = area_rect(
+            area(0.0, 0.0, 301.0, 201.0),
+            1512.0,
+            982.0,
+            1.0,
+            Preset::Sharp,
+        )
+        .unwrap();
+        assert_eq!((width, height), (300, 200));
     }
 
     fn window(id: u32, bundle: &str, title: &str, width: f64, height: f64) -> WindowInfo {
@@ -237,11 +384,41 @@ mod tests {
             id,
             bundle_id: bundle.into(),
             title: title.into(),
+            x: 0.0,
+            y: 0.0,
             width,
             height,
+            app: String::new(),
+            layer: 0,
+            level: 0,
             on_screen: true,
             own: false,
         }
+    }
+
+    #[test]
+    fn pickable_drops_own_small_and_offscreen() {
+        let mut own = window(1, "com.motetto.app", "Motetto", 800.0, 600.0);
+        own.own = true;
+        let small = window(2, "com.example.a", "Small", 150.0, 100.0);
+        let mut hidden = window(3, "com.example.b", "Hidden", 800.0, 600.0);
+        hidden.on_screen = false;
+        // The Dock's full-screen window, as macOS lists it.
+        let mut dock = window(6, "com.apple.dock", "Dock", 1728.0, 1117.0);
+        dock.level = 20;
+        let good_a = window(4, "com.example.c", "A", 800.0, 600.0);
+        let good_b = window(5, "com.example.d", "B", 200.0, 150.0);
+        let ids: Vec<u32> = pickable(&[own, small, hidden, dock, good_a, good_b])
+            .iter()
+            .map(|w| w.id)
+            .collect();
+        assert_eq!(ids, [4, 5]);
+    }
+
+    #[test]
+    fn pickable_lists_any_app() {
+        let notes = window(1, "com.example.notes", "Notes", 800.0, 600.0);
+        assert_eq!(pickable(&[notes]).len(), 1);
     }
 
     #[test]

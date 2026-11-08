@@ -188,12 +188,10 @@ fn handle(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
     let controller = app.state::<Controller>();
     let state = controller.state()?;
     if key == "S" {
-        return controller.action(match state.state {
-            SessionState::Recording | SessionState::Paused => Action::Stop,
-            SessionState::Stopped { .. } => Action::Resume,
-            SessionState::Idle => Action::Start,
-            _ => return Ok(()),
-        });
+        return match record_key(&state) {
+            Some(action) => controller.action(action),
+            None => Ok(()),
+        };
     }
     if state.state != SessionState::Recording {
         return Ok(());
@@ -221,6 +219,21 @@ fn handle(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
         _ => {}
     }
     Ok(())
+}
+/// The record key: Stop, Resume, or open the screen setup when nothing is recording. A clip
+/// held behind a call question is still recording, so the key stops it.
+pub fn record_key(state: &motetto_core::events::AppState) -> Option<Action> {
+    Some(match &state.state {
+        SessionState::Recording | SessionState::Paused => {
+            Action::Stop(crate::controller::StopSource::Keyboard)
+        }
+        SessionState::Asking { .. } if state.held_clip.is_some() => {
+            Action::Stop(crate::controller::StopSource::Keyboard)
+        }
+        SessionState::Stopped { .. } => Action::Resume,
+        SessionState::Idle => Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
+        _ => return None,
+    })
 }
 pub fn open_notes(app: &tauri::AppHandle, jot: bool) {
     let sharing = app

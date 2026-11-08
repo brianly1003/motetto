@@ -2,7 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod bookmarks;
 mod calls;
+mod capture_overlay;
 mod catalog;
+mod clicks;
+mod clip;
 mod companion;
 mod controller;
 mod desktop;
@@ -16,6 +19,9 @@ mod library_commands;
 mod live;
 mod meeting_actions;
 mod meeting_media;
+mod mic_preview;
+#[cfg(target_os = "macos")]
+mod mic_preview_macos;
 mod microphone;
 mod model_store;
 mod my_notes;
@@ -27,6 +33,7 @@ mod playback;
 #[cfg(target_os = "macos")]
 mod playback_macos;
 mod prompter;
+mod rec_frame;
 mod recording;
 mod recording_screen;
 mod rehearse;
@@ -44,6 +51,8 @@ mod speech;
 mod transcript_edits;
 mod translations;
 mod tray;
+mod trim;
+mod video_export;
 mod window_native;
 
 fn main() {

@@ -5,7 +5,7 @@ const window={choice:{kind:'CallWindow',app_id:'zoom'},name:'Zoom window'},displ
 test('screen defaults, labels and share-end transitions',()=>{
  const options=[{pick:window,sub:''},{pick:display,sub:''}];
  assert.deepEqual(defaultPick(options,'call_window'),window);assert.deepEqual(defaultPick(options,'display'),display);assert.equal(defaultPick([],'display'),null);
- assert.equal(pillLabel(null),'Record the screen too');assert.equal(pillLabel({pick:window,while_sharing:null,waiting:false}),'Recording the screen: Zoom window');assert.equal(sizeLabel('smaller'),'70 MB');
+ assert.equal(pillLabel(null),'Record the screen too');assert.equal(pillLabel({pick:window,while_sharing:null,waiting:false}),'Recording the screen: Zoom window');assert.equal(sizeLabel('smaller'),'120 MB');assert.equal(sizeLabel('sharp'),'200 MB');assert.equal(sizeLabel('high'),'1 GB');
  assert.ok(shareEnded({screen:{while_sharing:display}},{sharing:null}));assert.ok(!shareEnded({screen:{while_sharing:null}},{sharing:null}));
 });
 test('video mapping uses start-inclusive/end-exclusive part intervals and preserves gaps',()=>{

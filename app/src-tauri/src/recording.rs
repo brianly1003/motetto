@@ -5,7 +5,7 @@ use crate::{
 };
 use motetto_core::{
     config, correct,
-    events::{Event, Stage},
+    events::{Event, MicChoice, RecordSetup, ScreenChoice, Stage},
     summarize, transcribe,
 };
 use std::{
@@ -39,6 +39,8 @@ pub fn spawn(
                         stop,
                         screen,
                         while_sharing,
+                        setup,
+                        mouse_stop,
                     } => {
                         if recording.as_ref().is_none_or(|r| r.id != id) {
                             recording = Some(Recording {
@@ -50,124 +52,243 @@ pub fn spawn(
                         let Some(record) = recording.as_mut() else {
                             continue;
                         };
-                        let result = capture_part(&root, record, offset_ms, stop, |base, stop| {
-                            // The meeting exists from its first second: list it before capture, and
-                            // open it in the library (owner 2026-10-20: Record now from the tray
-                            // left the old meeting selected). Resume parts don't pull the view.
-                            let _ = app.emit("motetto://library-changed", ());
-                            if offset_ms == 0 {
-                                let _ = app.emit("motetto://open-meeting", id.clone());
-                            }
-                            // Live captions off (set by the speed test on a slow Mac): the call
-                            // is transcribed after Stop only.
-                            let settings = app.state::<crate::settings::Store>().get();
-                            if live_captions(settings.as_ref().ok()) {
-                                crate::live::start(
-                                    app.clone(),
-                                    id.clone(),
-                                    base.into(),
-                                    offset_ms,
-                                    stop.clone(),
-                                )?;
-                            }
-                            // The script strip follows the voice with or without live captions
-                            // (Apple on a Mac; Whisper only on the captions' server).
-                            crate::follow::start(
-                                app.clone(),
-                                format!("{base}.mic.wav").into(),
-                                stop.clone(),
-                                false,
-                            );
-                            #[cfg(target_os = "macos")]
-                            let result = {
-                                let mic = crate::microphone::for_capture(&app);
-                                let (mut picture, progress) = crate::recording_screen::prepare(
-                                    &app,
-                                    &results,
-                                    &id,
-                                    base,
-                                    offset_ms,
-                                    &stop,
-                                    screen.as_ref().map(|pick| (pick, while_sharing)),
-                                )
-                                .unwrap_or_else(|reason| {
-                                    let _ = results.send(Message::ScreenEnded {
-                                        id: id.clone(),
-                                        part: stop.clone(),
-                                        lost: false,
-                                        restart: false,
-                                        reason: Some(reason),
+                        let (mic_on, system_on) = tracks(setup.as_ref());
+                        let result = capture_part(
+                            &root,
+                            record,
+                            offset_ms,
+                            stop,
+                            setup.as_ref(),
+                            |base, stop| {
+                                // The meeting exists from its first second: list it before capture, and
+                                // open it in the library (owner 2026-10-20: Record now from the tray
+                                // left the old meeting selected). Resume parts don't pull the view.
+                                let _ = app.emit("motetto://library-changed", ());
+                                if offset_ms == 0 {
+                                    let _ = app.emit("motetto://open-meeting", id.clone());
+                                }
+                                // Live captions off (set by the speed test on a slow Mac): the call
+                                // is transcribed after Stop only. They need both tracks: a clip has
+                                // none, and one track is transcribed after Stop (one-track captions:
+                                // later).
+                                let settings = app.state::<crate::settings::Store>().get();
+                                // A screen recording's page names its frame rate, as recorded.
+                                if let (0, Ok(settings)) = (offset_ms, &settings) {
+                                    let fps = picture_preset(setup.as_ref(), settings).fps();
+                                    let _ = crate::bookmarks::update(&root, &id, |s| {
+                                        if let Some(facts) = s.facts.as_mut() {
+                                            facts.fps = fps.unsigned_abs();
+                                        }
                                     });
-                                    (None, None)
-                                });
-                                if stop.load(Ordering::Acquire) {
+                                }
+                                if live_captions(settings.as_ref().ok())
+                                    && mic_on
+                                    && system_on
+                                    && setup.as_ref().is_none_or(|s| s.notes)
+                                {
+                                    crate::live::start(
+                                        app.clone(),
+                                        id.clone(),
+                                        base.into(),
+                                        offset_ms,
+                                        stop.clone(),
+                                    )?;
+                                }
+                                // The script strip follows the voice with or without live captions
+                                // (Apple on a Mac; Whisper only on the captions' server).
+                                if mic_on {
+                                    crate::follow::start(
+                                        app.clone(),
+                                        format!("{base}.mic.wav").into(),
+                                        stop.clone(),
+                                        false,
+                                    );
+                                }
+                                #[cfg(target_os = "macos")]
+                                let result = {
+                                    let mic = match setup.as_ref().map(|s| &s.mic) {
+                                        None | Some(MicChoice::Default) => {
+                                            crate::microphone::for_capture(&app)
+                                        }
+                                        Some(MicChoice::Device { id }) => Some(id.clone()),
+                                        Some(MicChoice::Off) => None,
+                                    };
+                                    let (mut picture, progress) = crate::recording_screen::prepare(
+                                        &app,
+                                        &results,
+                                        &id,
+                                        base,
+                                        offset_ms,
+                                        &stop,
+                                        screen.as_ref().map(|pick| (pick, while_sharing)),
+                                    )
+                                    .unwrap_or_else(|reason| {
+                                        let _ = results.send(Message::ScreenEnded {
+                                            id: id.clone(),
+                                            part: stop.clone(),
+                                            lost: false,
+                                            restart: false,
+                                            reason: Some(reason),
+                                        });
+                                        (None, None)
+                                    });
+                                    // Chosen on the setup bar: the pointer always, click rings if asked.
+                                    if let (Some(picture), Some(setup)) =
+                                        (picture.as_mut(), setup.as_ref())
+                                    {
+                                        picture.cursor = true;
+                                        picture.clicks = setup.clicks;
+                                        if let Some(p) = &setup.picture {
+                                            picture.preset = motetto_core::video::Preset::parse(p);
+                                        }
+                                    }
+                                    if stop.load(Ordering::Acquire) {
+                                        picture.take();
+                                        if let Some(progress) = progress {
+                                            let _ = progress.join();
+                                        }
+                                        let empty = motetto_core::video::VideoOutcome {
+                                            path: format!("{base}.screen.mp4"),
+                                            width: 0,
+                                            height: 0,
+                                            moments_ms: vec![],
+                                            lost: false,
+                                            error: None,
+                                        };
+                                        crate::recording_screen::finish(
+                                            base,
+                                            offset_ms,
+                                            screen.as_ref(),
+                                            while_sharing,
+                                            &empty,
+                                            &app,
+                                        );
+                                        return Ok(vec![]);
+                                    }
+                                    // Click dots for a recorded picture, and the pointer against its
+                                    // target for the reach for Stop.
+                                    let clicks = picture.as_ref().and_then(|picture| {
+                                        let dir = std::path::Path::new(base).parent()?;
+                                        let target = crate::clicks::target(&picture.target);
+                                        Some(crate::clicks::start(&app, dir, offset_ms, target))
+                                    });
+                                    // The red frame outlines a window or an area while it records.
+                                    crate::rec_frame::set(picture.as_ref().map(|p| p.target));
+                                    let part_began = std::time::Instant::now();
+                                    let result = motetto_core::capture::record_with_levels(
+                                        base,
+                                        stop.clone(),
+                                        Some(app.state::<crate::live::State>().meters.clone()),
+                                        mic.as_deref(),
+                                        picture.as_ref(),
+                                        motetto_core::capture::Tracks {
+                                            mic: mic_on,
+                                            system: system_on,
+                                        },
+                                    )
+                                    .map_err(|e| e.to_string());
+                                    crate::rec_frame::set(None);
                                     picture.take();
+                                    // The last part decides: one not ended by a Stop click clears an
+                                    // earlier part's suggestion.
+                                    if let Some(clicks) = &clicks {
+                                        let stop_ms =
+                                            offset_ms + part_began.elapsed().as_millis() as u64;
+                                        let reach = if mouse_stop.load(Ordering::SeqCst) {
+                                            clicks.reach(stop_ms)
+                                        } else {
+                                            0
+                                        };
+                                        let _ = crate::bookmarks::set_reach(&root, &id, reach);
+                                    }
+                                    drop(clicks);
                                     if let Some(progress) = progress {
                                         let _ = progress.join();
                                     }
-                                    let empty = motetto_core::video::VideoOutcome {
-                                        path: format!("{base}.screen.mp4"),
-                                        width: 0,
-                                        height: 0,
-                                        moments_ms: vec![],
-                                        lost: false,
-                                        error: None,
-                                    };
-                                    crate::recording_screen::finish(
-                                        base,
-                                        offset_ms,
-                                        screen.as_ref(),
-                                        while_sharing,
-                                        &empty,
-                                        &app,
-                                    );
-                                    return Ok(vec![]);
-                                }
-                                let result = motetto_core::capture::record_with_levels(
-                                    base,
-                                    stop.clone(),
-                                    Some(app.state::<crate::live::State>().meters.clone()),
-                                    mic.as_deref(),
-                                    picture.as_ref(),
-                                )
-                                .map_err(|e| e.to_string());
-                                picture.take();
-                                if let Some(progress) = progress {
-                                    let _ = progress.join();
-                                }
-                                if let Ok(captured) = &result
-                                    && let Some(video) = &captured.video
-                                {
-                                    crate::recording_screen::finish(
-                                        base,
-                                        offset_ms,
-                                        screen.as_ref(),
-                                        while_sharing,
-                                        video,
-                                        &app,
-                                    );
-                                }
-                                result.map(|captured| captured.files)
-                            };
-                            #[cfg(target_os = "windows")]
-                            let result = motetto_core::capture::record(base, stop.clone())
-                                .map_err(|e| e.to_string());
-                            let ended = stop.swap(true, Ordering::SeqCst);
-                            crate::speech::shutdown();
-                            if result.is_ok() && !ended {
-                                return Err(
+                                    // A silent clip ends with its window: the session stops it on the
+                                    // ScreenEnded sent above. Wait for that Stop briefly instead of
+                                    // calling the end unexpected.
+                                    if !mic_on
+                                        && !system_on
+                                        && result.as_ref().is_ok_and(|captured| {
+                                            captured.video.as_ref().is_some_and(|v| v.lost)
+                                        })
+                                    {
+                                        let waited = std::time::Instant::now();
+                                        while !stop.load(Ordering::Acquire)
+                                            && waited.elapsed() < std::time::Duration::from_secs(2)
+                                        {
+                                            std::thread::sleep(std::time::Duration::from_millis(
+                                                50,
+                                            ));
+                                        }
+                                    }
+                                    if let Ok(captured) = &result
+                                        && let Some(video) = &captured.video
+                                    {
+                                        crate::recording_screen::finish(
+                                            base,
+                                            offset_ms,
+                                            screen.as_ref(),
+                                            while_sharing,
+                                            video,
+                                            &app,
+                                        );
+                                    }
+                                    result.map(|captured| captured.files)
+                                };
+                                #[cfg(target_os = "windows")]
+                                let result = motetto_core::capture::record(base, stop.clone())
+                                    .map_err(|e| e.to_string());
+                                let ended = stop.swap(true, Ordering::SeqCst);
+                                crate::speech::shutdown();
+                                if result.is_ok() && !ended {
+                                    return Err(
                                     "Audio capture ended unexpectedly. Partial audio is retained."
                                         .into(),
                                 );
-                            }
-                            result
-                        });
+                                }
+                                result
+                            },
+                        );
                         if let Err(mut reason) = result {
                             if let Err(e) = status(&root, &id, "NeedsAttention") {
                                 reason.push_str(&format!(" Status could not be saved: {e}"));
                             }
                             record.failure = Some(reason.clone());
                             let _ = results.send(Message::CaptureFailed { id, reason });
+                        }
+                    }
+                    Job::SaveClip { id } => {
+                        // A failed capture with no picture stays NeedsAttention with its
+                        // partial files; one whose earlier parts left a picture is saved.
+                        let failed = recording
+                            .as_ref()
+                            .is_some_and(|r| r.id == id && r.failure.is_some());
+                        let mut saved = false;
+                        if (!failed || has_picture(&root, &id)) && root.join(&id).is_dir() {
+                            let result = save_clip(&root, &id);
+                            saved = result.is_ok();
+                            let _ = app.emit(
+                                "motetto://notice",
+                                match result {
+                                    Ok(()) => CLIP_SAVED.into(),
+                                    Err(e) => format!("Couldn't save the screen recording: {e}"),
+                                },
+                            );
+                        }
+                        recording = None;
+                        let _ = app.emit("motetto://library-changed", ());
+                        // The library comes back with the saved recording open (owner 2026-11-06):
+                        // the setup hid it, and the notice is shown there. Not when a new
+                        // recording saved this one as it started: that one keeps the library away.
+                        let idle = app
+                            .state::<crate::controller::Controller>()
+                            .state()
+                            .is_ok_and(|s| s.state == motetto_core::events::SessionState::Idle);
+                        if saved && idle {
+                            let _ = app.emit("motetto://open-meeting", id.clone());
+                            crate::desktop::show(&app);
                         }
                     }
                     Job::Finish { id, apps } => {
@@ -270,17 +391,35 @@ struct Recording {
     parts: Vec<(Vec<String>, u64)>,
     failure: Option<String>,
 }
+const CLIP_SAVED: &str = "Saved to your library. Just the video: no transcript, no notes.";
+/// The picture preset: the one chosen on the setup bar, else Settings › Screen video.
+fn picture_preset(
+    setup: Option<&RecordSetup>,
+    settings: &crate::settings::Settings,
+) -> motetto_core::video::Preset {
+    motetto_core::video::Preset::parse(
+        setup
+            .and_then(|s| s.picture.as_deref())
+            .unwrap_or(&settings.screen_preset),
+    )
+}
+
+/// The tracks a setup records, as (mic, system); without a setup both, as before.
+fn tracks(setup: Option<&RecordSetup>) -> (bool, bool) {
+    setup.map_or((true, true), |s| (s.mic != MicChoice::Off, s.app_sounds))
+}
 fn capture_part(
     root: &Path,
     record: &mut Recording,
     offset_ms: u64,
     stop: motetto_core::events::Stop,
+    setup: Option<&RecordSetup>,
     capture: impl FnOnce(&str, motetto_core::events::Stop) -> Result<Vec<String>, String>,
 ) -> Result<(), String> {
     if let Some(e) = &record.failure {
         return Err(e.clone());
     }
-    let dir = create(root, &record.id)?;
+    let dir = create(root, &record.id, setup)?;
     if stop.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -288,8 +427,14 @@ fn capture_part(
     let base = base.to_string_lossy().into_owned();
     // Listed before capture, so a crash or a failed capture still leaves its audio findable by
     // Recover and Write the notes again; the entry is narrowed to the files written afterwards.
-    let tracks = ["mic", "system"].map(|side| format!("{base}.{side}.wav"));
-    record.parts.push((tracks.to_vec(), offset_ms));
+    // A track that is off gets no file, so it isn't listed.
+    let (mic, system) = tracks(setup);
+    let tracks: Vec<String> = [("mic", mic), ("system", system)]
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(side, _)| format!("{base}.{side}.wav"))
+        .collect();
+    record.parts.push((tracks.clone(), offset_ms));
     write_parts(&dir, &record.parts)?;
     let captured = capture(&base, stop.clone()).and_then(|files| {
         if stop.load(Ordering::SeqCst) {
@@ -321,20 +466,45 @@ fn write_parts(dir: &Path, parts: &[(Vec<String>, u64)]) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())
 }
-fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
+fn create(root: &Path, id: &str, setup: Option<&RecordSetup>) -> Result<PathBuf, String> {
     let dir = root.join(id);
     if !dir.exists() {
         fs::create_dir(&dir).map_err(|e| e.to_string())?;
+        let created_ms = id
+            .parse::<u128>()
+            .map_err(|e| e.to_string())?
+            .checked_div(1_000_000)
+            .unwrap_or(0) as u64;
+        // Just the video: a screen recording, named by its start time until renamed.
+        let clip = setup.filter(|s| s.video_only());
+        let facts = clip.and_then(|s| {
+            let pick = s.screen.as_ref()?;
+            Some(library::ScreenFacts {
+                source: pick.name.clone(),
+                what: match pick.choice {
+                    ScreenChoice::CallWindow { .. } | ScreenChoice::Window { .. } => "window",
+                    ScreenChoice::Display { .. } => "display",
+                    ScreenChoice::Area { .. } => "area",
+                }
+                .into(),
+                mic_off: s.mic == MicChoice::Off,
+                app_sounds: s.app_sounds,
+                clicks: s.clicks,
+                fps: 0,
+                width: 0,
+                height: 0,
+            })
+        });
         library::save(
             root,
             &library::MeetingSummary {
                 id: id.into(),
-                title: "Recorded meeting".into(),
-                created_ms: id
-                    .parse::<u128>()
-                    .map_err(|e| e.to_string())?
-                    .checked_div(1_000_000)
-                    .unwrap_or(0) as u64,
+                title: if clip.is_some() {
+                    clip_title(created_ms)
+                } else {
+                    "Recorded meeting".into()
+                },
+                created_ms,
                 status: "Recording".into(),
                 marks_ms: vec![],
                 duration_ms: None,
@@ -346,11 +516,70 @@ fn create(root: &Path, id: &str) -> Result<PathBuf, String> {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                reach_ms: None,
+                kind: if clip.is_some() {
+                    library::MeetingKind::Screen
+                } else {
+                    library::MeetingKind::Meeting
+                },
+                facts,
+                deleted_kind: Default::default(),
                 has_video: false,
             },
         )?;
     }
     library::folder(root, id)
+}
+/// "Screen recording at HH:MM" in local time. The system's `date` reads the time zone, so no
+/// time-zone crate is needed; without it the title has no time.
+fn clip_title(created_ms: u64) -> String {
+    let clock = std::process::Command::new("/bin/date")
+        .args(["-r", &(created_ms / 1000).to_string(), "+%H:%M"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.trim().to_string())
+        .filter(|text| text.len() == 5);
+    match clock {
+        Some(clock) => format!("Screen recording at {clock}"),
+        None => "Screen recording".into(),
+    }
+}
+/// A video-only recording is ready at Stop: no transcript, no notes. Its size comes from the
+/// first picture part that has one.
+fn save_clip(root: &Path, id: &str) -> Result<(), String> {
+    let dir = library::folder(root, id)?;
+    let parts: Vec<crate::screen::ScreenPart> = crate::screen_files::read(&dir, "screen.json");
+    let audio: Vec<(Vec<String>, u64)> = crate::screen_files::read(&dir, "parts.json");
+    let mut summary = library::summary(root, id)?;
+    summary.status = "Ready".into();
+    summary.kind = library::MeetingKind::Screen;
+    if let Some(facts) = summary.facts.as_mut() {
+        // The facts follow what was recorded, not the setup at the start: the mic or the
+        // source can change between parts.
+        let written = |side: &str| {
+            audio
+                .iter()
+                .flat_map(|(files, _)| files)
+                .any(|f| f.ends_with(side) && Path::new(f).is_file())
+        };
+        facts.mic_off = !written(".mic.wav");
+        facts.app_sounds = written(".system.wav");
+        if let Some(part) = parts.iter().rev().find(|p| p.width > 0 && p.height > 0) {
+            facts.width = part.width;
+            facts.height = part.height;
+            facts.source = part.source.name.clone();
+        }
+    }
+    library::save(root, &summary)
+}
+/// Whether a clip left any picture: a later part that failed must not discard earlier ones.
+fn has_picture(root: &Path, id: &str) -> bool {
+    let dir = root.join(id);
+    crate::screen_files::read::<Vec<crate::screen::ScreenPart>>(&dir, "screen.json")
+        .iter()
+        .any(|p| dir.join(&p.file).is_file())
 }
 fn status(root: &Path, id: &str, value: &str) -> Result<library::MeetingSummary, String> {
     let mut summary = library::summary(root, id)?;
@@ -480,12 +709,19 @@ mod tests {
             failure: None,
         };
         for offset in [0, 25_000] {
-            capture_part(&root, &mut record, offset, Stop::default(), |base, stop| {
-                let file = format!("{base}.mic.wav");
-                fs::write(&file, b"audio").unwrap();
-                stop.store(true, Ordering::SeqCst);
-                Ok(vec![file])
-            })
+            capture_part(
+                &root,
+                &mut record,
+                offset,
+                Stop::default(),
+                None,
+                |base, stop| {
+                    let file = format!("{base}.mic.wav");
+                    fs::write(&file, b"audio").unwrap();
+                    stop.store(true, Ordering::SeqCst);
+                    Ok(vec![file])
+                },
+            )
             .unwrap();
         }
         assert_ne!(record.parts[0].0, record.parts[1].0);
@@ -508,36 +744,213 @@ mod tests {
             serde_json::from_slice(&fs::read(root.join("123/parts.json")).unwrap()).unwrap()
         };
         // While capture runs (a crash would stop here), both tracks are already listed.
-        capture_part(&root, &mut record, 0, Stop::default(), |base, stop| {
-            assert_eq!(
-                listed(&root),
-                [(
-                    vec![format!("{base}.mic.wav"), format!("{base}.system.wav")],
-                    0
-                )]
-            );
-            fs::write(format!("{base}.mic.wav"), b"audio").unwrap();
-            stop.store(true, Ordering::SeqCst);
-            Ok(vec![format!("{base}.mic.wav")])
-        })
+        capture_part(
+            &root,
+            &mut record,
+            0,
+            Stop::default(),
+            None,
+            |base, stop| {
+                assert_eq!(
+                    listed(&root),
+                    [(
+                        vec![format!("{base}.mic.wav"), format!("{base}.system.wav")],
+                        0
+                    )]
+                );
+                fs::write(format!("{base}.mic.wav"), b"audio").unwrap();
+                stop.store(true, Ordering::SeqCst);
+                Ok(vec![format!("{base}.mic.wav")])
+            },
+        )
         .unwrap();
         // A failed part keeps only the audio it wrote; one that wrote nothing is not listed.
-        let error = capture_part(&root, &mut record, 25_000, Stop::default(), |base, _| {
-            fs::write(format!("{base}.system.wav"), b"partial").unwrap();
-            Err("disk full".into())
-        });
+        let error = capture_part(
+            &root,
+            &mut record,
+            25_000,
+            Stop::default(),
+            None,
+            |base, _| {
+                fs::write(format!("{base}.system.wav"), b"partial").unwrap();
+                Err("disk full".into())
+            },
+        );
         assert_eq!(error, Err("disk full".into()));
         let parts = listed(&root);
         assert_eq!(parts, record.parts);
         assert_eq!(parts.len(), 2);
         assert!(parts[1].0.len() == 1 && parts[1].0[0].ends_with("part-0001.system.wav"));
         assert_eq!(parts[1].1, 25_000);
-        let ended = capture_part(&root, &mut record, 50_000, Stop::default(), |_, _| {
+        let ended = capture_part(&root, &mut record, 50_000, Stop::default(), None, |_, _| {
             Ok(vec![])
         });
         assert!(ended.unwrap_err().contains("ended unexpectedly"));
         assert_eq!(listed(&root).len(), 2);
         fs::remove_dir_all(root).unwrap();
+    }
+    fn clip(mic: MicChoice, app_sounds: bool) -> RecordSetup {
+        RecordSetup {
+            mic,
+            app_sounds,
+            notes: false,
+            clicks: true,
+            picture: None,
+            screen: Some(motetto_core::events::ScreenPick {
+                choice: ScreenChoice::Window {
+                    window_id: 7,
+                    app: "Safari".into(),
+                },
+                name: "Safari".into(),
+            }),
+        }
+    }
+    #[test]
+    fn the_setup_picture_wins_over_settings() {
+        let settings: crate::settings::Settings = serde_json::from_str("{}").unwrap();
+        let mut setup = clip(MicChoice::Off, true);
+        assert_eq!(picture_preset(Some(&setup), &settings).fps(), 15);
+        assert_eq!(picture_preset(None, &settings).fps(), 15);
+        setup.picture = Some("high".into());
+        assert_eq!(picture_preset(Some(&setup), &settings).fps(), 30);
+    }
+    #[test]
+    fn mic_off_writes_no_mic_wav() {
+        let root = root();
+        let mut record = Recording {
+            id: "123".into(),
+            parts: vec![],
+            failure: None,
+        };
+        let setup = clip(MicChoice::Off, true);
+        let listed = |root: &Path| -> Vec<(Vec<String>, u64)> {
+            serde_json::from_slice(&fs::read(root.join("123/parts.json")).unwrap()).unwrap()
+        };
+        capture_part(
+            &root,
+            &mut record,
+            0,
+            Stop::default(),
+            Some(&setup),
+            |base, stop| {
+                // Listed before capture: the system track only.
+                assert_eq!(listed(&root), [(vec![format!("{base}.system.wav")], 0)]);
+                fs::write(format!("{base}.system.wav"), b"audio").unwrap();
+                stop.store(true, Ordering::SeqCst);
+                Ok(vec![format!("{base}.system.wav")])
+            },
+        )
+        .unwrap();
+        let parts = listed(&root);
+        assert_eq!(parts.len(), 1);
+        assert!(parts[0].0.iter().all(|f| !f.ends_with(".mic.wav")));
+        assert!(!root.join("123/part-0000.mic.wav").exists());
+        // Mic on, app sounds off: the mic track only. Without a setup: both, as before.
+        assert_eq!(
+            tracks(Some(&clip(MicChoice::Default, false))),
+            (true, false)
+        );
+        assert_eq!(tracks(None), (true, true));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn finish_with_only_video_is_ready() {
+        let root = root();
+        let mut record = Recording {
+            id: "123".into(),
+            parts: vec![],
+            failure: None,
+        };
+        let setup = clip(MicChoice::Off, false);
+        capture_part(
+            &root,
+            &mut record,
+            0,
+            Stop::default(),
+            Some(&setup),
+            |base, stop| {
+                fs::write(format!("{base}.screen.mp4"), b"video").unwrap();
+                stop.store(true, Ordering::SeqCst);
+                Ok(vec![])
+            },
+        )
+        .unwrap();
+        // No WAVs: nothing to transcribe, and the old path would refuse it.
+        assert!(record.parts.is_empty());
+        assert!(
+            finish(&root, &record, vec![], |_| {})
+                .unwrap_err()
+                .contains("No audio was captured")
+        );
+        let dir = root.join("123");
+        let saving = library::summary(&root, "123").unwrap();
+        assert_eq!(saving.status, "Recording");
+        assert_eq!(saving.kind, library::MeetingKind::Screen);
+        assert!(saving.title.starts_with("Screen recording"));
+        fs::write(
+            dir.join("screen.json"),
+            r#"[{"file":"part-0000.screen.mp4","offset_ms":0,"source":{"kind":"window","name":"Safari"},"while_sharing":false,"width":1280,"height":800}]"#,
+        )
+        .unwrap();
+        save_clip(&root, "123").unwrap();
+        let saved = library::summary(&root, "123").unwrap();
+        assert_eq!(saved.status, "Ready");
+        assert_eq!(saved.kind, library::MeetingKind::Screen);
+        assert_eq!(
+            saved.facts,
+            Some(library::ScreenFacts {
+                source: "Safari".into(),
+                what: "window".into(),
+                mic_off: true,
+                app_sounds: false,
+                clicks: true,
+                fps: 0,
+                width: 1280,
+                height: 800,
+            })
+        );
+        assert!(!dir.join("transcript.txt").exists() && !dir.join("notes.md").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_clip_is_saved_with_the_tracks_and_source_it_recorded() {
+        let root = root();
+        // Started with no mic and no app sounds; the mic was turned on for the second part.
+        create(&root, "123", Some(&clip(MicChoice::Off, false))).unwrap();
+        let dir = root.join("123");
+        assert!(!has_picture(&root, "123"));
+        let mic = dir.join("part-0001.mic.wav");
+        fs::write(&mic, b"audio").unwrap();
+        fs::write(
+            dir.join("parts.json"),
+            serde_json::to_vec(&[(vec![mic.to_string_lossy().into_owned()], 5_000u64)]).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join("part-0000.screen.mp4"), b"video").unwrap();
+        fs::write(
+            dir.join("screen.json"),
+            r#"[{"file":"part-0000.screen.mp4","offset_ms":0,"source":{"kind":"window","name":"Safari"},"while_sharing":false,"width":1280,"height":800},
+               {"file":"part-0001.screen.mp4","offset_ms":5000,"source":{"kind":"window","name":"Notes window"},"while_sharing":false,"width":900,"height":700}]"#,
+        )
+        .unwrap();
+        // The first part's picture is on disk, so a later failure still saves the clip.
+        assert!(has_picture(&root, "123"));
+        save_clip(&root, "123").unwrap();
+        let facts = library::summary(&root, "123").unwrap().facts.unwrap();
+        assert!(!facts.mic_off && !facts.app_sounds);
+        assert_eq!(facts.source, "Notes window");
+        assert_eq!((facts.width, facts.height), (900, 700));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_clip_is_named_by_its_local_start_time() {
+        let title = clip_title(1_793_890_000_000);
+        let clock = title.strip_prefix("Screen recording at ").unwrap();
+        assert!(clock.len() == 5 && clock.as_bytes()[2] == b':', "{title}");
+        assert!(
+            clock.chars().filter(char::is_ascii_digit).count() == 4,
+            "{title}"
+        );
     }
     #[test]
     fn canceled_queued_resume_never_opens_capture() {
@@ -552,6 +965,7 @@ mod tests {
             &mut record,
             0,
             Arc::new(AtomicBool::new(true)),
+            None,
             |_, _| panic!("must not start"),
         )
         .unwrap();
@@ -567,7 +981,7 @@ mod tests {
             failure: Some("disk failed".into()),
         };
         assert_eq!(
-            capture_part(&root, &mut record, 0, Stop::default(), |_, _| panic!(
+            capture_part(&root, &mut record, 0, Stop::default(), None, |_, _| panic!(
                 "must not start"
             )),
             Err("disk failed".into())
@@ -584,7 +998,7 @@ mod tests {
     fn real_resumed_recording_writes_notes_with_offsets() {
         let source = PathBuf::from(std::env::var("MOTETTO_TEST_RECORDING").unwrap());
         let root = root();
-        let dir = create(&root, "123").unwrap();
+        let dir = create(&root, "123", None).unwrap();
         let mut record = Recording {
             id: "123".into(),
             parts: vec![],

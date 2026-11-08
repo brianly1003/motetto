@@ -35,7 +35,8 @@ async (page) => {
         if (c === 'plugin:event|listen') { (listeners[a.event] ||= []).push(a.handler); return a.handler; }
         if (c === 'get_state') return state;
         if (c === 'microphones') return report();
-        if (c === 'set_microphone') { chosen = a.id; loud = false; return report(); }
+        if (c === 'set_microphone') { chosen = a.id; loud = false; if (state.setup) state.setup.mic = {kind: 'Default'}; return report(); }
+        if (c === 'set_mic_choice') { state.setup = {mic: a.choice, app_sounds: true, notes: true, clicks: true, screen: null}; return report(); }
         if (c === 'set_mic_volume') { mics.find(m => m.id === a.id).volume = a.volume; loud = false; return report(); }
         if (c === 'get_levels') return [loud ? .3 : .08, 0];
         if (c === 'get_settings') return settings;
@@ -89,11 +90,14 @@ async (page) => {
     await ref.locator('.recbar .micchip[data-micmenu]').click();
     same(await styles(menu), await styles(ref.locator('.micmenu')), 'Menu');
     const items = await menu.getByRole('menuitemradio').allInnerTexts();
-    // The default device is listed once, as System default (owner 2026-11-05).
-    if (items.length !== 3 || !items[0].startsWith('System default (OpenRun Pro 2 by Shokz)') || items.slice(1).some(x => x.includes('Shokz'))) throw Error(`Menu items: ${items}`);
+    // None first during a recording; the default device is listed once, as System default (owner 2026-11-05).
+    if (items.length !== 4 || !items[0].startsWith('None\nYour voice isn\'t recorded') || !items[1].startsWith('System default (OpenRun Pro 2 by Shokz)') || items.slice(2).some(x => x.includes('Shokz'))) throw Error(`Menu items: ${items}`);
+    const refItems = await ref.locator('.micmenu').getByRole('menuitemradio').allInnerTexts();
+    if (refItems[0] !== items[0]) throw Error(`None row: ${items[0]} != ${refItems[0]}`);
+    same(await styles(menu.getByRole('menuitemradio').first()), await styles(ref.locator('.micmenu [data-mic="off"]')), 'None row');
     if (await menu.getByRole('menuitemradio', {checked: true}).count() !== 1) throw Error('One choice is not checked');
     if (!(await menu.innerText()).includes('OpenRun Pro 2 by Shokz sets its own level.')) throw Error('Bluetooth volume line missing');
-    if (!items[0].includes('Bluetooth · 16 kHz') || !items[1].includes('Built-in · 48 kHz') || /quality/.test(items.join())) throw Error(`Menu labels: ${items}`);
+    if (!items[1].includes('Bluetooth · 16 kHz') || !items[2].includes('Built-in · 48 kHz') || /quality/.test(items.join())) throw Error(`Menu labels: ${items}`);
     await p.screenshot({path: `.playwright-out/mic-app-recmenu-${theme}.png`, clip: {x: 448, y: 0, width: 600, height: 520}});
     await p.keyboard.press('ArrowDown');
     await p.keyboard.press('Escape');
@@ -102,6 +106,12 @@ async (page) => {
     await menu.waitFor();
     await p.evaluate(() => window.dispatchEvent(new Event('blur')));
     await menu.waitFor({state: 'detached', timeout: 2000});
+    await chip.click();
+    await menu.waitFor();
+    // None: a new part without the mic (the recording's choice; Settings keeps its own).
+    await menu.getByRole('menuitemradio', {name: /^None/}).click();
+    await p.getByText('Your mic is off. Only the other side is recorded now.').waitFor();
+    if (!await p.evaluate(() => window.calls.some(x => x.c === 'set_mic_choice' && x.a.choice.kind === 'Off'))) throw Error('None not sent');
     await chip.click();
     await menu.waitFor();
     await menu.getByRole('menuitemradio', {name: /MacBook Pro Microphone/}).click();

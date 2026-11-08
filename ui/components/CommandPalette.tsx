@@ -24,7 +24,7 @@ export default function CommandPalette({onClose, onSelect, onImport, onHome, can
     return () => { active = false; clearTimeout(timer); };
   }, [query]);
   const actions = [
-    ...(state?.state.type === "Idle" && canRecord ? [{label: "Record now", run: ipc.startRecording}] : []),
+    ...(state?.state.type === "Idle" && canRecord ? [{label: "Record now", run: ipc.recordNow}] : []),
     ...(state?.state.type === "Recording" ? [{label: "Stop recording", run: ipc.stopRecording}, {label: "Pause recording", run: ipc.pauseRecording}, {label: "Mark this moment", run: async () => { await ipc.markMoment(); }}, {label: "Open My notes", run: () => ipc.setCompanionSize("Sidecar")}] : []),
     ...(state?.state.type === "Paused" ? [{label: "Resume recording", run: ipc.resumeRecording}, {label: "Stop recording", run: ipc.stopRecording}] : []),
     ...(onHome ? [{label: "Go to Action items", run: async () => { onHome(); }}] : []),

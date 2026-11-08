@@ -233,8 +233,10 @@ pub(crate) fn regenerate(
         if let Some(code) = &summary.notes_language {
             let _ = fs::remove_file(folder.join(format!("notes.{code}.md")));
         }
-        // Notes written: a recording that needed them (Discard, then Undo) is ready now.
+        // Notes written: a recording that needed them (Discard, then Undo) is ready now, and a
+        // screen recording kept as just the video becomes a meeting.
         summary.status = "Ready".into();
+        summary.kind = library::MeetingKind::Meeting;
         library::save(root, &summary)
     })();
     let _ = fs::remove_dir_all(staging);
@@ -342,6 +344,34 @@ mod tests {
             "[00:01] Me: first"
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    #[ignore = "needs the speech model and a running notes model; set MOTETTO_TEST_RECORDING"]
+    fn write_notes_later_uses_existing_rewrite() {
+        // Write notes on a screen recording kept as just the video: the same Write the notes
+        // again, from its system track, and it is a meeting afterwards.
+        let source = std::env::var("MOTETTO_TEST_RECORDING").unwrap();
+        let root = std::env::temp_dir().join(format!("motetto-write-clip-{}", std::process::id()));
+        let folder = root.join("456");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("meeting.json"),
+            r#"{"id":"456","title":"Screen recording at 10:02","created_ms":1,"status":"Ready","kind":"screen"}"#,
+        )
+        .unwrap();
+        fs::copy(&source, folder.join("part-0000.system.wav")).unwrap();
+        let parts = vec![(vec![folder.join("part-0000.system.wav")], 0)];
+        fs::write(
+            folder.join("parts.json"),
+            serde_json::to_vec(&parts).unwrap(),
+        )
+        .unwrap();
+        regenerate(&root, "456", None, &|_| {}).unwrap();
+        let summary = library::summary(&root, "456").unwrap();
+        assert_eq!(summary.kind, library::MeetingKind::Meeting);
+        assert_eq!(summary.status, "Ready");
+        assert!(!library::read(&root, "456").unwrap().notes_md.is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn a_file_error_names_the_file() {

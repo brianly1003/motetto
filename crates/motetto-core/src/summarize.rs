@@ -319,7 +319,7 @@ pub fn notes(
     plan.lock().unwrap_or_else(|e| e.into_inner()).end();
     let summary = summary?;
     let (title, summary) = split_title(&tidy_headings(&summary));
-    let summary = bracket_times(&summary);
+    let summary = plain_none(&bracket_times(&summary));
     let mut summary = tidy_tasks(&one_time(&grounded(&summary, transcript)));
     summary = committed(&summary, transcript, |prompt| ask(&llm, prompt));
     if !labeled {
@@ -434,6 +434,33 @@ fn labeled(transcript: &str) -> bool {
             rest.starts_with("Me: ") || rest.starts_with("Them: ") || rest.starts_with("Speaker ")
         })
     })
+}
+
+/// True for an item that only says "nothing": the prompt's "- None", and what small models write
+/// instead by copying the layout's <...> placeholders (`<none>`, `(none)`, `None.`, `N/A`).
+/// The desktop shows saved notes through the same list (ui/lib/document.ts `noneItem`).
+pub fn none_item(text: &str) -> bool {
+    let text = text.trim().replace("&lt;", "<");
+    let text = text
+        .trim_end_matches('.')
+        .trim_matches(|c| matches!(c, '<' | '>' | '(' | ')' | '[' | ']' | '*' | '_'))
+        .trim();
+    ["none", "n/a", "nothing", "-"]
+        .iter()
+        .any(|w| text.eq_ignore_ascii_case(w))
+}
+
+/// Every "nothing" bullet becomes the plain "- None", so `grounded` treats them alike: kept under
+/// Action items, dropped (with its empty section) elsewhere.
+fn plain_none(summary: &str) -> String {
+    summary
+        .lines()
+        .map(|line| match line.trim_start().strip_prefix("- ") {
+            Some(item) if none_item(item) => "- None",
+            _ => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Drops every note line that cites a [mm:ss] no transcript line starts with: given little to go
@@ -1178,6 +1205,31 @@ mod tests {
             "NAME ID SIZE MODIFIED\ngpt-oss:120b-cloud 1a - 2 days ago\nqwen3:cloud 2b 1 GB now\n";
         assert!(!installed(list, "gpt-oss:120b-cloud"));
         assert!(!installed(list, "qwen3:cloud"));
+    }
+
+    #[test]
+    fn a_placeholder_none_is_none_and_an_empty_decisions_section_goes() {
+        for none in [
+            "None",
+            "<none>",
+            "&lt;none>",
+            "(none)",
+            "None.",
+            "N/A",
+            "*None*",
+            "nothing",
+        ] {
+            assert!(none_item(none), "{none}");
+        }
+        for real in ["None of the options fit", "Keep FCM [00:10]", "No"] {
+            assert!(!none_item(real), "{real}");
+        }
+        let notes =
+            "### Action items\n- <none>\n### Decisions\n- <none>\n### Overview\n- A sound check.";
+        assert_eq!(
+            grounded(&plain_none(notes), "[00:01] Me: Hello"),
+            "### Action items\n- None\n### Overview\n- A sound check."
+        );
     }
 
     #[test]

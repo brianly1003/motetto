@@ -66,9 +66,57 @@ import type {ScreenOption} from './bindings/ScreenOption';
 export const answerAsk = (callId: string, record: boolean, screen: ScreenPick|null = null) => invoke<void>("answer_ask", { callId, record, screen });
 export const listScreenSources = () => invoke<ScreenOption[]>('list_screen_sources');
 export const setScreen = (screen: ScreenPick|null) => invoke<void>('set_screen', {screen});
+import type {CaptureKind} from './bindings/CaptureKind';
+import type {CaptureMemory} from './bindings/CaptureMemory';
+import type {CaptureWindow} from './bindings/CaptureWindow';
+import type {RecordSetup} from './bindings/RecordSetup';
+import type {ClipPreview} from './bindings/ClipPreview';
+import type {ClipTrack} from './clip';
+/** The screen setup over every display; `mode` opens it on that mode instead of the remembered one. */
+export const openCapture = (kind: CaptureKind, mode: 'audio'|'display'|'window'|'area'|null = null) => invoke<void>('open_capture', {kind, mode});
+export const closeCapture = () => invoke<void>('close_capture');
+export const captureWindows = () => invoke<CaptureWindow[]>('capture_windows');
+export const captureMemory = (kind: CaptureKind) => invoke<CaptureMemory>('capture_memory', {kind});
+/** Once the countdown ends: closes the overlays, saves the memory when Remember is on, records. */
+export const startCapture = (kind: CaptureKind, setup: RecordSetup, memory: CaptureMemory|null = null) => invoke<void>('start_capture', {kind, setup, memory});
+/** During a recording: the setup's choice becomes the recorded screen instead of starting. */
+export const pickCapture = (screen: ScreenPick) => invoke<void>('pick_capture', {screen});
+/** Esc pressed anywhere while the setup is open; the page answers within 500 ms or Rust closes it. */
+export const onCaptureEsc = (callback: (n: number) => void) => listen<number>('motetto://capture-esc', callback);
+export const captureEscAck = (n: number) => invoke<void>('capture_esc_ack', {n});
+/** One setup across displays: each overlay sends its changes to the others. */
+export async function sendCaptureSetup<T>(payload: T) {
+  const { emit } = await import("@tauri-apps/api/event");
+  return emit('motetto://capture-setup', payload);
+}
+export const onCaptureSetup = <T,>(callback: (payload: T) => void) => listen<T>('motetto://capture-setup', callback);
+/** The overlay's controls in its window's points; with `through` (Audio only) clicks elsewhere reach the apps below. */
+export const captureControls = (through: boolean, rects: [number, number, number, number][]) => invoke<void>('capture_controls', {through, rects});
+/** A meter-only listen to the system default mic while the setup is open; never written. */
+export const captureMicPreview = (on: boolean) => invoke<void>('capture_mic_preview', {on});
+export const captureLevel = () => invoke<number>('capture_level');
+/** Record now: the screen setup on macOS (mic, timer and what to record first); elsewhere it starts. */
+export const recordNow = () => /Mac/.test(navigator.platform) ? openCapture('Call') : startRecording();
 export const answerShareVideo = (display: ScreenPick|null) => invoke<void>('answer_share_video', {display});
 export const deleteVideo = (id:string) => invoke<void>('delete_video',{id});
 export const restoreVideo = (id:string) => invoke<void>('restore_video',{id});
+/** Trims a saved screen recording to fromMs..toMs; the full original goes to Recently deleted. */
+export const trimVideo = (id:string, fromMs:number, toMs:number) => invoke<MeetingSummary>('trim_video',{id, fromMs, toMs});
+/** Undo of a trim: the full original comes back from Recently deleted. */
+export const restoreTrim = (id:string) => invoke<MeetingSummary>('restore_trim',{id});
+/** Export MP4…: the save panel, then the whole video; false when the panel was cancelled. */
+export const exportVideo = (id:string) => invoke<boolean>('export_video',{id});
+/** Save a clip (SPEC 15). Peaks of the raw track over fromMs..toMs, for the close-up. */
+export const clipLevels = (id:string, track:ClipTrack, fromMs:number, toMs:number, bins:number) => invoke<number[]>('clip_levels',{id, track, fromMs, toMs, bins});
+/** The exact clip written into the app cache, so Play and Loop play what Save would write. */
+export const clipPreview = (id:string, track:ClipTrack, fromMs:number, toMs:number) => invoke<ClipPreview>('clip_preview',{id, track, fromMs, toMs});
+export const clipPreviewClear = () => invoke<void>('clip_preview_clear');
+/** Show in Finder for the clip just saved (the app remembers which; no path is sent). */
+export const revealClip = () => invoke<void>('reveal_clip');
+/** A preview's file path as the webview can play it. */
+export async function clipAudioSrc(path: string) { const {convertFileSrc} = await import('@tauri-apps/api/core'); return convertFileSrc(path); }
+/** The save panel, then the WAV and its words; null when the panel was cancelled. */
+export const saveClip = (id:string, track:ClipTrack, fromMs:number, toMs:number, words:string|null) => invoke<string|null>('save_clip',{id, track, fromMs, toMs, words});
 export const dontAskForApp = (callId: string) => invoke<void>("dont_ask_for_app", { callId });
 export const undoDontAsk = (appId: string) => invoke<void>("undo_dont_ask", { appId });
 export const holdAsk = (hold: boolean) => invoke<void>("hold_ask", { hold });
@@ -87,6 +135,9 @@ import type { MicReport } from "./bindings/MicReport";
 import type { PermissionKind } from "./bindings/PermissionKind";
 export const microphones = () => invoke<MicReport>("microphones");
 export const setMicrophone = (id: string | null) => invoke<MicReport>("set_microphone", { id });
+import type { MicChoice } from "./bindings/MicChoice";
+/** During a recording only: its mic, None included; the next part records with it. */
+export const setMicChoice = (choice: MicChoice) => invoke<MicReport>("set_mic_choice", { choice });
 export const setMicVolume = (id: string, volume: number) => invoke<MicReport>("set_mic_volume", { id, volume });
 export const openSoundSettings = () => invoke<void>("open_sound_settings");
 export const openPermissionSettings = (kind: PermissionKind) => invoke<void>("open_permission_settings", { kind });
@@ -169,7 +220,7 @@ import type { MeetingMedia } from './bindings/MeetingMedia';
 export async function meetingMedia(id: string): Promise<MeetingMedia> {
   const media = await invoke<MeetingMedia>('meeting_media', {id});
   const {convertFileSrc} = await import('@tauri-apps/api/core');
-  return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
+  return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[],clicks:media.clicks??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
 }
 /** macOS plays meeting audio natively (WebKit's WAV playback can freeze the window); false
  *  where the page plays it with audio elements (Windows, fixtures). */

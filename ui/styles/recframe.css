@@ -1,0 +1,5 @@
+/* The recording frame window (mockup .recframe, with its tab under the frame): the window is the
+   target plus 3 pt on each side (the border and its light edge) and 24 pt below for the tab. */
+html, body { background: transparent !important; overflow: hidden; margin: 0; }
+.recframe { position: absolute; left: 1px; top: 1px; right: 1px; bottom: 25px; z-index: 38; pointer-events: none; border: 2px solid var(--rec); border-radius: 4px; box-shadow: 0 0 0 1px rgba(255,255,255,.5); box-sizing: border-box; }
+.recframe::after { content: attr(data-label); position: absolute; top: 100%; right: -2px; padding: 2px 8px; border-radius: 0 0 6px 6px; background: var(--rec); color: #fff; font: 600 11px/1.5 var(--font-data); font-feature-settings: "tnum"; white-space: nowrap; }

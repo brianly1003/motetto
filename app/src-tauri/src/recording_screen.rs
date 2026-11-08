@@ -23,8 +23,9 @@ fn part(base: &str, offset_ms: u64, pick: &ScreenPick, while_sharing: bool) -> S
         offset_ms,
         source: ScreenSourceInfo {
             kind: match pick.choice {
-                ScreenChoice::CallWindow { .. } => "window",
+                ScreenChoice::CallWindow { .. } | ScreenChoice::Window { .. } => "window",
                 ScreenChoice::Display { .. } => "display",
+                ScreenChoice::Area { .. } => "area",
             }
             .into(),
             name: pick.name.clone(),

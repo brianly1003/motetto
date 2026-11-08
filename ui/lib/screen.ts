@@ -6,7 +6,8 @@ export function defaultPick(options: ScreenOption[], setting: string) {
   return (options.find(o=>o.pick.choice.kind===(setting==='display'?'Display':'CallWindow'))??options[0])?.pick??null;
 }
 export function pillLabel(screen: ScreenState|null) { return screen?`Recording the screen: ${(screen.while_sharing??screen.pick).name}`:'Record the screen too'; }
-export function sizeLabel(preset: string) { return preset==='smaller'?'70 MB':'110 MB'; }
+/** About an hour of a busy screen at each preset (measured 2026-11-07); a still screen costs less. */
+export function sizeLabel(preset: string) { return preset==='smaller'?'120 MB':preset==='high'?'1 GB':'200 MB'; }
 export function shareEnded(previous: AppState|null, next: AppState) { return !!previous?.screen?.while_sharing && !next.sharing; }
 export function partAt(videos: VideoPart[], ms: number) { const part=videos.find(p=>ms>=p.offset_ms&&ms<p.offset_ms+p.duration_ms);return part?{part,fileMs:ms-part.offset_ms}:null; }
 

@@ -9,17 +9,18 @@ pub(crate) const STOPPED: &str = "stopped";
 
 /// When a meeting went to Recently deleted, in ms, inside its folder: renaming a folder doesn't
 /// reliably change its own times, so the 30 days count from this file (`purge_expired`).
-const DELETED_AT: &str = "deleted-at";
+pub(crate) const DELETED_AT: &str = "deleted-at";
 const KEEP_DELETED_MS: u128 = 30 * 86_400_000;
 
-fn now_ms() -> Result<u128, String> {
+pub(crate) fn now_ms() -> Result<u128, String> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis())
 }
 
-pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), String> {
+/// Recently deleted, created when missing; refused when it leads outside the library.
+pub(crate) fn bin(root: &Path) -> Result<std::path::PathBuf, String> {
     let deleted = root.join(".deleted");
     fs::create_dir_all(&deleted).map_err(|e| e.to_string())?;
     if deleted.canonicalize().map_err(|e| e.to_string())?.parent()
@@ -27,6 +28,11 @@ pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), S
     {
         return Err("Deleted folder is outside the library".into());
     }
+    Ok(deleted)
+}
+
+pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), String> {
+    let deleted = bin(root)?;
     let (from, to) = if restore {
         (deleted.as_path(), root)
     } else {
@@ -59,7 +65,12 @@ pub(crate) fn purge_expired(root: &Path, now: u128) -> Result<(), String> {
     for entry in fs::read_dir(&deleted).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let id = entry.file_name().to_string_lossy().into_owned();
-        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        let meeting = !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit());
+        if !meeting
+            && crate::trim::original_of(&id)
+                .or_else(|| crate::trim::staged_of(&id))
+                .is_none()
+        {
             continue;
         }
         let stamp = entry.path().join(DELETED_AT);
@@ -105,7 +116,20 @@ fn purge_meeting(root: &Path, id: &str) -> Result<(), String> {
     {
         return Err("Invalid deleted meetings folder".into());
     }
-    let folder = library::folder(&deleted, id)?;
+    // A trimmed original (`<id>-full`, or a crash's `<id>-full.partial`) sits beside the
+    // meetings, checked the same way.
+    let folder = if crate::trim::original_of(id)
+        .or_else(|| crate::trim::staged_of(id))
+        .is_some()
+    {
+        let folder = deleted.join(id).canonicalize().map_err(|e| e.to_string())?;
+        if folder.parent() != Some(deleted.canonicalize().map_err(|e| e.to_string())?.as_path()) {
+            return Err("Deleted video is outside the library".into());
+        }
+        folder
+    } else {
+        library::folder(&deleted, id)?
+    };
     if fs::symlink_metadata(deleted.join(id))
         .map_err(|e| e.to_string())?
         .file_type()
@@ -135,7 +159,18 @@ pub fn deleted_meetings(
     {
         return Err("Deleted folder is outside the library".into());
     }
-    library::list(&deleted)
+    let mut rows = library::list(&deleted)?;
+    for entry in fs::read_dir(&deleted).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(id) = crate::trim::original_of(&name)
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && let Some(row) = crate::trim::listed(&state.root, id)
+        {
+            rows.push(row);
+        }
+    }
+    rows.sort_by_key(|m| std::cmp::Reverse(m.created_ms));
+    Ok(rows)
 }
 
 /// SPEC 7.6 `rename_meeting`: titles live in meeting.json only, so the folder never moves.
@@ -175,7 +210,18 @@ fn run(root: &Path, id: &str, action: &str) -> Result<(), String> {
     match action {
         "delete" => move_meeting(root, id, false),
         "restore" => move_meeting(root, id, true),
-        "purge" => purge_meeting(root, id),
+        // A trimmed original can't come back without its meeting, so it goes too.
+        "purge" => purge_meeting(root, id).and_then(|()| {
+            for full in [
+                format!("{id}{}", crate::trim::FULL),
+                format!("{id}{}.partial", crate::trim::FULL),
+            ] {
+                if root.join(".deleted").join(&full).symlink_metadata().is_ok() {
+                    purge_meeting(root, &full)?;
+                }
+            }
+            Ok(())
+        }),
         "reveal" => {
             let folder = library::folder(root, id)?;
             #[cfg(target_os = "macos")]
@@ -225,6 +271,25 @@ pub async fn meeting_action(
             || (code != "same_as_call" && motetto_core::summarize::language_name(code).is_none()))
     {
         return Err("Unknown notes language".into());
+    }
+    // A trimmed original in Recently deleted: Restore puts it back in its meeting.
+    if let Some(meeting) = crate::trim::original_of(&id) {
+        return match action.as_str() {
+            "restore" => crate::trim::restore_trim(app, meeting.to_string())
+                .await
+                .map(|_| ()),
+            "purge" => {
+                let root = app.state::<Library>().root.clone();
+                let result =
+                    tauri::async_runtime::spawn_blocking(move || purge_meeting(&root, &id))
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|r| r);
+                let _ = app.emit("motetto://library-changed", ());
+                result
+            }
+            _ => Err("A full video can only be restored or deleted".into()),
+        };
     }
     let state = app.state::<Library>();
     let root = state.root.clone();
@@ -377,6 +442,34 @@ mod tests {
             assert!(purge_expired(&root, at + 10 * KEEP_DELETED_MS).is_ok());
             assert!(root.join("1/notes.md").exists());
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn full_videos_expire_and_go_with_their_meeting() {
+        let root = std::env::temp_dir().join(format!("motetto-full-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for name in [
+            "1-full",
+            "2-full",
+            "2",
+            "3-full",
+            "2-full.partial",
+            "4-full.partial",
+        ] {
+            fs::create_dir_all(root.join(".deleted").join(name)).unwrap();
+        }
+        fs::write(root.join(".deleted/1-full").join(DELETED_AT), "0").unwrap();
+        fs::write(root.join(".deleted/4-full.partial").join(DELETED_AT), "0").unwrap();
+        purge_expired(&root, KEEP_DELETED_MS).unwrap();
+        assert!(!root.join(".deleted/1-full").exists());
+        // A crash's staged original expires the same way.
+        assert!(!root.join(".deleted/4-full.partial").exists());
+        // Unstamped: its 30 days start now.
+        assert!(root.join(".deleted/3-full").join(DELETED_AT).exists());
+        run(&root, "2", "purge").unwrap();
+        assert!(!root.join(".deleted/2").exists() && !root.join(".deleted/2-full").exists());
+        assert!(!root.join(".deleted/2-full.partial").exists());
+        assert!(purge_meeting(&root, "../3-full").is_err());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

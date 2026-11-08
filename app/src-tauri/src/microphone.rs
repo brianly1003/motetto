@@ -90,6 +90,28 @@ pub async fn set_microphone(
     .map_err(|e| e.to_string())?
 }
 
+/// The recording's own mic, None included (a screen recording, or a call where only the other
+/// side matters): the next part records with it. The saved choice in Settings stays as it is.
+#[tauri::command]
+pub async fn set_mic_choice(
+    app: tauri::AppHandle,
+    choice: motetto_core::events::MicChoice,
+) -> Result<MicReport, String> {
+    use motetto_core::events::MicChoice;
+    if let MicChoice::Device { id } = &choice
+        && (id.is_empty() || id.len() > 255 || id.contains('\0'))
+    {
+        return Err("Unknown microphone".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Controller>().action(Action::SetMic(choice))?;
+        let _ = app.emit("motetto://mic-changed", ());
+        report(&app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The same input volume as the system's Sound settings (0.0-1.0).
 #[tauri::command]
 pub async fn set_mic_volume(

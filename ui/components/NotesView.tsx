@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { noteSections, taskLine, timeLabel } from '@/lib/document';
+import { noteSections, taskLine, tidyNone, timeLabel } from '@/lib/document';
 import { transcriptLines } from '@/lib/transcript';
 import { renderInline, renderNotes, timeChip, timeMs } from '@/lib/md';
 import { assignBlock, cleanName, renameOwner, replaceBlock, splitBlock, type Kind } from '@/lib/noteEdit';
@@ -68,7 +68,7 @@ const kindOf = (block: HTMLElement): Kind => (block.dataset.kind as Kind) ?? (bl
  *  keeps its original's look (`labelOf`) and a tick goes to notes.md (`onToggle`, none when stale). */
 export type Translated = {hint:string; labelOf:(line:number)=>string|undefined; onToggle?:(line:number, done:boolean)=>Promise<void>};
 
-export default function NotesView({id, markdown, locked=false, translated, onChange, onError, durationMs, onSeek, transcript='', check}: {id:string; markdown:string; locked?:boolean; translated?:Translated; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void; transcript?:string; check?:Check}) {
+export default function NotesView({id, markdown: stored, locked=false, translated, onChange, onError, durationMs, onSeek, transcript='', check}: {id:string; markdown:string; locked?:boolean; translated?:Translated; onChange:(text:string)=>void; onError:(error:string)=>void; durationMs:number; onSeek?:(ms:number)=>void; transcript?:string; check?:Check}) {
   const [saving, setSaving] = useState(false);
   // The @ picker (SPEC 7.11): the one way to assign. `at` is the "@" being typed: its text node,
   // offset and the query after it; the menu lists You, then owners already in these notes.
@@ -80,6 +80,8 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
   // `latest` is what notes.md holds now (autosave writes it while typing); `base` is the text the
   // edited block's line range refers to. The page re-renders only when a block is left, so the
   // caret never jumps and nothing reflows (SPEC 7.11).
+  // Notes written before placeholders were tidied ("- <none>") show as "- None", as new ones do.
+  const markdown = tidyNone(stored);
   const latest = useRef(markdown), base = useRef(markdown), editing = useRef<HTMLElement|null>(null);
   const history = useRef<string[]>([]), pending = useRef<{index:number; at:At}|null>(null), timer = useRef(0);
   const durationRef = useRef(durationMs); durationRef.current = durationMs;
@@ -289,7 +291,7 @@ export default function NotesView({id, markdown, locked=false, translated, onCha
   const checkAt = Math.max(0, sections.findIndex(section => /^action items$/i.test(section.title)) + 1);
   const quickCheck = rows.length > 0 && check && <section key="check" className="suggest" aria-label={s.quickCheck}><h4>{s.quickCheck}</h4><div className="cgroup"><b className="check-warning">{s.unsure}</b><span className="tip">{s.unsureTip}</span>{rows.map(row => {
     const ms = citedMs(row.claim), q = said.get(ms), kind = row.decision ? s.unsureDecision : s.unsureTask, time = ms >= 0 ? timeLabel(ms) : '';
-    return <div className="sg" key={row.line}><span className="ctask">{row.claim.replace(/\s*\[\d+:\d{2}\]\s*$/, '').replace(/\*\*/g, '')}</span><span className="rcpt"><span className="tip">{time ? s.unsureFrom.replace('{kind}', kind).replace('{time}', time) : s.unsureNoTime.replace('{kind}', kind)}</span>{q && <q>{q.text}</q>}{time && onSeek && ms <= durationMs && <button type="button" className="src" data-ms={ms} title={`Play from ${time}`}>{time}</button>}</span>
+    return <div className="sg" key={row.line}><span className="ctask">{row.claim.replace(/\s*\[\d+:\d{2}\]\s*$/, '').replace(/\*\*/g, '').replace(/&lt;/g, '<')}</span><span className="rcpt"><span className="tip">{time ? s.unsureFrom.replace('{kind}', kind).replace('{time}', time) : s.unsureNoTime.replace('{kind}', kind)}</span>{q && <q>{q.text}</q>}{time && onSeek && ms <= durationMs && <button type="button" className="src" data-ms={ms} title={`Play from ${time}`}>{time}</button>}</span>
       <span className="field"><button type="button" className="btn sm" onClick={() => check.keep(row.claim)}>{s.keep}</button><button type="button" className="btn sm ghost" onClick={() => check.remove(row.claim, row.line, row.decision)}>{s.remove}</button></span></div>;
   })}</div></section>;
   const withCheck = (out: React.ReactNode[]) => { if (quickCheck) out.splice(Math.min(checkAt, out.length), 0, quickCheck); return out; };

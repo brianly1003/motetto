@@ -11,13 +11,22 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// A setup with no mic, no app sounds and no picture is refused before anything is created.
+pub const NOTHING_TO_RECORD: &str =
+    "Nothing to record: choose a microphone, turn on app sounds or choose what to show.";
+
 pub enum Action {
-    Start,
-    Stop,
+    /// Record now; a setup carries the choices made on the screen setup bar.
+    Start(Option<RecordSetup>),
+    /// Record now from the tray or the shortcut: open the setup bar, which starts later.
+    OpenCapture(crate::capture_overlay::CaptureKind),
+    Stop(StopSource),
     StopMeeting(String),
     Pause,
     /// Another mic was chosen: a new part when recording, nothing otherwise.
     SwitchMic,
+    /// The recording's mic, None included: a new part while recording or paused.
+    SetMic(MicChoice),
     SetScreen(Option<ScreenPick>),
     AnswerShareVideo(Option<ScreenPick>),
     ShareVideoAsk(bool),
@@ -58,6 +67,13 @@ pub enum Action {
         mode: Mode,
     },
 }
+/// What pressed Stop: a mouse click (the Pill, a page or the tray menu) or a key. Only a click
+/// suggests trimming the reach for Stop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopSource {
+    Mouse,
+    Keyboard,
+}
 pub enum Message {
     ScreenSnapshot(mpsc::Sender<Option<(AppState, Stop)>>),
     ScreenWatch {
@@ -91,6 +107,14 @@ pub enum Job {
         stop: Stop,
         screen: Option<ScreenPick>,
         while_sharing: bool,
+        /// The choices made before recording; None records as before (both tracks, notes).
+        setup: Option<RecordSetup>,
+        /// Set when this part ends with a Stop clicked with the mouse.
+        mouse_stop: Arc<AtomicBool>,
+    },
+    /// A video-only recording ended: it is ready as it is, with no transcript or notes.
+    SaveClip {
+        id: String,
     },
     Finish {
         id: String,
@@ -127,6 +151,9 @@ pub trait Host: Send + 'static {
     fn set_app_mode(&self, app_id: &str, mode: Mode) -> Result<(), String>;
     fn ask_on_call(&self) -> bool;
     fn set_ask_on_call(&self, on: bool) -> Result<(), String>;
+    /// Shows the screen setup over every display, on `mode` when given; it calls
+    /// `start_capture` (or `pick_capture` for a recording under way) when it is done.
+    fn open_capture(&self, kind: crate::capture_overlay::CaptureKind, mode: Option<&'static str>);
 }
 
 pub struct Controller {
@@ -281,6 +308,8 @@ struct Engine<H> {
     busy: Arc<AtomicBool>,
     shared: Arc<Mutex<AppState>>,
     stop: Option<Stop>,
+    /// The current part's "stopped by a mouse click" flag (`Job::Capture::mouse_stop`).
+    mouse_stop: Option<Arc<AtomicBool>>,
     owns_busy: bool,
     capture_failed: bool,
     exiting: bool,
@@ -308,6 +337,7 @@ impl<H: Host> Engine<H> {
             busy,
             shared,
             stop: None,
+            mouse_stop: None,
             owns_busy: false,
             capture_failed: false,
             exiting: false,
@@ -332,9 +362,34 @@ impl<H: Host> Engine<H> {
         if self.exiting {
             return Err("Motetto is shutting down".into());
         }
+        // A clip or a recording without a mic, started while a call is asked, is not that call:
+        // decline the question, then start with the setup as chosen (no mic means no Me track).
+        if let (Action::Start(Some(setup)), SessionState::Asking { call_id, .. }) =
+            (&action, &self.session.app.state)
+            && (setup.video_only() || setup.mic == MicChoice::Off)
+        {
+            let call_id = call_id.clone();
+            self.apply(
+                Command::AnswerAsk {
+                    call_id,
+                    record: false,
+                    screen: None,
+                },
+                now,
+            );
+        }
         // Record now while asking is the answer to the question (guardrail 2): record that call.
+        // The asked call keeps its own mic rules; only the setup's picture carries over.
         let action = match (action, &self.session.app.state) {
-            (Action::Start, SessionState::Asking { call_id, .. }) => Action::AnswerAsk {
+            (Action::Start(setup), SessionState::Asking { call_id, .. }) => Action::AnswerAsk {
+                call_id: call_id.clone(),
+                record: true,
+                screen: setup.and_then(|s| s.screen),
+            },
+            (
+                Action::OpenCapture(crate::capture_overlay::CaptureKind::Call),
+                SessionState::Asking { call_id, .. },
+            ) => Action::AnswerAsk {
                 call_id: call_id.clone(),
                 record: true,
                 screen: None,
@@ -342,12 +397,24 @@ impl<H: Host> Engine<H> {
             (action, _) => action,
         };
         let command = match action {
-            Action::Start => {
+            Action::OpenCapture(kind) => {
+                self.host.open_capture(kind, None);
+                return Ok(());
+            }
+            Action::Start(setup) => {
+                // No mic, no app sounds and no picture would make an empty meeting.
+                if setup
+                    .as_ref()
+                    .is_some_and(|s| s.mic == MicChoice::Off && !s.app_sounds && s.screen.is_none())
+                {
+                    return Err(NOTHING_TO_RECORD.into());
+                }
                 self.reserve(now)?;
                 self.apply(
                     Command::StartManual {
                         meeting_id: timestamp(),
                         notes_only: false,
+                        setup,
                     },
                     now,
                 );
@@ -410,6 +477,12 @@ impl<H: Host> Engine<H> {
                 self.host.set_ask_on_call(on)?;
                 Command::SetAskOnCall(on)
             }
+            // The clip's window closed: Resume chooses another window on the setup.
+            Action::Resume if self.session.app.screen_closed.is_some() => {
+                self.host
+                    .open_capture(crate::capture_overlay::CaptureKind::Clip, Some("window"));
+                return Ok(());
+            }
             Action::Resume => {
                 if self.capture_failed {
                     return Err(
@@ -436,15 +509,32 @@ impl<H: Host> Engine<H> {
                 if self.session.app.meeting_id.as_ref() != Some(&id) {
                     return Ok(());
                 }
+                self.stopped_by(StopSource::Keyboard);
                 Command::StopRecordingInMain
             }
-            Action::Stop => Command::StopRecordingInMain,
+            Action::Stop(source) => {
+                self.stopped_by(source);
+                Command::StopRecordingInMain
+            }
             Action::Keep => Command::KeepRecording,
-            Action::SwitchMic => {
-                if self.session.app.state != SessionState::Recording {
-                    return Ok(());
+            // A setup that fixed the mic (a device, or None) gives way to the one just chosen.
+            Action::SwitchMic => match (&self.session.app.state, &self.session.app.setup) {
+                (SessionState::Recording | SessionState::Paused, Some(setup))
+                    if setup.mic != MicChoice::Default =>
+                {
+                    Command::SetMic(MicChoice::Default)
                 }
-                Command::SwitchMicrophone
+                (SessionState::Recording, _) => Command::SwitchMicrophone,
+                _ => return Ok(()),
+            },
+            Action::SetMic(mic) => {
+                if !matches!(
+                    self.session.app.state,
+                    SessionState::Recording | SessionState::Paused
+                ) {
+                    return Err("Choose the microphone while recording".into());
+                }
+                Command::SetMic(mic)
             }
             Action::Discard => Command::DiscardRecording,
             Action::UndoDiscard => Command::UndoDiscard,
@@ -493,6 +583,12 @@ impl<H: Host> Engine<H> {
             self.host.show_main();
         }
         Ok(())
+    }
+    /// Tell the worker how the running part is being stopped, before the stop itself.
+    fn stopped_by(&self, source: StopSource) {
+        if let Some(flag) = &self.mouse_stop {
+            flag.store(source == StopSource::Mouse, Ordering::SeqCst);
+        }
     }
     /// Take the one-meeting reservation and fresh readiness before a recording can start.
     fn reserve(&mut self, now: u64) -> Result<(), String> {
@@ -652,6 +748,8 @@ impl<H: Host> Engine<H> {
                 Effect::StartCapture { meeting_id, .. } => {
                     let stop = Stop::default();
                     self.stop = Some(stop.clone());
+                    let mouse_stop = Arc::new(AtomicBool::new(false));
+                    self.mouse_stop = Some(mouse_stop.clone());
                     self.host.job(Job::Capture {
                         id: meeting_id,
                         offset_ms: self.session.app.elapsed_ms,
@@ -669,6 +767,8 @@ impl<H: Host> Engine<H> {
                             .screen
                             .as_ref()
                             .is_some_and(|s| s.while_sharing.is_some()),
+                        setup: self.session.app.setup.clone(),
+                        mouse_stop,
                     })
                 }
                 Effect::StopCapture => {
@@ -679,6 +779,7 @@ impl<H: Host> Engine<H> {
                     id: meeting_id,
                     apps: self.session.app_names(),
                 }),
+                Effect::SaveClip { meeting_id } => self.host.job(Job::SaveClip { id: meeting_id }),
                 Effect::Discard { meeting_id } => self.host.job(Job::Discard { id: meeting_id }),
                 Effect::Trash { meeting_id } => self.host.job(Job::Trash { id: meeting_id }),
                 Effect::NotifyShort { seconds } => {

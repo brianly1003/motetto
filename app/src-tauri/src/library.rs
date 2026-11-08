@@ -53,6 +53,65 @@ pub struct MeetingSummary {
     /// Keep or Remove in Quick check (SPEC 7.13). Written with the notes.
     #[serde(default)]
     pub unconfirmed: Vec<String>,
+    /// Milliseconds before Stop the pointer left the recorded screen, for trim to suggest cutting;
+    /// None unless Stop was a mouse click and the pointer had left.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub reach_ms: Option<u64>,
+    /// A screen recording saved as just the video, or a meeting (notes make it one).
+    #[serde(default)]
+    pub kind: MeetingKind,
+    /// What a screen recording recorded and how, for its page's fact chips.
+    #[serde(default)]
+    pub facts: Option<ScreenFacts>,
+    /// What a Recently deleted row holds: a whole meeting, or the full video a trim replaced
+    /// (its id is then `<id>-full`).
+    #[serde(default)]
+    pub deleted_kind: DeletedKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DeletedKind {
+    #[default]
+    Meeting,
+    TrimmedOriginal,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum MeetingKind {
+    #[default]
+    Meeting,
+    Screen,
+}
+
+/// A kind this version doesn't know (written by a newer one) reads as a meeting.
+impl<'de> Deserialize<'de> for MeetingKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("screen") => Self::Screen,
+            _ => Self::Meeting,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ScreenFacts {
+    /// The window's app, the area or the display, as the setup named it.
+    pub source: String,
+    /// "window", "area" or "display".
+    pub what: String,
+    pub mic_off: bool,
+    pub app_sounds: bool,
+    pub clicks: bool,
+    /// Frames a second the picture was recorded at; 0 when not known.
+    pub fps: u32,
+    /// The video's size in pixels; 0 until the first picture part is saved.
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -321,6 +380,10 @@ fn unreadable(id: &str) -> MeetingSummary {
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        reach_ms: None,
+        kind: Default::default(),
+        facts: None,
+        deleted_kind: Default::default(),
         has_video: false,
     }
 }
@@ -448,6 +511,10 @@ pub fn import(
         notes_language: None,
         apps: vec![],
         unconfirmed: vec![],
+        reach_ms: None,
+        kind: Default::default(),
+        facts: None,
+        deleted_kind: Default::default(),
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -570,6 +637,13 @@ pub(crate) fn used_spellings() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_facts_from_an_older_or_newer_writer_still_read() {
+        let facts: ScreenFacts = serde_json::from_str(r#"{"source":"Safari"}"#).unwrap();
+        assert_eq!(facts.source, "Safari");
+        assert!(!facts.mic_off && facts.width == 0);
+    }
     #[test]
     fn bytes_sum_meeting_files_but_not_links() {
         let root = temp_root();
@@ -713,6 +787,10 @@ mod tests {
                     notes_language: None,
                     apps: vec![],
                     unconfirmed: vec![],
+                    reach_ms: None,
+                    kind: Default::default(),
+                    facts: None,
+                    deleted_kind: Default::default(),
                     has_video: false,
                 },
             )
@@ -725,6 +803,23 @@ mod tests {
         assert_eq!(meeting.notes_md, "### Action items");
         assert_eq!(meeting.transcript, "[00:00] Hello");
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn unknown_kind_reads_as_meeting() {
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready","kind":"podcast"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(summary.kind, MeetingKind::Meeting);
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready","kind":"screen"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(summary.kind, MeetingKind::Screen);
+        // Saved before kinds existed.
+        let json = r#"{"id":"1","title":"T","created_ms":1,"status":"Ready"}"#;
+        let summary: MeetingSummary = serde_json::from_str(json).unwrap();
+        assert_eq!((summary.kind, summary.facts), (MeetingKind::Meeting, None));
+        assert_eq!(
+            serde_json::to_value(MeetingKind::Screen).unwrap(),
+            serde_json::json!("screen")
+        );
     }
     #[test]
     fn list_skips_other_folders_and_flags_unreadable_meetings() {
@@ -761,6 +856,10 @@ mod tests {
                 notes_language: None,
                 apps: vec![],
                 unconfirmed: vec![],
+                reach_ms: None,
+                kind: Default::default(),
+                facts: None,
+                deleted_kind: Default::default(),
                 has_video: false,
             };
             save(&root, &summary).unwrap();

@@ -4,6 +4,7 @@ import { elapsedLabel } from "@/lib/session";
 import { strings as s } from "@/lib/strings";
 import * as ipc from "@/lib/ipc";
 import { handBack } from "@/lib/focus";
+import { lineInClip, type ClipTrack } from "@/lib/clip";
 
 const esc = (text: string) => text.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const READ_MS = 1500;
@@ -11,7 +12,7 @@ const READ_MS = 1500;
 // As in the mockup: the time plays from its line; the words are the line's text, edited in place
 // (SPEC 7.11). The speaker and time never change; an emptied line is removed but keeps its place,
 // and what was heard stays one click away (Revert).
-export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position, running = false}: {id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number; running?: boolean}) {
+export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position, running = false, clip}: {id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number; running?: boolean; /** Save a clip is open: lines outside the range step back, a time takes its line. */ clip?: {from: number; to: number; track: ClipTrack; total: number; onPick: (index: number) => void}}) {
   const lines = transcriptLines(text, marks);
   const heardLines = heard ? transcriptLines(heard, []) : null;
   const [focused, setFocused] = useState(-1);
@@ -119,7 +120,7 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
 
   const editable = !locked;
   return <div className="transcript-edit">
-    <div ref={box} className="tlist" tabIndex={0} role="document" aria-label={locked ? s.transcriptLockedLabel : s.transcriptLabel}
+    <div ref={box} className="tlist" data-clip={clip ? "" : undefined} tabIndex={0} role="document" aria-label={locked ? s.transcriptLockedLabel : s.transcriptLabel}
       onKeyDown={event => {
         const target = event.target as HTMLElement;
         if (target.isContentEditable || target.closest(".epop, .rmv") || event.metaKey || event.ctrlKey) return;
@@ -135,8 +136,10 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
         const removed = !line.text.trim() && !!original.trim(), edited = !!heardLines && line.text !== original;
         const next = lines.slice(index + 1).find(l => l.ms !== null)?.ms;
         const seek = onSeek && line.ms !== null ? () => onSeek(line.ms!) : undefined;
-        return <div className={`tline ${side}${index === playing && index !== focused ? " playing" : ""}${edited ? " edited" : ""}${removed ? " removed" : ""}`} key={index} data-line={index} tabIndex={-1}>
-          <button className="ts" disabled={!seek} onClick={seek} aria-label={`Play from ${line.time}`}>{line.time}</button><span className={`who ${side}`}>{line.speaker}</span>
+        const inclip = !!clip && lineInClip(lines, index, clip.total, clip.from, clip.to, clip.track);
+        const pick = clip && line.ms !== null ? () => clip.onPick(index) : undefined;
+        return <div className={`tline ${side}${index === playing && index !== focused ? " playing" : ""}${edited ? " edited" : ""}${removed ? " removed" : ""}${inclip ? " inclip" : ""}`} key={index} data-line={index} tabIndex={-1}>
+          <button className="ts" disabled={clip ? !pick : !seek} onClick={clip ? pick : seek} aria-label={clip ? `${s.clipLine} ${line.time}` : `Play from ${line.time}`}>{line.time}</button><span className={`who ${side}`}>{line.speaker}</span>
           <span className="tx">
             {removed
               ? <span className="rmv"><s>{original}</s><span>{s.lineRemoved}</span>{editable && <button className="lnk" onClick={() => void save(index, original)}>{s.revert}</button>}</span>
