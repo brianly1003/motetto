@@ -23,20 +23,24 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
   onToast?: (message: string, action?: () => Promise<void>, label?: string) => void; onError: (message: string) => void;
 }) {
   const total = media.duration_ms, { from, to, track } = clip, length = (to - from) / 1000;
-  const [levels, setLevels] = useState<number[]>([]);
+  // The close-up's levels with the window they were read for: while a handle moves the window
+  // moves too, and snapping must read the levels at their own times, not the new window's.
+  const [read, setRead] = useState<{ z0: number; z1: number; levels: number[] }>({ z0: 0, z1: 0, levels: [] }), levels = read.levels;
   // The last measured facts stay on screen while a new preview is made; only Play waits for it.
   const [preview, setPreview] = useState<{ facts: ClipPreview; src: string } | null>(null), [fresh, setFresh] = useState(false);
   const [playing, setPlaying] = useState(false), [loop, setLoop] = useState(false), [words, setWords] = useState(true);
   const [at, setAt] = useState<number | null>(null), [drag, setDrag] = useState<"a" | "b" | null>(null), [saving, setSaving] = useState(false);
   const strip = useRef<HTMLDivElement>(null), audio = useRef<HTMLAudioElement>(null), handleB = useRef<HTMLSpanElement>(null), bar = useRef<HTMLDivElement>(null);
   const latest = useRef(clip); latest.current = clip;
+  // The edge the arrow keys move: the one last dragged, clicked or focused; the end at first.
+  const [edge, setEdge] = useState<"a" | "b">("b");
   const z0 = Math.max(0, from - ZOOM_PAD), z1 = Math.min(total, to + ZOOM_PAD);
-  const zoom = useRef({ z0, z1, levels }); zoom.current = { z0, z1, levels };
+  const zoom = useRef(read); zoom.current = read;
 
   // The close-up and the preview follow the range once it stops moving.
   useEffect(() => {
     let live = true;
-    const t = setTimeout(() => { ipc.clipLevels(id, track, z0, z1, ZOOM_BINS).then(v => { if (live) setLevels(v); }).catch(() => {}); }, 120);
+    const t = setTimeout(() => { ipc.clipLevels(id, track, z0, z1, ZOOM_BINS).then(v => { if (live) setRead({ z0, z1, levels: v }); }).catch(() => {}); }, 120);
     return () => { live = false; clearTimeout(t); };
   }, [id, track, z0, z1]);
   useEffect(() => {
@@ -72,11 +76,11 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
     onChange(side === "a" ? { ...c, from: Math.min(v, c.to - 500) } : { ...c, to: Math.max(v, c.from + 500) });
   };
   function grab(e: React.PointerEvent<HTMLSpanElement>, side: "a" | "b") {
-    e.preventDefault(); e.currentTarget.focus(); setDrag(side);
+    e.preventDefault(); e.currentTarget.focus(); setDrag(side); setEdge(side);
     let last = latest.current[side === "a" ? "from" : "to"], exact = e.altKey;
     const move = (ev: PointerEvent) => { const r = strip.current?.getBoundingClientRect(); if (!r) return; exact = ev.altKey; last = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * total; set(side, last); };
     // A dropped handle lands on the nearest pause, unless Alt was held.
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); setDrag(null); if (!exact) { const z = zoom.current; set(side, snap(z.levels, z.z0, z.z1, last)); } };
+    const up = (ev: PointerEvent) => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); setDrag(null); if (!exact && !ev.altKey) { const z = zoom.current; set(side, snap(z.levels, z.z0, z.z1, last)); } };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
   }
   async function save() {
@@ -98,7 +102,8 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
     const key = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest?.("input:not([type=checkbox]), textarea, [role=menu], [role=alertdialog]")) return;
-      const side = (document.activeElement as HTMLElement | null)?.dataset?.ch as "a" | "b" | undefined;
+      // Arrows move the chosen edge wherever focus is (Play, Loop, a transcript time), not only on a handle.
+      const side = ((document.activeElement as HTMLElement | null)?.dataset?.ch as "a" | "b" | undefined) ?? edge;
       if (side && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); e.stopPropagation(); const c = latest.current; set(side, (side === "a" ? c.from : c.to) + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 100)); }
       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
       else if (e.key === "Enter" && !e.metaKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); void save(); }
@@ -123,7 +128,7 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
   const quiet: [number, number][] = [];
   levels.forEach((v, i) => { if (v < loudest * 0.2) { const last = quiet[quiet.length - 1]; if (last && last[1] === i) last[1] = i + 1; else quiet.push([i, i + 1]); } });
   const pauses = quiet.filter(([a, b]) => (b - a) * per >= 60);
-  const th = (side: "a" | "b", ms: number) => <span ref={side === "b" ? handleB : undefined} className={`th ${side}${drag === side ? " drag" : ""}`} role="slider" tabIndex={0} data-ch={side}
+  const th = (side: "a" | "b", ms: number) => <span ref={side === "b" ? handleB : undefined} className={`th ${side}${drag === side ? " drag" : ""}${edge === side ? " on" : ""}`} role="slider" tabIndex={0} data-ch={side} onFocus={() => setEdge(side)}
     aria-label={side === "a" ? "Start of the clip" : "End of the clip"} aria-valuemin={0} aria-valuemax={total / 1000} aria-valuenow={+(ms / 1000).toFixed(1)} aria-valuetext={tfmt(ms / 1000)}
     onPointerDown={e => grab(e, side)}><b>{tfmt(ms / 1000)}</b></span>;
   const text = wordsInRange(lines, from, to, track), who = track === "Me" ? "You" : track;
@@ -154,7 +159,7 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
     <div className="trow"><button type="button" className="btn sm" disabled={!fresh} onClick={toggle} title="Play the clip (Space)">{playing ? STOP : PLAY}{playing ? "Stop" : "Play"}</button>
       <button type="button" className="btn sm" aria-pressed={loop} onClick={() => setLoop(on => !on)} title="Play it again and again (L)"><MenuIcon name="again"/>Loop</button>
       <span className="mono"><b>{tfmt(from / 1000)} - {tfmt(to / 1000)}</b> · {length.toFixed(1)} s</span><span className="sp"/>
-      <span className="tkeys"><kbd>←</kbd><kbd>→</kbd> nudge · <kbd>⌥</kbd> exact</span></div>
+      <span className="tkeys"><kbd>←</kbd><kbd>→</kbd> {edge === "a" ? "move the start" : "move the end"} · <kbd>⌥</kbd>-drag exact</span></div>
     <div className="trow end"><span className="cfile" title={clipFileName(title, from)}>{clipFileName(title, from)} · {s.clipFormat.replace("{bits}", String(facts?.bits ?? 32)).replace("{kind}", facts && !facts.float ? "integer" : "float")}</span>
       <label className="cbx"><input type="checkbox" checked={words} onChange={e => setWords(e.target.checked)}/> {s.clipWords}</label>
       <button type="button" className="btn sm ghost" onClick={onClose}>{s.cancel}</button>

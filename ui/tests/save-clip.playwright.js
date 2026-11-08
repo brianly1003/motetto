@@ -71,13 +71,41 @@ async (page) => {
   // Keys: Shift+→ on the end handle adds a second.
   await p.locator('[data-ch="b"]').focus(); await p.keyboard.press('Shift+ArrowRight');
   if (!(await p.locator('.clipbar .trow .mono').textContent()).includes('00:37.0')) fails.push('Shift+→ ' + await p.locator('.clipbar .trow .mono').textContent());
+  // Arrows move the chosen edge with nothing focused (after Play, Loop or a transcript time), and
+  // the hint says which edge; the end first, the start once its handle was used.
+  const range = async () => (await p.locator('.clipbar .trow .mono').textContent()).match(/(\d+):(\d+\.\d) - (\d+):(\d+\.\d)/).slice(1).map(Number);
+  const secs = ([am, as, bm, bs]) => [am * 60 + as, bm * 60 + bs];
+  await p.evaluate(() => document.activeElement?.blur());
+  if (!(await p.locator('.clipbar .tkeys').last().textContent()).includes('move the end')) fails.push('hint does not name the end');
+  await p.keyboard.press('ArrowRight');
+  if (secs(await range())[1] !== 37.1) fails.push('→ with nothing focused: ' + await range());
+  await p.locator('[data-ch="a"]').focus(); await p.evaluate(() => document.activeElement?.blur());
+  await p.keyboard.press('ArrowLeft');
+  if (secs(await range())[0] !== 27.9) fails.push('← after using the start: ' + await range());
+  if (!(await p.locator('.clipbar .tkeys').last().textContent()).includes('move the start')) fails.push('hint does not name the start');
+  // A drag snaps to the pause in the close-up (31.7-32.1 s here); ⌥ drags exactly.
+  await p.waitForTimeout(400);
+  const box = await p.locator('#cstrip, .clipbar .tstrip').first().boundingBox(), at = (ms) => box.x + (ms / 87000) * box.width;
+  const drag = async (to, alt) => {
+    const h = await p.locator('[data-ch="b"]').boundingBox();
+    await p.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await p.mouse.down();
+    if (alt) await p.keyboard.down('Alt');
+    await p.mouse.move(at(to), h.y + h.height / 2, { steps: 4 }); await p.mouse.up();
+    if (alt) await p.keyboard.up('Alt');
+    return secs(await range())[1];
+  };
+  const snapped = await drag(31500, false);
+  if (snapped < 31.6 || snapped > 32.2) fails.push('drag did not snap to the pause: ' + snapped);
+  await p.waitForTimeout(400);
+  const exact = await drag(33500, true);
+  if (Math.abs(exact - 33.5) > 0.15) fails.push('⌥-drag not exact: ' + exact);
   await p.screenshot({ path: '.playwright-out/save-clip-light.png' });
   // Save: the words of Them in the range, then a toast and the timeline back.
   await p.getByRole('button', { name: 'Save clip…' }).click();
   await p.waitForSelector('.tl');
   const save = await p.evaluate(() => window.calls.find(x => x.c === 'save_clip')?.a);
-  if (!save || save.track !== 'Them' || save.fromMs !== 28000 || save.toMs !== 37000 || save.words !== 'So Beams adds device management and reporting on top of FCM?') fails.push('save args ' + JSON.stringify(save));
-  if (!await p.getByText('Saved “FCM vs Pusher Beams 00-28.wav” and its words. The meeting is unchanged.').count()) fails.push('no saved toast');
+  if (!save || save.track !== 'Them' || save.fromMs !== 27900 || Math.abs(save.toMs - 33500) > 150 || save.words !== 'So Beams adds device management and reporting on top of FCM?') fails.push('save args ' + JSON.stringify(save));
+  if (!await p.getByText('Saved “FCM vs Pusher Beams 00-27.wav” and its words. The meeting is unchanged.').count()) fails.push('no saved toast');
   if (!await p.evaluate(() => window.calls.some(x => x.c === 'clip_preview_clear'))) fails.push('previews not cleared on close');
   await p.close();
 
