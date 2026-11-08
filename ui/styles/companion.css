@@ -195,3 +195,6 @@ html:has(.pill), body:has(.pill), html:has(.askwrap), body:has(.askwrap), body:h
 .pill[data-videoonly] .duet, .pill[data-videoonly] .caption { display: none !important; }
 .pillvo { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
 .pillvo svg { width: 15px; height: 15px; flex: none; color: var(--rec); }
+.pillvo { overflow: hidden; } .pillvo > span { overflow: hidden; text-overflow: ellipsis; }
+/* The open sidecar has no room for the words: the film icon stays, its title says why. */
+.pill[data-size="sidecar"] .pillvo { flex: none; } .pill[data-size="sidecar"] .pillvo > span { display: none; }

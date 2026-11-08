@@ -75,6 +75,24 @@ async (page) => {
   out.push('clip screen menu without Audio only');
   await c.close();
 
+  // 2b. The Pill names a video-only recording; the open sidecar keeps only its icon, never
+  // drawing the words under the buttons.
+  c = await open('companion', 'companion', {}, {width: 460, height: 72});
+  await c.locator('.pillvo').waitFor();
+  assert((await c.locator('.pillvo').innerText()).startsWith('Video only'), 'Pill label');
+  await c.close();
+  c = await open('companion', 'companion', {over: {companion: {visible: true, size: 'Sidecar', pinned: false, peeking: false, display_id: ''}}}, {width: 340, height: 420});
+  await c.locator('.pillvo').waitFor({state: 'attached'});
+  const spill = await c.evaluate(() => {
+    const vo = document.querySelector('.pillvo'), text = vo.querySelector(':scope > span');
+    const right = getComputedStyle(text).display === 'none' ? vo.getBoundingClientRect().right : text.getBoundingClientRect().right;
+    const next = vo.nextElementSibling && [...vo.parentElement.children].slice([...vo.parentElement.children].indexOf(vo) + 1).find(e => e.getBoundingClientRect().width > 0);
+    return next ? right - next.getBoundingClientRect().left : 0;
+  });
+  assert(spill <= 0.5, `Video only runs ${spill}px under the sidecar buttons`);
+  out.push('video only label fits the Pill and the sidecar');
+  await c.close();
+
   // 3. The window closed: the Pill says so and Resume chooses another window.
   const closed = {state: {type: 'Stopped', resume_until_ms: 1e15}, screen_closed: 'Safari'};
   c = await open('companion', 'companion', {over: closed}, {width: 460, height: 72});
