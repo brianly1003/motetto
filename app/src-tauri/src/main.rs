@@ -5,6 +5,7 @@ mod calls;
 mod capture_overlay;
 mod catalog;
 mod clicks;
+mod clip;
 mod companion;
 mod controller;
 mod desktop;

@@ -70,6 +70,8 @@ import type {CaptureKind} from './bindings/CaptureKind';
 import type {CaptureMemory} from './bindings/CaptureMemory';
 import type {CaptureWindow} from './bindings/CaptureWindow';
 import type {RecordSetup} from './bindings/RecordSetup';
+import type {ClipPreview} from './bindings/ClipPreview';
+import type {ClipTrack} from './clip';
 /** The screen setup over every display; `mode` opens it on that mode instead of the remembered one. */
 export const openCapture = (kind: CaptureKind, mode: 'audio'|'display'|'window'|'area'|null = null) => invoke<void>('open_capture', {kind, mode});
 export const closeCapture = () => invoke<void>('close_capture');
@@ -104,6 +106,17 @@ export const trimVideo = (id:string, fromMs:number, toMs:number) => invoke<Meeti
 export const restoreTrim = (id:string) => invoke<MeetingSummary>('restore_trim',{id});
 /** Export MP4…: the save panel, then the whole video; false when the panel was cancelled. */
 export const exportVideo = (id:string) => invoke<boolean>('export_video',{id});
+/** Save a clip (SPEC 15). Peaks of the raw track over fromMs..toMs, for the close-up. */
+export const clipLevels = (id:string, track:ClipTrack, fromMs:number, toMs:number, bins:number) => invoke<number[]>('clip_levels',{id, track, fromMs, toMs, bins});
+/** The exact clip written into the app cache, so Play and Loop play what Save would write. */
+export const clipPreview = (id:string, track:ClipTrack, fromMs:number, toMs:number) => invoke<ClipPreview>('clip_preview',{id, track, fromMs, toMs});
+export const clipPreviewClear = () => invoke<void>('clip_preview_clear');
+/** Show in Finder for the clip just saved (the app remembers which; no path is sent). */
+export const revealClip = () => invoke<void>('reveal_clip');
+/** A preview's file path as the webview can play it. */
+export async function clipAudioSrc(path: string) { const {convertFileSrc} = await import('@tauri-apps/api/core'); return convertFileSrc(path); }
+/** The save panel, then the WAV and its words; null when the panel was cancelled. */
+export const saveClip = (id:string, track:ClipTrack, fromMs:number, toMs:number, words:string|null) => invoke<string|null>('save_clip',{id, track, fromMs, toMs, words});
 export const dontAskForApp = (callId: string) => invoke<void>("dont_ask_for_app", { callId });
 export const undoDontAsk = (appId: string) => invoke<void>("undo_dont_ask", { appId });
 export const holdAsk = (hold: boolean) => invoke<void>("hold_ask", { hold });

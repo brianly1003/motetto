@@ -117,6 +117,11 @@ pub fn run() {
             crate::trim::trim_video,
             crate::trim::restore_trim,
             crate::video_export::export_video,
+            crate::clip::clip_levels,
+            crate::clip::clip_preview,
+            crate::clip::clip_preview_clear,
+            crate::clip::save_clip,
+            crate::clip::reveal_clip,
             dont_ask_for_app,
             undo_dont_ask,
             hold_ask,
@@ -164,6 +169,8 @@ pub fn run() {
             crate::settings_system::open_logs_folder
         ])
         .setup(|app| {
+            // Clip previews from a run that ended with the panel open.
+            crate::clip::clear_previews(app.handle());
             let config = app.path().app_config_dir()?;
             let mut settings = crate::settings::Settings::read(&config)?;
             crate::settings::apply_appearance(app.handle(), &settings.appearance);

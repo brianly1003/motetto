@@ -9,8 +9,9 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-/// The file name the save panel proposes: the title without path separators.
-fn file_name(title: &str) -> String {
+/// A title made safe as a file name: no path separators or control characters, no leading dot;
+/// `fallback` when nothing is left.
+pub(crate) fn clean_title(title: &str, fallback: &str) -> String {
     let name: String = title
         .chars()
         .map(|c| {
@@ -22,14 +23,16 @@ fn file_name(title: &str) -> String {
         })
         .collect();
     let name = name.trim().trim_start_matches('.');
-    format!(
-        "{}.mp4",
-        if name.is_empty() {
-            "Screen recording"
-        } else {
-            name
-        }
-    )
+    if name.is_empty() {
+        fallback.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// The file name the save panel proposes: the title without path separators.
+fn file_name(title: &str) -> String {
+    format!("{}.mp4", clean_title(title, "Screen recording"))
 }
 
 /// Writes the whole video beside `dst` first, then renames it over, so a failure never leaves a

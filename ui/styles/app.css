@@ -1186,6 +1186,54 @@ input.sp-name:hover { background: var(--surface-2); }
 .tsug svg { width: 13px; height: 13px; }
 .tkeys { color: var(--ink-3); font-size: 11.5px; display: inline-flex; gap: 3px; align-items: center; }
 @media (prefers-reduced-motion: reduce) { .twin .th b { transition: none; } }
+/* Save a clip (DESIGN 4.20, mockup clipEdHtml): a range of one track saved as its own WAV plus
+   its words. Same window, handles and keys as Trim; the strip shows the track's sound, not frames. */
+.clipbar { margin-top: 10px; --voice: var(--voice-me); }
+.clipbar[data-track="Them"] { --voice: var(--voice-them); } .clipbar[data-track="Both"] { --voice: var(--ink-2); }
+.clipbar .chead { display: flex; align-items: center; gap: 8px; }
+.clipbar .chead h4 { margin: 0; font: 600 13px var(--font-ui); display: inline-flex; align-items: center; gap: 6px; }
+.clipbar .chead h4 svg { width: 14px; height: 14px; color: var(--accent); }
+.clipbar .sp { flex: 1; }
+.cwave { position: absolute; inset: 4px 0; width: 100%; height: calc(100% - 8px); border-radius: 6px; background: var(--surface-2); }
+.cwave .w { opacity: .7; } .cwave .w.me { fill: var(--voice-me); } .cwave .w.them { fill: var(--voice-them); }
+.cwave .mid { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* Outside the clip fades instead of going dark: a waveform has no picture to hide. */
+.clipbar .tdim { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.cplay { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); pointer-events: none; }
+.czoom { position: relative; height: 36px; border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.czoom svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.czoom .bar { fill: var(--voice); opacity: .35; } .czoom .bar.in { opacity: .85; }
+.czoom .quiet { fill: color-mix(in srgb, var(--ok) 14%, transparent); }
+.czoom .edge { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.czoom .head { stroke: var(--ink); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.czoom .snap { stroke: var(--ok); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.czoom .zl { position: absolute; top: 3px; left: 6px; font: 500 10.5px var(--font-data); color: var(--ink-3); font-feature-settings: "tnum"; }
+.czoom .zr { left: auto; right: 6px; }
+/* The clip's words as a quotation in the document face, led by who said them (no box, no rule). */
+.cwords { margin: 0; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.cwords .who { flex: none; font: 500 12px var(--font-ui); color: var(--voice); }
+.cwords q { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 400 14.5px/1.5 var(--font-doc); color: var(--ink); quotes: "\201C" "\201D"; }
+.cwords.empty q { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-3); quotes: none; }
+.cchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cchips .chip.amber { background: var(--accent-soft); color: var(--accent-ink); }
+.cchips .chip.rec { background: var(--rec-soft); color: var(--rec); }
+.cnote { margin: 0; font-size: 12px; color: var(--ink-2); display: flex; gap: 6px; align-items: flex-start; }
+.cnote svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--accent); }
+/* The Recently deleted rows share the .trow name; the panel's rows are plain lines. */
+.clipbar .trow { padding: 0; border-bottom: 0; background: none; }
+.clipbar .trow .btn svg { width: 13px; height: 13px; }
+.clipbar .trow .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.clipbar .trow.end { flex-wrap: nowrap; padding-top: 8px; border-top: 1px solid var(--line); }
+.cfile { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px var(--font-data); color: var(--ink-2); font-feature-settings: "tnum"; }
+.cbx { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+/* While clipping, the lines outside the clip step back; the clip's lines keep full strength and
+   their time becomes the amber time chip the notes use. */
+.tlist[data-clip] .tline { transition: opacity .15s ease; }
+.tlist[data-clip] .tline:not(.inclip) { opacity: .42; }
+.tlist[data-clip] .tline:not(.inclip):hover { opacity: .75; }
+.tline.inclip .ts { color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 0 6px; margin-left: -6px; justify-self: start; }
+.tlist[data-clip] .tline .ts:hover:not(:disabled)::after { content: " \2702"; }
+@media (prefers-reduced-motion: reduce) { .tlist[data-clip] .tline { transition: none; } }
 /* The app plays the real video where the mockup draws a scene, and the strip shows real frames. */
 .clipframe video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .clipframe .vgap { z-index: 1; }

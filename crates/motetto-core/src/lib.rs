@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "macos")]
 pub mod capture;
+pub mod clip;
 mod platform;
 #[cfg(target_os = "windows")]
 pub use platform::windows as capture;

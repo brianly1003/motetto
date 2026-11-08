@@ -14,6 +14,7 @@ const paths = {
   trash: <path d="M2.8 4.5h10.4M6.3 4.5V3h3.4v1.5M4.3 4.5l.7 8.5h6l.7-8.5"/>,
   script: <path d="M3 4h10M3 8h10M3 12h6"/>,
   lock: <><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></>,
+  cut: <><circle cx="4.5" cy="4.5" r="2"/><circle cx="4.5" cy="11.5" r="2"/><path d="M6.2 5.6L13.5 12M6.2 10.4L13.5 4"/></>,
 };
 export type IconName = keyof typeof paths;
 
