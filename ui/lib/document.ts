@@ -67,6 +67,22 @@ export function noteSections(markdown: string) {
   if(section.title || section.lines.length) sections.push(section);
   return sections.filter(s => s.title || s.lines.some(l=>l.text.trim()));
 }
+/** An item that only says "nothing": "None", or what small models write instead by copying the
+ *  prompt's <...> placeholders ("<none>", "(none)", "None.", "N/A"). Same list as the notes
+ *  writer's `summarize::none_item`, so notes saved before it shows "None" too. */
+export function noneItem(text: string) {
+  const t = text.trim().replace(/&lt;/g, "<").replace(/\.+$/, "").replace(/^[<>()[\]*_]+|[<>()[\]*_]+$/g, "").trim().toLowerCase();
+  return ["none", "n/a", "nothing", "-"].includes(t);
+}
+
+/** Every "nothing" bullet as the plain "- None"; the line count stays, so edits keep their place. */
+export function tidyNone(markdown: string) {
+  return markdown.split("\n").map(line => {
+    const m = /^(\s*[-*] )(.*)$/.exec(line);
+    return m && noneItem(m[2]) ? `${m[1]}None` : line;
+  }).join("\n");
+}
+
 export function taskLine(text: string) {
   const match = /^\s*[-*] \[([ xX])\] (.*)$/.exec(text);
   if (!match) return null;

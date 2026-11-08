@@ -57,7 +57,7 @@ pub fn unconfirmed(
             continue;
         }
         let claim = claim(line);
-        if claim.is_empty() || claim.trim_end_matches('.').eq_ignore_ascii_case("none") {
+        if claim.is_empty() || crate::summarize::none_item(claim) {
             continue;
         }
         let (text, time) = split_time(claim);
