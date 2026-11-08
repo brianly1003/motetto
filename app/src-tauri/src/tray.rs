@@ -364,6 +364,7 @@ mod tests {
                 app_sounds: true,
                 notes: false,
                 clicks: true,
+                picture: None,
                 screen: Some(motetto_core::events::ScreenPick {
                     choice: motetto_core::events::ScreenChoice::Display { id: 1 },
                     name: "Display".into(),

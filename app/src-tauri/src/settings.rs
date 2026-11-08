@@ -364,7 +364,7 @@ impl Settings {
             || !["30_days", "forever", "after_notes"].contains(&self.keep_audio.as_str())
             || !["call_window", "display"].contains(&self.screen_source.as_str())
             || !["ask", "keep_window"].contains(&self.screen_on_own_share.as_str())
-            || !["sharp", "smaller"].contains(&self.screen_preset.as_str())
+            || !crate::capture_overlay::PICTURES.contains(&self.screen_preset.as_str())
             || !["same_as_audio", "7_days", "forever"].contains(&self.keep_video.as_str())
             || !["pill", "dot"].contains(&self.companion.default_size.as_str())
         {
@@ -737,6 +737,7 @@ mod tests {
             clicks: true,
             area: None,
             remember: true,
+            picture: None,
         };
         assert_eq!(
             settings.capture_call,
@@ -762,6 +763,8 @@ mod tests {
         settings.screen_preset = "huge".into();
         assert!(settings.validate().is_err());
         settings.screen_preset = "smaller".into();
+        assert!(settings.validate().is_ok());
+        settings.screen_preset = "high".into();
         assert!(settings.validate().is_ok());
     }
 

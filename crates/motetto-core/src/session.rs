@@ -789,6 +789,7 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
                     app_sounds: true,
                     notes: true,
                     clicks: true,
+                    picture: None,
                     screen,
                 })
                 .mic = mic;

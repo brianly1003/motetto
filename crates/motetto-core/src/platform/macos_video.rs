@@ -32,6 +32,8 @@ struct State {
     origin: Option<f64>,
     /// No audio: the first frame sets the origin instead of the audio clock.
     origin_from_frames: bool,
+    /// The preset's frame rate: a held first frame lasts one frame of it.
+    fps: i32,
     finished: bool,
 }
 
@@ -174,6 +176,7 @@ impl Writer {
                 me,
                 origin: None,
                 origin_from_frames,
+                fps: preset.fps(),
                 finished: false,
             })))
         }
@@ -223,7 +226,7 @@ impl Writer {
             let sample = if elapsed < 0.0 && matches!(input, Input::Video) {
                 let origin = s.origin.unwrap_or(seconds);
                 let timing = objc2_core_media::CMSampleTimingInfo {
-                    duration: objc2_core_media::CMTime::new(1, 15),
+                    duration: objc2_core_media::CMTime::new(1, s.fps),
                     presentationTimeStamp: objc2_core_media::CMTime::new(
                         (origin * 1_000_000.0).round() as i64,
                         1_000_000,

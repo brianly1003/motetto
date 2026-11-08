@@ -1747,6 +1747,7 @@ fn clip_setup(notes: bool) -> RecordSetup {
         app_sounds: true,
         notes,
         clicks: true,
+        picture: None,
         screen: Some(window_pick()),
     }
 }
@@ -1935,6 +1936,7 @@ fn call_recording_keeps_old_rules() {
         app_sounds: true,
         notes: true,
         clicks: true,
+        picture: None,
         screen: None,
     };
     let (s, _) = start_setup(fresh(), setup);

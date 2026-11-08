@@ -35,6 +35,7 @@ async (page) => {
         if (c === 'plugin:event|listen') { (listeners[a.event] ||= []).push(a.handler); return a.handler; }
         if (c === 'get_state') return {state: {type: 'Idle'}, meeting_id: null, app: null, elapsed_ms: 0};
         if (c === 'capture_memory') return memory[a.kind];
+        if (c === 'get_settings') return {screen_preset: 'smaller'};
         if (c === 'capture_windows') return windows;
         if (c === 'microphones') return {mics, chosen: null, active: mics[0], issue: null};
         if (c === 'capture_level') return .12;
@@ -284,6 +285,29 @@ async (page) => {
     if (startArea.kind !== 'Area' || startArea.display !== 1) throw Error('Return on another display: ' + JSON.stringify(startArea));
     if (d.errors.length) throw Error(d.errors.join());
     await d.close();
+
+    // Picture: Settings' preset until this setup picks one; High goes with the recording.
+    const q2 = await open(ctx, theme, 'Clip');
+    await q2.locator('[data-cap="opts"]').click();
+    await q2.locator('[data-capset="pic:smaller"][aria-checked="true"]').waitFor();
+    if (!(await q2.locator('.capmenu .note').innerText()).includes('About 120 MB an hour')) throw Error('size for Settings\' preset');
+    await q2.locator('[data-capset="pic:high"]').click();
+    await q2.locator('[data-cap="opts"]').click();
+    if ((await q2.locator('[data-capset="pic:high"]').getAttribute('aria-checked')) !== 'true') throw Error('High not chosen');
+    if (!(await q2.locator('.capmenu .note').innerText()).includes('About 1 GB an hour')) throw Error('size for High');
+    await q2.locator('.capmenu').screenshot({path: `.playwright-out/capture-picture-${theme}.png`});
+    await q2.keyboard.press('Escape');
+    await q2.locator('[data-capmode="display"]').click();
+    await q2.keyboard.press('Alt+Enter');
+    await q2.waitForFunction(() => window.calls.some(x => x.c === 'start_capture'));
+    const pic = await q2.evaluate(() => window.calls.find(x => x.c === 'start_capture').a);
+    if (pic.setup.picture !== 'high' || pic.memory.picture !== 'high') throw Error('picture not sent ' + JSON.stringify(pic));
+    if (q2.errors.length) throw Error(q2.errors.join());
+    await q2.close();
+    const q3 = await open(ctx, theme, 'Call');
+    await q3.locator('[data-cap="opts"]').click();
+    if (await q3.locator('[data-capset^="pic:"]').count()) throw Error('Picture offered in Audio only');
+    await q3.close();
 
     r.diffs = diffs;
     out.push(r);

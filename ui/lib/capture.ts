@@ -15,9 +15,14 @@ export type Screen = { id: number; name: string; w: number; h: number };
 /** A countdown: it ends at `until` (ms), and the overlay of display `by` starts the recording. */
 export type Count = { total: number; until: number; by: number };
 /** One setup for every display: each overlay sends its changes to the others. */
+/** Picture presets, as Settings › Screen video offers them (Rust: capture_overlay::PICTURES). */
+export const PICTURES = ["smaller", "sharp", "high"];
+
 export type Cap = {
   mode: Mode; mic: MicChoice; sys: boolean; notes: boolean; timer: number; clicks: boolean; remember: boolean;
   area: Area; sel: CaptureWindow | null; screen: Screen | null; count: Count | null;
+  /** The picture preset for this recording; null follows Settings › Screen video. */
+  picture: string | null;
 };
 
 /** The remembered setup; during a recording (`live`) there is no Audio only. */
@@ -29,7 +34,7 @@ export function fromMemory(memory: CaptureMemory, mode: string | null, live: boo
     mode: next, mic: memory.mic, sys: hears(memory.mic, memory.app_sounds, next === "audio" || memory.notes), notes: next === "audio" || memory.notes,
     timer: TIMERS.includes(memory.timer) ? memory.timer : 0, clicks: memory.clicks, remember: memory.remember,
     area: a ? { display: null, x: a.x, y: a.y, w: a.width, h: a.height } : { display: null, x: Math.round(view.w / 2 - 260), y: 150, w: 520, h: 320 },
-    sel: null, screen: null, count: null,
+    sel: null, screen: null, count: null, picture: PICTURES.includes(memory.picture ?? "") ? memory.picture! : null,
   };
 }
 
@@ -44,6 +49,7 @@ export function capSet(cap: Cap, key: string, mic?: MicChoice): Cap {
   if (k === "timer") next.timer = Number(val);
   if (k === "clicks") next.clicks = !cap.clicks;
   if (k === "remember") next.remember = !cap.remember;
+  if (k === "pic" && PICTURES.includes(val)) next.picture = val;
   if (next.notes && next.mic.kind === "Off" && !next.sys) next.sys = true;
   return next;
 }
@@ -95,11 +101,12 @@ export function screenPick(cap: Cap, main: number, scale: number, mainScreen: Sc
   return null;
 }
 
-export const recordSetup = (cap: Cap, screen: ScreenPick | null): RecordSetup => ({ mic: cap.mic, app_sounds: cap.sys, notes: cap.notes, clicks: cap.clicks, screen });
+export const recordSetup = (cap: Cap, screen: ScreenPick | null): RecordSetup => ({ mic: cap.mic, app_sounds: cap.sys, notes: cap.notes, clicks: cap.clicks, screen, ...(screen && cap.picture ? { picture: cap.picture } : {}) });
 
 export const memoryOf = (cap: Cap): CaptureMemory => ({
   mode: cap.mode, mic: cap.mic, app_sounds: cap.sys, notes: cap.notes, timer: cap.timer, clicks: cap.clicks,
   area: { x: cap.area.x, y: cap.area.y, width: cap.area.w, height: cap.area.h }, remember: cap.remember,
+  ...(cap.picture ? { picture: cap.picture } : {}),
 });
 
 /** Seconds left in a countdown at `now`. */

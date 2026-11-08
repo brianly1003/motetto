@@ -5,4 +5,8 @@ import type { ScreenPick } from "./ScreenPick";
 /**
  * The choices made on the setup screen before a recording starts.
  */
-export type RecordSetup = { mic: MicChoice, app_sounds: boolean, notes: boolean, clicks: boolean, screen: ScreenPick | null, };
+export type RecordSetup = { mic: MicChoice, app_sounds: boolean, notes: boolean, clicks: boolean, screen: ScreenPick | null, 
+/**
+ * The picture preset for this recording ("smaller", "sharp" or "high"); None keeps Settings'.
+ */
+picture?: string, };

@@ -6,9 +6,12 @@ import type { Cap } from "@/lib/capture";
 import type { MicChoice } from "@/lib/bindings/MicChoice";
 import type { MicReport } from "@/lib/bindings/MicReport";
 import { micChoices, micSub } from "@/components/Microphone";
-import { CHECK_IC, CLICK_IC, Dial, FILM_IC, K, LOCK_IC, MIC_IC, MICOFF_IC, NOTES_IC, SPK_IC } from "./icons";
+import { sizeLabel } from "@/lib/screen";
+import { CHECK_IC, CLICK_IC, Dial, FILM_IC, K, LOCK_IC, MIC_IC, MICOFF_IC, NOTES_IC, SCR_IC, SPK_IC } from "./icons";
 
 export type Which = "mic" | "opts" | "timer";
+/** Settings › Screen video's presets, smallest first. */
+const PICTURE: [string, string, string][] = [["smaller", "Smaller", "720p · 10 fps"], ["sharp", "Sharp", "1080p · 15 fps"], ["high", "High", "1440p · 30 fps"]];
 const SUB: Record<number, string> = { 0: "The moment you press Record", 3: "Time to bring the window forward", 5: "Time to put the pointer in place", 10: "Time to set the scene" };
 
 /** The device the mic choice records from: `null` is the system default's row. */
@@ -27,8 +30,10 @@ export function micName(mic: MicChoice, report: MicReport | null) {
   return report?.mics.find(m => m.id === row)?.name ?? "Microphone";
 }
 
-export function CaptureMenu({ which, cap, report, anchor, onSet, onClose }: {
+export function CaptureMenu({ which, cap, report, anchor, preset, onSet, onClose }: {
   which: Which; cap: Cap; report: MicReport | null; anchor: HTMLElement | null;
+  /** Settings › Screen video, used while this setup has no picture of its own. */
+  preset: string;
   onSet: (key: string, mic?: MicChoice) => void; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -65,14 +70,15 @@ export function CaptureMenu({ which, cap, report, anchor, onSet, onClose }: {
       {row("sys", SPK_IC, "Sounds from apps", cap.sys, cap.sys ? "Videos, calls and alerts, on their own track" : "Off: the video is silent unless the mic is on")}
     </>;
   } else {
-    const silent = cap.mic.kind === "Off" && !cap.sys;
+    const silent = cap.mic.kind === "Off" && !cap.sys, picture = cap.picture ?? preset;
     body = <>
       {cap.mode !== "audio" && <><div className="mh">After recording</div>{row("notes:0", FILM_IC, "Just the video", !cap.notes, "No transcript, no notes")}</>}
       {cap.mode !== "audio" && row("notes:1", NOTES_IC, "Transcript and notes", cap.notes, silent ? "Needs a mic or computer audio" : `Written on this ${K("Mac", "PC")}, like a call`)}
+      {cap.mode !== "audio" && <><div className="sep"/><div className="mh">Picture</div>{PICTURE.map(([id, label, sub]) => row("pic:" + id, SCR_IC, label, picture === id, `${sub} · ~${sizeLabel(id)}/hour`))}</>}
       <div className="sep"/><div className="mh">Options</div>
       {row("clicks", CLICK_IC, "Show mouse clicks", cap.clicks)}
       {row("remember", CHECK_IC, "Remember last selection", cap.remember)}
-      <div className="sep"/><p className="note">{LOCK_IC} Saved to your Motetto library on this {K("Mac", "PC")}. About 110 MB an hour.</p>
+      <div className="sep"/><p className="note">{LOCK_IC} Saved to your Motetto library on this {K("Mac", "PC")}.{cap.mode !== "audio" && ` About ${sizeLabel(picture)} an hour.`}</p>
     </>;
   }
   return <div ref={ref} className="capmenu" data-for={which} role="menu" aria-label={which === "mic" ? "Microphone" : which === "timer" ? "Start recording" : "Options"}

@@ -106,6 +106,10 @@ pub struct RecordSetup {
     pub notes: bool,
     pub clicks: bool,
     pub screen: Option<ScreenPick>,
+    /// The picture preset for this recording ("smaller", "sharp" or "high"); None keeps Settings'.
+    #[serde(default)]
+    #[ts(optional)]
+    pub picture: Option<String>,
 }
 
 impl RecordSetup {

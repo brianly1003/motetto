@@ -13,4 +13,8 @@ mode: string, mic: MicChoice, app_sounds: boolean, notes: boolean,
 /**
  * Seconds before the first frame, one of `TIMERS`.
  */
-timer: number, clicks: boolean, area: AreaRect | null, remember: boolean, };
+timer: number, clicks: boolean, area: AreaRect | null, remember: boolean, 
+/**
+ * One of `PICTURES` for a screen recording; None follows Settings › Screen video.
+ */
+picture?: string, };

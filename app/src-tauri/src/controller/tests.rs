@@ -715,6 +715,7 @@ fn start_with_setup_passes_setup() {
         app_sounds: true,
         notes: false,
         clicks: true,
+        picture: None,
         screen: Some(ScreenPick {
             choice: ScreenChoice::Window {
                 window_id: 7,
@@ -770,6 +771,7 @@ fn a_clip_started_while_asking_declines_the_call_and_keeps_its_setup() {
         app_sounds: true,
         notes: false,
         clicks: true,
+        picture: None,
         screen: Some(ScreenPick {
             choice: ScreenChoice::Display { id: 1 },
             name: "Built-in Display".into(),
@@ -791,6 +793,7 @@ fn a_stopped_clip_is_saved_and_the_worker_knows_how_it_was_stopped() {
         app_sounds: false,
         notes: false,
         clicks: true,
+        picture: None,
         screen: Some(ScreenPick {
             choice: ScreenChoice::Display { id: 1 },
             name: "Built-in Display".into(),
@@ -843,6 +846,7 @@ fn resume_after_a_clip_window_closed_opens_the_setup_on_window() {
         app_sounds: true,
         notes: false,
         clicks: true,
+        picture: None,
         screen: Some(motetto_core::events::ScreenPick {
             choice: motetto_core::events::ScreenChoice::Window {
                 window_id: 7,
@@ -868,6 +872,7 @@ fn a_setup_with_nothing_to_record_never_starts() {
         app_sounds: false,
         notes: true,
         clicks: true,
+        picture: None,
         screen: None,
     };
     assert_eq!(

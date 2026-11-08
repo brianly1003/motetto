@@ -27,6 +27,8 @@ pub enum CaptureKind {
 
 pub const MODES: [&str; 4] = ["audio", "display", "window", "area"];
 pub const TIMERS: [u8; 4] = [0, 3, 5, 10];
+/// Picture presets, as in Settings › Screen video.
+pub const PICTURES: [&str; 3] = ["smaller", "sharp", "high"];
 
 /// The setup bar's last choices for one kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -42,6 +44,9 @@ pub struct CaptureMemory {
     pub clicks: bool,
     pub area: Option<AreaRect>,
     pub remember: bool,
+    /// One of `PICTURES` for a screen recording; None follows Settings › Screen video.
+    #[ts(optional)]
+    pub picture: Option<String>,
 }
 impl CaptureMemory {
     /// Record now: audio only, the Settings mic, notes, no timer.
@@ -55,6 +60,7 @@ impl CaptureMemory {
             clicks: true,
             area: None,
             remember: true,
+            picture: None,
         }
     }
     /// Record the screen: a window, no mic, just the video, 3 s to bring the window forward.
@@ -79,6 +85,10 @@ impl CaptureMemory {
                     && a.width > 0.0
                     && a.height > 0.0
             })
+            && self
+                .picture
+                .as_deref()
+                .is_none_or(|p| PICTURES.contains(&p))
     }
 }
 impl Default for CaptureMemory {
@@ -631,6 +641,11 @@ mod tests {
             height: 10.0,
         });
         assert!(!bad.valid());
+        let mut picture = CaptureMemory::clip();
+        picture.picture = Some("high".into());
+        assert!(picture.valid());
+        picture.picture = Some("huge".into());
+        assert!(!picture.valid());
     }
 
     #[test]

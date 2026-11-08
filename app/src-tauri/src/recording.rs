@@ -74,9 +74,7 @@ pub fn spawn(
                                 let settings = app.state::<crate::settings::Store>().get();
                                 // A screen recording's page names its frame rate, as recorded.
                                 if let (0, Ok(settings)) = (offset_ms, &settings) {
-                                    let fps =
-                                        motetto_core::video::Preset::parse(&settings.screen_preset)
-                                            .fps();
+                                    let fps = picture_preset(setup.as_ref(), settings).fps();
                                     let _ = crate::bookmarks::update(&root, &id, |s| {
                                         if let Some(facts) = s.facts.as_mut() {
                                             facts.fps = fps.unsigned_abs();
@@ -140,6 +138,9 @@ pub fn spawn(
                                     {
                                         picture.cursor = true;
                                         picture.clicks = setup.clicks;
+                                        if let Some(p) = &setup.picture {
+                                            picture.preset = motetto_core::video::Preset::parse(p);
+                                        }
                                     }
                                     if stop.load(Ordering::Acquire) {
                                         picture.take();
@@ -391,6 +392,18 @@ struct Recording {
     failure: Option<String>,
 }
 const CLIP_SAVED: &str = "Saved to your library. Just the video: no transcript, no notes.";
+/// The picture preset: the one chosen on the setup bar, else Settings › Screen video.
+fn picture_preset(
+    setup: Option<&RecordSetup>,
+    settings: &crate::settings::Settings,
+) -> motetto_core::video::Preset {
+    motetto_core::video::Preset::parse(
+        setup
+            .and_then(|s| s.picture.as_deref())
+            .unwrap_or(&settings.screen_preset),
+    )
+}
+
 /// The tracks a setup records, as (mic, system); without a setup both, as before.
 fn tracks(setup: Option<&RecordSetup>) -> (bool, bool) {
     setup.map_or((true, true), |s| (s.mic != MicChoice::Off, s.app_sounds))
@@ -782,6 +795,7 @@ mod tests {
             app_sounds,
             notes: false,
             clicks: true,
+            picture: None,
             screen: Some(motetto_core::events::ScreenPick {
                 choice: ScreenChoice::Window {
                     window_id: 7,
@@ -790,6 +804,15 @@ mod tests {
                 name: "Safari".into(),
             }),
         }
+    }
+    #[test]
+    fn the_setup_picture_wins_over_settings() {
+        let settings: crate::settings::Settings = serde_json::from_str("{}").unwrap();
+        let mut setup = clip(MicChoice::Off, true);
+        assert_eq!(picture_preset(Some(&setup), &settings).fps(), 15);
+        assert_eq!(picture_preset(None, &settings).fps(), 15);
+        setup.picture = Some("high".into());
+        assert_eq!(picture_preset(Some(&setup), &settings).fps(), 30);
     }
     #[test]
     fn mic_off_writes_no_mic_wav() {

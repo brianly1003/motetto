@@ -6,14 +6,16 @@ use crate::watch::{AppRule, title_matches};
 pub enum Preset {
     Sharp,
     Smaller,
+    /// Crisp text and smooth scrolling; several times the size (owner 2026-11-07).
+    High,
 }
 
 impl Preset {
     pub fn parse(value: &str) -> Self {
-        if value == "smaller" {
-            Self::Smaller
-        } else {
-            Self::Sharp
+        match value {
+            "smaller" => Self::Smaller,
+            "high" => Self::High,
+            _ => Self::Sharp,
         }
     }
 
@@ -21,6 +23,7 @@ impl Preset {
         match self {
             Self::Sharp => (1920, 1080),
             Self::Smaller => (1280, 720),
+            Self::High => (2560, 1440),
         }
     }
 
@@ -28,6 +31,7 @@ impl Preset {
         match self {
             Self::Sharp => 15,
             Self::Smaller => 10,
+            Self::High => 30,
         }
     }
 
@@ -35,6 +39,7 @@ impl Preset {
         match self {
             Self::Sharp => 350_000,
             Self::Smaller => 200_000,
+            Self::High => 2_500_000,
         }
     }
 }
@@ -311,6 +316,9 @@ mod tests {
         }
         assert_eq!(Preset::parse("other"), Preset::Sharp);
         assert_eq!(Preset::parse("smaller").video_bps(), 200_000);
+        assert_eq!(fit_size(3456.0, 2234.0, Preset::High), (2226, 1440));
+        let high = Preset::parse("high");
+        assert_eq!((high.fps(), high.video_bps()), (30, 2_500_000));
     }
 
     fn area(x: f64, y: f64, width: f64, height: f64) -> AreaRect {

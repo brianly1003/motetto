@@ -37,6 +37,8 @@ function Setup() {
   const [drawn, setDrawn] = useState<Area | null>(null);
   const [menu, setMenu] = useState<{ which: Which; anchor: HTMLElement } | null>(null);
   const [name, setName] = useState("this display");
+  // Settings › Screen video: the picture while this setup hasn't chosen one.
+  const [preset, setPreset] = useState("sharp");
   // Re-renders the countdown; the seconds left are read from the clock when drawn.
   const [, setNow] = useState(0);
   const started = useRef(false);
@@ -64,6 +66,7 @@ function Setup() {
       update(fromMemory(memory, modeParam, recording, view), false);
     });
     void ipc.captureWindows().then(w => { if (active) setWindows(w); }).catch(() => {});
+    void ipc.getSettings().then(s => { if (active) setPreset(s.screen_preset); }).catch(() => {});
     void ipc.listScreenSources().then(o => {
       const d = o.find(o => o.pick.choice.kind === "Display" && o.pick.choice.id === display);
       if (active && d) setName(d.pick.name);
@@ -245,7 +248,7 @@ function Setup() {
         onMode={(m: Mode) => { setHover(null); update(capMode(cap, m)); }}
         onMenu={(which, anchor) => setMenu(menu?.which === which ? null : { which, anchor })}
         onGo={() => go()} onClose={() => void ipc.closeCapture()}/>
-      {menu && <CaptureMenu which={menu.which} cap={cap} report={report} anchor={menu.anchor} onSet={set} onClose={() => setMenu(null)}/>}
+      {menu && <CaptureMenu which={menu.which} cap={cap} report={report} anchor={menu.anchor} preset={preset} onSet={set} onClose={() => setMenu(null)}/>}
     </>}
     {!main && ownHover && <CapHint cap={cap} own screenName={name}/>}
     {cap.count && mine(target) && <Countdown left={countLeft(cap.count, Date.now())} total={cap.count.total} name={aim.name} noMic={cap.mic.kind === "Off"} x={aim.x} y={aim.y} onNow={startNow} onMore={() => {
