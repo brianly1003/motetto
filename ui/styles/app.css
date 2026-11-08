@@ -1199,6 +1199,10 @@ input.sp-name:hover { background: var(--surface-2); }
 .cwave .mid { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 /* Outside the clip fades instead of going dark: a waveform has no picture to hide. */
 .clipbar .tdim { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+/* The edge the arrow keys move keeps its time showing. */
+.clipbar .twin .th.on b { opacity: 1; }
+/* Room above the strip for that time, so it never covers the track buttons. */
+.clipbar .tstrip { margin-top: 22px; }
 .cplay { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); pointer-events: none; }
 .czoom { position: relative; height: 36px; border-radius: 8px; background: var(--surface-2); overflow: hidden; }
 .czoom svg { position: absolute; inset: 0; width: 100%; height: 100%; }
