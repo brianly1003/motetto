@@ -31,11 +31,16 @@ pub(super) struct Track {
 impl SCStreamOutputTrait for Track {
     fn did_output_sample_buffer(&self, buf: CMSampleBuffer, _: SCStreamOutputType) {
         if let Err(error) = self.write_buffer(&buf) {
+            // Only a failed write is about the disk; a format the mic sends is not.
+            let hint = if error.is::<hound::Error>() || error.is::<std::io::Error>() {
+                "; check free disk space and folder permissions"
+            } else {
+                ""
+            };
             // The receiver may already be gone while capture is stopping.
-            let _ = self.errors.send(Err(format!(
-                "cannot save {}: {error}; check free disk space and folder permissions",
-                self.path
-            )));
+            let _ = self
+                .errors
+                .send(Err(format!("cannot save {}: {error}{hint}", self.path)));
         } else if let Some(video) = &self.video
             && buf.num_samples() > 0
         {
@@ -56,15 +61,42 @@ impl Track {
         if frames == 0 {
             return Ok(());
         }
-        // Built-in mics deliver f32; a Bluetooth headset mic in call mode delivers 16-bit integers.
+        // Built-in mics deliver f32; a Bluetooth headset mic in call mode delivers 16-bit integers,
+        // and USB interfaces 24-bit ones, packed in 3 bytes or padded to 4.
         let format = buf.format_description();
         let float = format.as_ref().is_none_or(|f| f.audio_is_float());
         let bits = format
             .as_ref()
             .and_then(|f| f.audio_bits_per_channel())
             .unwrap_or(32);
-        let samples = to_f32(first.data(), float, bits)
-            .ok_or_else(|| format!("unsupported audio format ({bits}-bit, float: {float})"))?;
+        let flags = format
+            .as_ref()
+            .and_then(|f| f.audio_format_flags())
+            .unwrap_or(0);
+        // Core Audio's kAudioFormatFlagIsAlignedHigh and kAudioFormatFlagIsNonInterleaved.
+        let (high, planar) = (flags & 1 << 4 != 0, flags & 1 << 5 != 0);
+        let per_buffer = if planar {
+            1
+        } else {
+            format
+                .as_ref()
+                .and_then(|f| f.audio_channel_count())
+                .unwrap_or(1)
+                .max(1)
+        };
+        let width = format
+            .as_ref()
+            .and_then(|f| f.audio_bytes_per_frame())
+            .map(|bytes| bytes / per_buffer)
+            .filter(|&w| w > 0)
+            .unwrap_or(bits.div_ceil(8));
+        let big = format.as_ref().is_some_and(|f| f.audio_is_big_endian());
+        let samples = (!big)
+            .then(|| to_f32(first.data(), float, bits, width as usize, high))
+            .flatten()
+            .ok_or_else(|| {
+                format!("this microphone's audio format isn't supported ({bits}-bit in {width} bytes, float: {float}); choose another microphone")
+            })?;
         // Non-interleaved: buffer 0 is channel 0. Interleaved: take every Nth sample.
         let stride = (samples.len() / frames).max(1);
 
@@ -136,28 +168,36 @@ pub(super) fn send_listen(listener: &crate::mics::Listener, mono: &[f32], rate: 
     }
 }
 
-fn to_f32(data: &[u8], float: bool, bits: u32) -> Option<Vec<f32>> {
-    Some(match (float, bits) {
-        (true, 32) => data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| f32::from_ne_bytes(*b))
+/// Little-endian samples of `bits` bits, each in `width` bytes (`high`: in the top bits of
+/// them), as floats in -1.0..1.0.
+fn to_f32(data: &[u8], float: bool, bits: u32, width: usize, high: bool) -> Option<Vec<f32>> {
+    if float {
+        return (bits == 32 && width == 4).then(|| {
+            data.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect()
+        });
+    }
+    if !(2..=4).contains(&width) || bits == 0 || bits as usize > width * 8 {
+        return None;
+    }
+    // Left-justify each sample in 32 bits, so every width reaches full scale at ±1.0.
+    let shift = if high {
+        32 - width * 8
+    } else {
+        32 - bits as usize
+    };
+    Some(
+        data.chunks_exact(width)
+            .map(|b| {
+                let mut word = [0; 4];
+                word[..width].copy_from_slice(b);
+                (u32::from_le_bytes(word) << shift) as i32 as f32 / 2_147_483_648.0
+            })
             .collect(),
-        (false, 16) => data
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| f32::from(i16::from_ne_bytes(*b)) / 32768.0)
-            .collect(),
-        (false, 32) => data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| i32::from_ne_bytes(*b) as f32 / 2_147_483_648.0)
-            .collect(),
-        _ => return None,
-    })
+    )
 }
 
 fn rms(samples: impl Iterator<Item = f32>) -> f32 {
@@ -242,13 +282,33 @@ mod tests {
             .iter()
             .flat_map(|v| v.to_ne_bytes())
             .collect();
-        assert_eq!(to_f32(&int16, false, 16), Some(vec![0.5, -1.0]));
-        assert_eq!(to_f32(&0.25_f32.to_ne_bytes(), true, 32), Some(vec![0.25]));
+        assert_eq!(to_f32(&int16, false, 16, 2, false), Some(vec![0.5, -1.0]));
         assert_eq!(
-            to_f32(&(i32::MIN).to_ne_bytes(), false, 32),
+            to_f32(&0.25_f32.to_le_bytes(), true, 32, 4, false),
+            Some(vec![0.25])
+        );
+        assert_eq!(
+            to_f32(&(i32::MIN).to_le_bytes(), false, 32, 4, false),
             Some(vec![-1.0])
         );
-        assert_eq!(to_f32(&[0; 3], false, 24), None);
+        // 24-bit packed in 3 bytes: half scale, then -1.0.
+        let packed = [0x00, 0x00, 0x40, 0x00, 0x00, 0x80];
+        assert_eq!(to_f32(&packed, false, 24, 3, false), Some(vec![0.5, -1.0]));
+        // 24-bit in 4 bytes, low-aligned (sign-extended) and high-aligned.
+        let low = [0x00, 0x00, 0xC0, 0xFF, 0xFF, 0xFF, 0x7F, 0x00];
+        let low = to_f32(&low, false, 24, 4, false).unwrap();
+        assert_eq!(low[0], -0.5);
+        assert!((low[1] - 1.0).abs() < 1e-6);
+        let high = [0x00, 0x00, 0x00, 0x40];
+        assert_eq!(to_f32(&high, false, 24, 4, true), Some(vec![0.5]));
+        // A partial last sample is dropped, never read past the buffer.
+        assert_eq!(
+            to_f32(&[0, 0, 0x40, 0], false, 24, 3, false),
+            Some(vec![0.5])
+        );
+        assert_eq!(to_f32(&[0; 3], true, 24, 3, false), None);
+        assert_eq!(to_f32(&[0; 8], false, 24, 8, false), None);
+        assert_eq!(to_f32(&[0; 2], false, 24, 2, false), None);
     }
     struct FailingWriter {
         bytes: Cursor<Vec<u8>>,
