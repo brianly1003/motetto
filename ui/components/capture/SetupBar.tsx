@@ -29,20 +29,21 @@ export function SetupBar({ cap, live, ready, what, report, menu, meter, onMode, 
   onMode: (mode: Mode) => void; onMenu: (which: Which, button: HTMLElement) => void; onGo: () => void; onClose: () => void;
 }) {
   const intro = !live, off = cap.mic.kind === "Off", name = micName(cap.mic, report);
-  const mode = (id: Mode, ic: ReactNode, label: string) =>
-    <button type="button" role="radio" className="mode" aria-checked={cap.mode === id} data-capmode={id} title={label} onClick={() => onMode(id)}>{ic}<span>{label}</span></button>;
+  // Icon over a short label, as in a call app's toolbar; the full name is the tooltip.
+  const mode = (id: Mode, ic: ReactNode, label: string, short = label) =>
+    <button type="button" role="radio" className="mode" aria-checked={cap.mode === id} data-capmode={id} aria-label={label} title={label} onClick={() => onMode(id)}>{ic}<span>{short}</span></button>;
   const title = cap.mode === "window" && !ready ? "Click a window to choose it first" : intro && cap.timer ? `Starts after ${cap.timer} seconds (Return). ${K("⌥", "Alt+")}Return starts now` : "Start (Return)";
   return <div className="capbar" id="capbar" role="toolbar" aria-label="Screen recording">
     <div className="modes" role="radiogroup" aria-label="What to record">
-      {intro && <>{mode("audio", WAVE_IC, "Audio only")}<span className="vr thin"/></>}
-      {mode("display", SCR_IC, "Entire screen")}{mode("window", WIN_IC, "Window")}{mode("area", AREA_IC, "Area")}
+      {intro && <>{mode("audio", WAVE_IC, "Audio only", "Audio")}<span className="vr thin"/></>}
+      {mode("display", SCR_IC, "Entire screen", "Screen")}{mode("window", WIN_IC, "Window")}{mode("area", AREA_IC, "Area")}
     </div><span className="vr"/>
     {intro && <>
       <button type="button" className={`chipb${off ? " off" : ""}`} data-cap="mic" aria-haspopup="menu" aria-expanded={menu === "mic"} aria-label={`Microphone: ${name}. Change`} title="Microphone" onClick={e => onMenu("mic", e.currentTarget)}>
-        {off ? MICOFF_IC : MIC_IC}<span className="nm">{name}</span>{meter && <CapLevel/>}{CHEV_IC}
+        <span className="top">{off ? MICOFF_IC : MIC_IC}{meter && <CapLevel/>}{CHEV_IC}</span><span className="nm">{name}</span>
       </button>
       <button type="button" className="chipb" data-cap="opts" aria-haspopup="menu" aria-expanded={menu === "opts"} title="Options" onClick={e => onMenu("opts", e.currentTarget)}>
-        {cap.notes ? NOTES_IC : FILM_IC}<span className="nm">{cap.notes ? "Notes after" : "Just video"}</span>{CHEV_IC}
+        <span className="top">{cap.notes ? NOTES_IC : FILM_IC}{CHEV_IC}</span><span className="nm">{cap.notes ? "Notes after" : "Just video"}</span>
       </button><span className="vr"/>
     </>}
     <div className={`recsplit${ready ? "" : " off"}`}>

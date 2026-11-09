@@ -200,6 +200,74 @@ fn displays(app: &tauri::AppHandle) -> Vec<Display> {
     }
 }
 
+/// Points the Dock (or the Windows taskbar) takes at the bottom of a display: the gap between the
+/// display's bottom and its work area's. Zero when it hides, sits at a side or isn't found.
+fn bottom_inset(display_bottom: f64, work_bottom: f64, height: f64) -> f64 {
+    let inset = display_bottom - work_bottom;
+    if inset.is_finite() && inset > 0.0 && inset < height / 3.0 {
+        inset.round()
+    } else {
+        0.0
+    }
+}
+
+/// A Dock that hides leaves the work area whole but still slides up over the bottom when it shows:
+/// reserve its height (the icon size plus 20 pt of shelf, 62 pt for 42 pt icons). A Dock at a
+/// side reserves nothing at the bottom.
+fn hidden_dock(autohide: bool, orientation: &str, tile_size: f64) -> f64 {
+    if autohide && orientation == "bottom" && tile_size.is_finite() {
+        tile_size.clamp(16.0, 128.0) + 20.0
+    } else {
+        0.0
+    }
+}
+
+/// The Dock's own settings (`defaults read com.apple.dock`), read once per setup.
+#[cfg(target_os = "macos")]
+fn dock_settings() -> f64 {
+    let read = |key: &str| {
+        std::process::Command::new("/usr/bin/defaults")
+            .args(["read", "com.apple.dock", key])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let autohide = read("autohide").is_some_and(|v| v == "1");
+    if !autohide {
+        return 0.0;
+    }
+    // macOS leaves out a key that was never changed: the Dock sits at the bottom, 48 pt icons.
+    let orientation = read("orientation").unwrap_or_else(|| "bottom".into());
+    let tile_size = read("tilesize")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(48.0);
+    hidden_dock(autohide, &orientation, tile_size)
+}
+#[cfg(not(target_os = "macos"))]
+fn dock_settings() -> f64 {
+    0.0
+}
+
+/// The work area of the monitor at (x, y) in points, so the bar sits above the Dock.
+fn dock(app: &tauri::AppHandle, &(_, x, y, _, height): &Display, hidden: f64) -> f64 {
+    let monitors = app.available_monitors().unwrap_or_default();
+    let shown = monitors
+        .iter()
+        .find_map(|m| {
+            let f = m.scale_factor();
+            let p = m.position();
+            let near = |a: i32, b: f64| (f64::from(a) / f - b).abs() < 2.0;
+            (near(p.x, x) && near(p.y, y)).then(|| {
+                let work = m.work_area();
+                let bottom = f64::from(work.position.y + work.size.height as i32) / f;
+                bottom_inset(y + height, bottom, height)
+            })
+        })
+        .unwrap_or(0.0);
+    shown.max(hidden)
+}
+
 /// Opening and closing one at a time, so a second open never races the first for a label.
 static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Esc reaches the overlays from Rust, whichever display or app has the keyboard: the page
@@ -348,12 +416,15 @@ fn build(app: &tauri::AppHandle, kind: CaptureKind, mode: Option<&str>) -> Resul
         })
         .map_err(|e| e.to_string())?;
     crate::window_native::activate_self(app);
-    for (i, &(id, x, y, width, height)) in displays.iter().enumerate() {
+    let hidden = dock_settings();
+    for (i, display) in displays.iter().enumerate() {
+        let &(id, x, y, width, height) = display;
         // The main display's page holds the setup bar; the others point at windows and areas.
         let mut url = format!(
-            "capture/?display={id}&kind={kind:?}&main={}&main_display={}",
+            "capture/?display={id}&kind={kind:?}&main={}&main_display={}&dock={}",
             u8::from(i == main),
-            displays[main].0
+            displays[main].0,
+            dock(app, display, hidden)
         );
         if let Some(mode) = mode {
             url.push_str(&format!("&mode={mode}"));
@@ -540,6 +611,27 @@ pub async fn pick_capture(app: tauri::AppHandle, screen: ScreenPick) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bar_clears_a_bottom_dock_only() {
+        // A 1117-point display with a 70-point Dock at the bottom.
+        assert_eq!(bottom_inset(1117.0, 1047.0, 1117.0), 70.0);
+        // Hidden or at a side: the work area reaches the bottom.
+        assert_eq!(bottom_inset(1117.0, 1117.0, 1117.0), 0.0);
+        // A second display below the first, and nonsense, never lift the bar off the screen.
+        assert_eq!(bottom_inset(2234.0, 1117.0, 1117.0), 0.0);
+        assert_eq!(bottom_inset(1117.0, f64::NAN, 1117.0), 0.0);
+    }
+
+    #[test]
+    fn a_hidden_dock_still_gets_its_room() {
+        // 42 pt icons take 62 pt when the Dock shows, as measured with it always shown.
+        assert_eq!(hidden_dock(true, "bottom", 42.0), 62.0);
+        assert_eq!(hidden_dock(false, "bottom", 42.0), 0.0);
+        assert_eq!(hidden_dock(true, "left", 42.0), 0.0);
+        assert_eq!(hidden_dock(true, "bottom", f64::NAN), 0.0);
+        assert_eq!(hidden_dock(true, "bottom", 900.0), 148.0);
+    }
 
     fn window(id: u32, x: f64, own: bool) -> video::WindowInfo {
         video::WindowInfo {

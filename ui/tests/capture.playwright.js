@@ -45,12 +45,12 @@ async (page) => {
   };
   const browser = page.context().browser();
   const count = (p, c) => p.evaluate(c => window.calls.filter(x => x.c === c).length, c);
-  const open = async (ctx, theme, kind = 'Clip') => {
+  const open = async (ctx, theme, kind = 'Clip', dock = 0) => {
     const p = await ctx.newPage();
     const errors = []; p.on('pageerror', e => errors.push(e.message));
     await p.emulateMedia({colorScheme: theme, reducedMotion: 'reduce'});
     await p.addInitScript(fixture, {kind});
-    await p.goto(`http://127.0.0.1:3000/capture/?display=1&kind=${kind}`);
+    await p.goto(`http://127.0.0.1:3000/capture/?display=1&kind=${kind}&dock=${dock}`);
     await p.locator('#capbar').waitFor();
     // A desktop behind the transparent overlay, for the screenshots only.
     await p.addStyleTag({content: 'html body { background: #c9ccc4 !important; }'});
@@ -72,6 +72,10 @@ async (page) => {
     const p = await open(ctx, theme);
     // Bar: four modes, Record and the 3 s dial for a clip; Tab order ends on ✕.
     if ((await p.locator('[data-capmode]').count()) !== 4) throw Error('modes');
+    // Zoom-style: icon over a short label, the full name as the tooltip.
+    if (await p.locator('[data-capmode="display"] span').innerText() !== 'Screen' || await p.locator('[data-capmode="display"]').getAttribute('title') !== 'Entire screen') throw Error('short labels');
+    const box = await p.locator('.capbar').boundingBox();
+    if (Math.abs(box.height - 52) > 1) throw Error('bar height ' + box.height);
     if (!(await p.locator('.capbar .rec').innerText()).startsWith('Record')) throw Error('Record label');
     if ((await p.locator('.capbar .rectime').innerText()).trim() !== '3s') throw Error('dial label');
     const tabs = await p.evaluate(() => [...document.querySelectorAll('#capbar button')].filter(b => !b.disabled).map(b => b.dataset.capmode || b.dataset.cap));
@@ -304,6 +308,12 @@ async (page) => {
     if (pic.setup.picture !== 'high' || pic.memory.picture !== 'high') throw Error('picture not sent ' + JSON.stringify(pic));
     if (q2.errors.length) throw Error(q2.errors.join());
     await q2.close();
+    // The Dock's height at the bottom: the bar and its hint sit above it, never on it.
+    const dk = await open(ctx, theme, 'Clip', 70);
+    const above = await dk.evaluate(() => [innerHeight - document.querySelector('.capbar').getBoundingClientRect().bottom, document.querySelector('.capbar').getBoundingClientRect().top - document.querySelector('.caphint').getBoundingClientRect().bottom]);
+    if (above[0] < 70 + 12 || above[1] < 4) throw Error('bar over the Dock ' + above);
+    await dk.screenshot({path: `.playwright-out/capture-dock-${theme}.png`});
+    await dk.close();
     const q3 = await open(ctx, theme, 'Call');
     await q3.locator('[data-cap="opts"]').click();
     if (await q3.locator('[data-capset^="pic:"]').count()) throw Error('Picture offered in Audio only');

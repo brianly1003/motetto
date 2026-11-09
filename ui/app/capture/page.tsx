@@ -29,6 +29,9 @@ function Setup() {
   const main = params.get("main") !== "0", modeParam = params.get("mode");
   // The display holding the bar: an area drawn on no display in particular is on it.
   const mainDisplay = Number(params.get("main_display") ?? display);
+  // Points the Dock takes at the bottom of this display: the bar and its hint sit above it.
+  const dock = Math.max(0, Number(params.get("dock")) || 0);
+  useEffect(() => { document.documentElement.style.setProperty("--dock", `${dock}px`); }, [dock]);
   const [cap, setCapState] = useState<Cap | null>(null);
   const capRef = useRef<Cap | null>(null);
   const [live, setLive] = useState(false);
