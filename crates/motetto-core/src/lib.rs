@@ -10,7 +10,7 @@ pub mod aec;
 pub mod config;
 pub mod correct;
 mod decode;
-pub use decode::to_wav as decode_audio;
+pub use decode::{to_wav as decode_audio, to_wav_as_recorded as decode_as_recorded};
 mod diarize;
 pub mod events;
 pub mod mics;

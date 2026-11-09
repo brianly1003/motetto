@@ -1,4 +1,4 @@
-//! Streaming audio decode and delay-compensated resampling to 16 kHz mono WAV.
+//! Streaming audio decode and delay-compensated resampling to mono WAV (16 kHz for whisper).
 
 use rubato::{FftFixedIn, Resampler};
 use std::{
@@ -27,9 +27,24 @@ pub(crate) fn to_wav_measured(source: &Path, destination: &Path) -> Result<(), B
     to_wav_with(source, destination, true)
 }
 
+/// Mono 32-bit float at the file's own rate, for a clip of an imported recording.
+pub fn to_wav_as_recorded(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+    convert_or_ffmpeg(source, destination, false, None)
+}
+
 fn to_wav_with(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<dyn Error>> {
-    let result = match convert(source, destination, measured) {
-        Err(e) if unsupported(e.as_ref()) => ffmpeg(source, destination, e.as_ref()),
+    convert_or_ffmpeg(source, destination, measured, Some(16_000))
+}
+
+/// `to`: the written rate, None for the source's.
+fn convert_or_ffmpeg(
+    source: &Path,
+    destination: &Path,
+    measured: bool,
+    to: Option<u32>,
+) -> Result<(), Box<dyn Error>> {
+    let result = match convert(source, destination, measured, to) {
+        Err(e) if unsupported(e.as_ref()) => ffmpeg(source, destination, to, e.as_ref()),
         other => other,
     };
     result.map_err(|e| {
@@ -64,7 +79,12 @@ pub(crate) fn seconds(source: &Path) -> Option<f64> {
     (rate > 0).then(|| track.num_frames.map(|n| n as f64 / f64::from(rate)))?
 }
 
-fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<dyn Error>> {
+fn convert(
+    source: &Path,
+    destination: &Path,
+    measured: bool,
+    to: Option<u32>,
+) -> Result<(), Box<dyn Error>> {
     if source == destination
         || (destination.exists() && source.canonicalize()? == destination.canonicalize()?)
     {
@@ -79,6 +99,13 @@ fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<
         .as_ref()
         .and_then(|p| p.audio())
         .ok_or("missing audio parameters")?;
+    let to = match to {
+        Some(to) => to,
+        None => params
+            .sample_rate
+            .filter(|&r| r > 0)
+            .ok_or("missing sample rate")?,
+    };
     let mut decoder =
         symphonia::default::get_codecs().make_audio_decoder(params, &Default::default())?;
     let track_id = track.id;
@@ -88,7 +115,7 @@ fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<
         destination,
         hound::WavSpec {
             channels: 1,
-            sample_rate: 16_000,
+            sample_rate: to,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         },
@@ -108,7 +135,7 @@ fn convert(source: &Path, destination: &Path, measured: bool) -> Result<(), Box<
             return Err("invalid audio sample rate or channels".into());
         }
         if resample.is_none() {
-            resample = Some(Mono::new(rate, 16_000)?);
+            resample = Some(Mono::new(rate, to)?);
         }
         let mono = resample.as_mut().ok_or("missing resampler")?;
         if mono.rate != rate {
@@ -147,7 +174,12 @@ fn unsupported(error: &(dyn Error + 'static)) -> bool {
 
 // Opus/WebM imports use the user's own ffmpeg; the desktop app bundles no ffmpeg.
 // If those imports become common, add an Opus decoder instead (docs/decisions/audio-decoding.md).
-fn ffmpeg(source: &Path, destination: &Path, why: &dyn Error) -> Result<(), Box<dyn Error>> {
+fn ffmpeg(
+    source: &Path,
+    destination: &Path,
+    to: Option<u32>,
+    why: &dyn Error,
+) -> Result<(), Box<dyn Error>> {
     // `file:` and the protocol whitelist keep ffmpeg on local files: a playlist or a name that
     // looks like a URL can't make it fetch anything. Mono f32 can't clip; ffmpeg's stereo
     // downmix is 3 dB louder than ours, which whisper doesn't mind.
@@ -161,17 +193,13 @@ fn ffmpeg(source: &Path, destination: &Path, why: &dyn Error) -> Result<(), Box<
             .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
             .args(["-protocol_whitelist", "file", "-y", "-i"])
             .arg(local(source))
-            .args([
-                "-vn",
-                "-ac",
-                "1",
-                "-ar",
-                "16000",
-                "-c:a",
-                "pcm_f32le",
-                "-f",
-                "wav",
-            ])
+            .args(["-vn", "-ac", "1"])
+            .args(
+                to.map(|to| ["-ar".to_string(), to.to_string()])
+                    .into_iter()
+                    .flatten(),
+            )
+            .args(["-c:a", "pcm_f32le", "-f", "wav"])
             .arg(local(destination))
             .stdin(Stdio::null()),
     );

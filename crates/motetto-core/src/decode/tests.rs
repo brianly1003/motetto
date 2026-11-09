@@ -150,3 +150,34 @@ fn seconds_come_from_the_header_without_decoding() {
     assert_eq!(super::seconds(&path), None);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn as_recorded_keeps_the_rate_and_every_sample() {
+    let dir = directory();
+    let (input, output) = (dir.join("in.wav"), dir.join("out.wav"));
+    let mut writer = hound::WavWriter::create(
+        &input,
+        hound::WavSpec {
+            channels: 2,
+            sample_rate: 44100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for i in 0..44_237i32 {
+        let v = (i % 200 - 100) as i16 * 100;
+        writer.write_sample(v).unwrap();
+        writer.write_sample(v).unwrap();
+    }
+    writer.finalize().unwrap();
+    to_wav_as_recorded(&input, &output).unwrap();
+    let mut reader = hound::WavReader::open(&output).unwrap();
+    assert_eq!(reader.spec().sample_rate, 44100);
+    assert_eq!(reader.spec().channels, 1);
+    let samples: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).collect();
+    assert_eq!(samples.len(), 44_237);
+    // Both channels equal, so the mono mix is the sample itself, untouched by a resampler.
+    assert!((samples[150] - (50 * 100) as f32 / 32768.0).abs() < 1e-6);
+    std::fs::remove_dir_all(dir).unwrap();
+}

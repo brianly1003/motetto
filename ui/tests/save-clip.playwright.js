@@ -1,7 +1,7 @@
 // Save a clip (SPEC 15, DESIGN 4.20): ••• opens the panel in place of the timeline, the floating
 // player hides, the transcript fades outside the range and a time takes its line, the track switch
 // changes the words and adds the consent line, the chips come from the preview, Save sends the
-// words and closes with a toast, Esc and Cancel close without saving, an import can't clip.
+// words and closes with a toast, Esc and Cancel close without saving, an import clips its one track.
 async (page) => {
   const fails = [];
   const open = async ({ imported = false, cancel = false, theme = 'light' } = {}) => {
@@ -30,6 +30,7 @@ async (page) => {
         if (c === 'clip_preview') return { path: '/preview.wav', rate: 48000, bits: 32, float: true, peak_db: -5.84, clipped: 0, duration_ms: a.toMs - a.fromMs };
         if (c === 'save_clip') return cancel ? null : `/Users/me/Desktop/FCM vs Pusher Beams ${String(Math.floor(a.fromMs / 60000)).padStart(2, '0')}-${String(Math.floor(a.fromMs / 1000) % 60).padStart(2, '0')}.wav`;
         return false; } };
+      if (imported) meeting.transcript = meeting.transcript.replace(/\] (Me|Them): /g, '] ');
     }, { imported, cancel, theme });
     await p.goto('http://127.0.0.1:3000/main/');
     await p.getByRole('button', { name: /FCM vs Pusher Beams/ }).first().click();
@@ -38,11 +39,18 @@ async (page) => {
     return p;
   };
 
-  // An import has no raw parts: disabled, with the reason.
+  // An import clips its one track: no track switch, no line about other people's voices.
   let p = await open({ imported: true });
   const item = p.getByRole('menuitem', { name: 'Save a clip…' });
-  if (!await item.isDisabled()) fails.push('Save a clip enabled on an import');
-  if (await item.getAttribute('title') !== 'Save a clip works on recordings made in Motetto.') fails.push('no reason on an import');
+  if (await item.isDisabled()) fails.push('Save a clip disabled on an import');
+  await item.click();
+  await p.waitForSelector('.clipbar');
+  if (await p.locator('.clipbar [role=radiogroup]').count()) fails.push('track switch on an import');
+  if (await p.locator('.clipbar .cnote').count()) fails.push('other voices line on an import');
+  if (await p.locator('.cwords .who').textContent() !== 'Audio') fails.push('import words not labelled Audio');
+  if (!(await p.locator('.cwords q').textContent()).startsWith('As you already know')) fails.push('import opens on its first line');
+  await p.waitForFunction(() => window.calls.some(c => c.c === 'clip_preview'));
+  if (!(await p.evaluate(() => window.calls.filter(c => 'track' in c.a).every(c => c.a.track === 'Them')))) fails.push('import clips ask for another track');
   await p.close();
 
   p = await open();

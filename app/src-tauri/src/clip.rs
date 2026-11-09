@@ -18,6 +18,55 @@ use ts_rs::TS;
 
 pub const IMPORTED: &str = "Save a clip works on recordings made in Motetto.";
 
+/// The imported file of an import's folder (`source.mp3`, `source.wav`...), not its `.16k.wav`
+/// copy or whisper's `source.csv`.
+pub(crate) fn imported_source(dir: &Path) -> Option<PathBuf> {
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|path| {
+            path.is_file()
+                && path.file_stem().and_then(|s| s.to_str()) == Some("source")
+                && path.extension().and_then(|s| s.to_str()) != Some("csv")
+        })
+}
+
+/// An import has no recorded parts: its file, decoded once at its own rate into the app cache,
+/// is one Them part (the transcript and the waveform call it Them too).
+fn imported_parts(app: &tauri::AppHandle, dir: &Path, id: &str) -> Result<Vec<Part>, String> {
+    static DECODING: Mutex<()> = Mutex::new(());
+    let source = imported_source(dir).ok_or(IMPORTED)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("clip-sources");
+    let wav = cache.join(format!("{id}.wav"));
+    {
+        // Levels and the preview ask at once; one decodes, the other waits for its file.
+        let _one = DECODING.lock().map_err(|e| e.to_string())?;
+        if !wav.is_file() {
+            fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+            let partial = cache.join(format!("{id}.partial.wav"));
+            motetto_core::decode_as_recorded(&source, &partial)
+                .and_then(|()| Ok(fs::rename(&partial, &wav)?))
+                .map_err(|e| {
+                    let _ = fs::remove_file(&partial);
+                    e.to_string()
+                })?;
+        }
+    }
+    let reader = hound::WavReader::open(&wav).map_err(|e| e.to_string())?;
+    Ok(vec![Part {
+        offset_ms: 0,
+        duration_ms: u64::from(reader.duration()) * 1000
+            / u64::from(reader.spec().sample_rate.max(1)),
+        mic: None,
+        system: Some(wav),
+    }])
+}
+
 #[derive(Debug, Serialize, TS)]
 pub struct ClipPreview {
     pub path: String,
@@ -132,9 +181,10 @@ fn previews(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("clips"))
 }
 
-/// Removes every preview (on close, on another meeting, and at start).
+/// Removes every preview and decoded import (on close, on another meeting, and at start).
 pub(crate) fn clear_previews(app: &tauri::AppHandle) {
     if let Ok(dir) = previews(app) {
+        let _ = fs::remove_dir_all(dir.with_file_name("clip-sources"));
         let _ = fs::remove_dir_all(dir);
     }
 }
@@ -142,7 +192,12 @@ pub(crate) fn clear_previews(app: &tauri::AppHandle) {
 fn load(app: &tauri::AppHandle, id: &str) -> Result<(Vec<Part>, library::MeetingSummary), String> {
     let root = app.state::<Library>().root.clone();
     let summary = library::summary(&root, id)?;
-    Ok((parts(&library::folder(&root, id)?)?, summary))
+    let dir = library::folder(&root, id)?;
+    let parts = match parts(&dir) {
+        Err(e) if e == IMPORTED => imported_parts(app, &dir, id)?,
+        other => other?,
+    };
+    Ok((parts, summary))
 }
 
 fn checked(parts: &[Part], track: &str, from_ms: u64, to_ms: u64) -> Result<Track, String> {
@@ -351,6 +406,21 @@ mod tests {
     #[test]
     fn an_imported_meeting_has_no_parts() {
         assert_eq!(parts(&temp("imported")), Err(IMPORTED.to_string()));
+    }
+
+    #[test]
+    fn an_import_clips_its_own_file() {
+        let dir = temp("source");
+        assert_eq!(imported_source(&dir), None);
+        for name in [
+            "source.16k.wav",
+            "source.csv",
+            "transcript.txt",
+            "source.mp3",
+        ] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        assert_eq!(imported_source(&dir), Some(dir.join("source.mp3")));
     }
 
     #[test]

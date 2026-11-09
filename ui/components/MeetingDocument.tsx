@@ -248,13 +248,14 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   // 2026-10-30: "[09:47]" showed as text, then turned into a chip).
   const notesDuration=media?duration:meeting.summary.duration_ms??0;
   const tracks=media?.tracks??[];
-  // Clips come from the raw parts a recording writes; an import has only its .16k copy.
+  // Clips come from a recording's raw parts, or from an import's own file (the app decodes it).
   const clipLines=transcriptLines(meeting.transcript,[]);
-  const clipBlocked=!media?null:!tracks.length?s.clipNoAudio:!tracks.some(t=>/^part-\d{4}\.(mic|system)\./.test(t.name))?s.clipImported:null;
+  const clipBlocked=!media?null:!tracks.length?s.clipNoAudio:null;
   function openClip(){
     if(!media)return;
     setPlaying(false);setTab('Transcript');
-    setClipping({...defaultRange(clipLines,'Me',duration),track:'Me'});
+    const track=tracks.some(t=>t.speaker==='You')?'Me':'Them';
+    setClipping({...defaultRange(clipLines,track,duration),track});
   }
   function pickLine(index:number){
     const r=lineRange(clipLines,index,duration);

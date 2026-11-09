@@ -116,7 +116,12 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
 
   const A = (from / total) * 100, B = (to / total) * 100;
   // The whole meeting's sound of the chosen track(s), mirrored around the middle.
-  const envelope = (speaker: string) => media.tracks.filter(t => t.speaker === speaker).map(t => {
+  // An import's one track ("Audio") is the Them side of a clip; whose voice it is isn't known.
+  const side = (speaker: string) => speaker === "You" ? "You" : "Them";
+  const has = (speaker: string) => media.tracks.some(t => side(t.speaker) === speaker);
+  const imported = !media.tracks.some(t => t.speaker === "You" || t.speaker === "Them");
+  const choices = ([["Me", "You"], ["Them", "Them"], ["Both", "Both"]] as const).filter(([v]) => v === "Both" ? has("You") && has("Them") : has(v === "Me" ? "You" : "Them"));
+  const envelope = (speaker: string) => media.tracks.filter(t => side(t.speaker) === speaker).map(t => {
     const x = (ms: number) => (ms / total) * 1000, h = (v: number) => Math.sqrt(Math.min(1, v)) * 16;
     const pts = t.waveform.map((v, i) => [x(t.offset_ms + (i / t.waveform.length) * t.duration_ms), h(v)] as const);
     return `M${x(t.offset_ms)} 20 ` + pts.map(([px, py]) => `L${px.toFixed(1)} ${(20 - py).toFixed(1)}`).join(" ") + ` L${x(t.offset_ms + t.duration_ms)} 20 `
@@ -131,14 +136,14 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
   const th = (side: "a" | "b", ms: number) => <span ref={side === "b" ? handleB : undefined} className={`th ${side}${drag === side ? " drag" : ""}${edge === side ? " on" : ""}`} role="slider" tabIndex={0} data-ch={side} onFocus={() => setEdge(side)}
     aria-label={side === "a" ? "Start of the clip" : "End of the clip"} aria-valuemin={0} aria-valuemax={total / 1000} aria-valuenow={+(ms / 1000).toFixed(1)} aria-valuetext={tfmt(ms / 1000)}
     onPointerDown={e => grab(e, side)}><b>{tfmt(ms / 1000)}</b></span>;
-  const text = wordsInRange(lines, from, to, track), who = track === "Me" ? "You" : track;
+  const text = wordsInRange(lines, from, to, track), who = track === "Me" ? "You" : imported ? "Audio" : track;
   const facts = preview?.facts, lc = lengthChip(length);
   const chips = facts ? [rateChip(facts.rate, facts.bits, facts.float), clippedChip(facts.clipped), { tone: "ok", label: peakLabel(facts.peak_db) }, lc] : [lc];
 
   return <div ref={bar} className="trimbar clipbar" role="group" aria-label={s.clipTitle} data-track={track}>
     <div className="chead"><h4><CutIcon/>{s.clipTitle}</h4>
-      <div className="segm" role="radiogroup" aria-label="Track">{([["Me", "You"], ["Them", "Them"], ["Both", "Both"]] as const).map(([v, l]) =>
-        <button key={v} type="button" role="radio" aria-checked={track === v} data-ctrack={v} onClick={() => onChange({ ...clip, track: v })}>{l}</button>)}</div>
+      {choices.length > 1 && <div className="segm" role="radiogroup" aria-label="Track">{choices.map(([v, l]) =>
+        <button key={v} type="button" role="radio" aria-checked={track === v} data-ctrack={v} onClick={() => onChange({ ...clip, track: v })}>{l}</button>)}</div>}
       <span className="sp"/><span className="tkeys">{s.clipHint}</span></div>
     <div className="tstrip" ref={strip}><svg className="cwave" viewBox="0 0 1000 40" preserveAspectRatio="none" aria-hidden="true">
       {(track === "Me" || track === "Both") && <path className="w me" d={envelope("You")}/>}{(track === "Them" || track === "Both") && <path className="w them" d={envelope("Them")}/>}
@@ -155,7 +160,7 @@ export default function ClipPanel({ id, title, media, lines, clip, onChange, onC
       <span className="zl">{tfmt(z0 / 1000)}</span><span className="zl zr">{tfmt(z1 / 1000)}</span></div>
     {text ? <p className="cwords" title={text}><span className="who">{who}</span><q>{text}</q></p> : <p className="cwords empty"><q>No words in this range</q></p>}
     <div className="cchips">{chips.map(c => <span key={c.label} className={`chip ${c.tone}`}>{c.label}</span>)}</div>
-    {track !== "Me" && <p className="cnote"><MenuIcon name="lock"/><span>{track === "Them" ? s.clipOthers : s.clipOthersBoth}</span></p>}
+    {track !== "Me" && !imported && <p className="cnote"><MenuIcon name="lock"/><span>{track === "Them" ? s.clipOthers : s.clipOthersBoth}</span></p>}
     <div className="trow"><button type="button" className="btn sm" disabled={!fresh} onClick={toggle} title="Play the clip (Space)">{playing ? STOP : PLAY}{playing ? "Stop" : "Play"}</button>
       <button type="button" className="btn sm" aria-pressed={loop} onClick={() => setLoop(on => !on)} title="Play it again and again (L)"><MenuIcon name="again"/>Loop</button>
       <span className="mono"><b>{tfmt(from / 1000)} - {tfmt(to / 1000)}</b> · {length.toFixed(1)} s</span><span className="sp"/>
