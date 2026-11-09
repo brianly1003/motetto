@@ -199,7 +199,9 @@ export async function rehearsalAudio(id: string): Promise<string | null> {
 }
 export const rehearsalKeep = (id: string, script: string) => invoke<void>("rehearsal_keep", { id, script });
 export const rehearsalShorten = (line: string) => invoke<string | null>("rehearsal_shorten", { line });
-export async function listen<T>(name: string, callback: (payload: T) => void) {
+/** Outside the desktop app (a page opened in a browser) there are no events: an unlisten that does nothing. */
+export async function listen<T>(name: string, callback: (payload: T) => void): Promise<() => void> {
+  if (!desktopAvailable()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<T>(name, event => callback(event.payload));
 }
