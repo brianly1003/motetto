@@ -15,9 +15,13 @@ your own Mac by local models. No account, no upload, no subscription.
 ![Local only](https://img.shields.io/badge/cloud-none-2e7d32)
 ![License](https://img.shields.io/badge/license-MIT%20%C2%B7%20MPL--2.0%20(core)-blue)
 
-[Issues](https://github.com/brianly1003/motetto/issues)
+[Build for macOS](#status) · [Issues](https://github.com/brianly1003/motetto/issues)
 
-<!-- Demo: add a 20-30 s GIF (or MP4 dragged into GitHub's editor) here, with a link to the full video. -->
+[![Motetto demo: meeting notes, source playback and audio clips](assets/demo/preview.gif)](assets/demo/motetto-demo.mp4)
+
+[Full demo (MP4, 73 seconds)](assets/demo/motetto-demo.mp4) · [English captions](assets/demo/motetto-demo.srt)
+
+Fictional meeting audio, processed in the desktop app. Processing waits are shortened.
 
 </div>
 
