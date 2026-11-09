@@ -1,0 +1,70 @@
+1
+00:00:00,250 --> 00:00:01,492
+Your meeting is over.
+
+2
+00:00:01,492 --> 00:00:04,908
+What did you agree to, and who is doing what next?
+
+3
+00:00:06,408 --> 00:00:10,350
+Motetto turns meeting audio into notes on your own Mac.
+
+4
+00:00:10,350 --> 00:00:13,898
+No account, no cloud processing, and no meeting bot.
+
+5
+00:00:15,398 --> 00:00:21,055
+Import a recording, and let local models transcribe the conversation and write the
+notes.
+
+6
+00:00:21,055 --> 00:00:24,287
+This example uses a fictional product launch meeting.
+
+7
+00:00:25,787 --> 00:00:27,924
+Review the decisions and action items.
+
+8
+00:00:27,924 --> 00:00:32,911
+Click a source timestamp to jump to the transcript and hear the original words.
+
+9
+00:00:33,537 --> 00:00:38,637
+Original meeting audio: Alex will finish the welcome screen
+and the first run checklist by Friday.
+
+10
+00:00:40,287 --> 00:00:44,009
+Check off a finished task, or edit the notes in place.
+
+11
+00:00:44,009 --> 00:00:46,378
+Your meeting stays useful after the call.
+
+12
+00:00:47,878 --> 00:00:49,920
+Need to share a specific moment?
+
+13
+00:00:49,920 --> 00:00:53,664
+Select a passage in the transcript and save an audio clip.
+
+14
+00:00:55,164 --> 00:00:59,515
+Your audio, transcript, and notes stay as files on your computer.
+
+15
+00:00:59,515 --> 00:01:01,888
+Keep control of your meeting history.
+
+16
+00:01:03,388 --> 00:01:05,049
+Motetto is in early development.
+
+17
+00:01:05,049 --> 00:01:11,691
+Explore the source on GitHub, try it on your Mac, and tell us what would make your next
+meeting easier.
