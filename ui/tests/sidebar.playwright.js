@@ -46,11 +46,16 @@ async page => {
       if(control.x!==controlAfter.x||control.y!==controlAfter.y)throw Error('Toggle moved');
       if(!await p.evaluate(()=>window.reader===document.querySelector('.docbody')&&window.reader.scrollTop>0))throw Error('Reading position lost');
       await p.screenshot({path:`.playwright-out/sidebar-app-collapsed-${os}-${theme}.png`});
-      const key=os==='mac'?'Meta+Backslash':'Control+Backslash';
+      const key=os==='mac'?'Meta+b':'Control+b';
       await p.keyboard.press(key);await p.waitForTimeout(220);
       await p.getByPlaceholder('Search notes and transcripts',{exact:true}).focus();
       await p.keyboard.press(key);
       if(!await reopen.evaluate(e=>e===document.activeElement))throw Error('Focus left in hidden navigation');
+      // In editable notes the same keys stay bold.
+      await p.getByText('Discussion point 20:',{exact:false}).click();
+      await p.locator('.docbody [contenteditable="true"]').first().waitFor();
+      await p.keyboard.press(key);await p.waitForTimeout(220);
+      if(await p.locator('.shell').getAttribute('data-sidebar')!=='hidden')throw Error('Bold key in notes toggled the sidebar');
       await p.keyboard.press(os==='mac'?'Meta+k':'Control+k');
       await p.getByRole('dialog',{name:'Command palette'}).waitFor();
       await p.keyboard.press('Escape');
@@ -72,7 +77,7 @@ async page => {
       if(await p.locator('.shell').evaluate(e=>getComputedStyle(e).transitionDuration)!=='0s')throw Error('Reduced motion ignored');
       await p.getByRole('button',{name:'Show sidebar',exact:true}).click();
       await p.getByRole('button',{name:'Hide sidebar',exact:true}).focus();await p.waitForTimeout(450);
-      if(await p.getByRole('tooltip').textContent()!==`Hide sidebar${os==='mac'?'⌘\\':'Ctrl+\\'}`)throw Error('Tooltip differs');
+      if(await p.getByRole('tooltip').textContent()!==`Hide sidebar${os==='mac'?'⌘B':'CtrlB'}`)throw Error('Tooltip differs');
       await p.keyboard.press('Escape');
       if(await p.getByRole('tooltip',{includeHidden:true}).evaluate(e=>getComputedStyle(e).visibility)!=='hidden')throw Error('Tooltip not dismissible');
       const ref=await context.newPage();await ref.goto('http://127.0.0.1:3001/motetto-app-mockup.html');

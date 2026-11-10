@@ -105,7 +105,9 @@ export default function Main(){
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
       const modified=mac?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey;
-      if(!modified||event.altKey||event.shiftKey||event.repeat||!(event.code==="Backslash"||event.key==="\\"))return;
+      if(!modified||event.altKey||event.shiftKey||event.repeat||!(event.code==="KeyB"||event.key.toLowerCase()==="b"))return;
+      // In editable notes ⌘B / Ctrl+B stays bold.
+      if((event.target as HTMLElement|null)?.isContentEditable)return;
       event.preventDefault();toggleSidebar();
     };
     document.addEventListener("keydown",key);
