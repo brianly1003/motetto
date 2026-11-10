@@ -4,7 +4,9 @@ async (page) => {
  for(const theme of ['light','dark']){
   const p=await page.context().newPage();p.setDefaultTimeout(7000);
   await p.emulateMedia({colorScheme:theme});
+  // The browser profile is shared between runs: start with the sidebar shown.
   await p.addInitScript(() => {
+    localStorage.removeItem('motetto-sidebar');
     const mk = (id, title, notes) => ({ summary: { id, title, created_ms: Date.now() - +id * 6e5, status: 'Ready', marks_ms: [], duration_ms: 87000, notes_ms: 48000, spellings: [], locked: false }, transcript: '[00:01] Me: hi', transcript_heard: '', notes_md: notes });
     const ms = [mk('1', 'Recorded meeting', '### Action items\n- [ ] Me: Send the budget proposal by **Friday** [02:15]\n- [ ] Anna: Review the draft [02:20]\n'), mk('2', 'Daily Meeting', '### Action items\n- [ ] Me: Brush my teeth [01:00]\n- [x] Me: Done thing\n')];
     let next = 0; window.ms = ms;
@@ -20,14 +22,16 @@ async (page) => {
 
   const ref=await page.context().newPage();ref.setDefaultTimeout(7000);
   await ref.route('https://**/*',r=>r.abort());
+  await ref.addInitScript(()=>localStorage.removeItem('motetto-sidebar'));
   await ref.goto('http://127.0.0.1:3001/motetto-app-mockup.html');
   await ref.getByRole('button',{name:'macOS',exact:true}).click();
   await ref.getByRole('button',{name:'After the call',exact:true}).click();
   await ref.evaluate(t=>document.documentElement.dataset.theme=t,theme);
   await p.goto('http://127.0.0.1:3000/main/',{waitUntil:'domcontentloaded'});
-  for(const [target,side,meeting,current] of [[p,'.sidebar','.meeting-row','page'],[ref,'.side','.mitem','true']]){
+  for(const [target,side,meeting,current] of [[p,'.sidebar','.meeting-row','page'],[ref,'.mainwin .side','.mitem','true']]){
    const rows=target.locator(`${side} .homerow, ${side} ${meeting}, ${side} .trash`);
-   await rows.first().waitFor();
+   // Action items appears only once meetings load; clicking before then would open Scripts.
+   await target.locator(`${side} ${meeting}`).first().waitFor();
    for(const width of [760,1200]){
     await target.setViewportSize({width,height:720});
     await rows.first().click();
@@ -40,9 +44,17 @@ async (page) => {
     await target.keyboard.press('ArrowUp');await check(0);
     await target.keyboard.press('ArrowDown');await check(1);
     if(await rows.nth(1).evaluate(e=>getComputedStyle(e).boxShadow.includes('inset')))throw Error('Sidebar focus draws a ring');
-    const title=await rows.nth(1).locator('strong,.mt').innerText();
-    if(!(await target.locator(target===p?'.workspace':'#doc').innerText()).includes(title))throw Error('Detail did not open: '+title);
-    await target.keyboard.press('ArrowDown');await check(2);
+    // A meeting row opens its notes; Scripts may sit between Action items and the meetings.
+    let opened=0;
+    const opens=async i=>{
+     if(!await rows.nth(i).evaluate((e,meeting)=>e.matches(meeting),meeting))return;
+     const title=await rows.nth(i).locator('strong,.mt').innerText();
+     if(!(await target.locator(target===p?'.workspace':'#doc').innerText()).includes(title))throw Error('Detail did not open: '+title);
+     opened++;
+    };
+    await opens(1);
+    await target.keyboard.press('ArrowDown');await check(2);await opens(2);
+    if(!opened)throw Error('No meeting row opened by arrows');
     await target.keyboard.press('ArrowUp');await check(1);
     await target.keyboard.press('ArrowUp');await check(0);
     const count=await rows.count();
@@ -57,8 +69,12 @@ async (page) => {
   const search=p.locator('.search input');await search.fill('Daily');
   await p.waitForFunction(()=>document.querySelectorAll('.meeting-row').length===1);
   await search.press('ArrowDown');if(!await search.evaluate(e=>e===document.activeElement))throw Error('Sidebar arrows stole search focus');
-  await p.locator('.homerow').click();await p.keyboard.press('ArrowDown');
+  // Action items, then Scripts, then the one meeting the filter leaves.
+  await p.locator('.homerow:not(.scripts-entry)').click();await p.keyboard.press('ArrowDown');await p.keyboard.press('ArrowDown');
   await p.waitForFunction(()=>document.querySelector('.meeting-row')===document.activeElement&&document.activeElement?.getAttribute('aria-current')==='page');
+  // A mouse click on Scripts still puts the caret in the first-use box.
+  await p.locator('.scripts-entry').click();
+  await p.waitForFunction(()=>document.activeElement?.matches('.scripts-first-box'));
   await p.close();await ref.close();results.push(theme+' PASS');
  }
  return results;

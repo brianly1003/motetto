@@ -158,6 +158,13 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     editor.current.focus(); editor.current.setSelectionRange(caret.current, caret.current); caret.current = null;
   }, [open]);
   const nameField = useRef<HTMLInputElement>(null);
+  // The first-use box takes the caret when Scripts is opened by mouse; arrowing through the
+  // sidebar keeps focus there, so the next arrow moves on instead of into the box.
+  const firstBox = useRef<HTMLTextAreaElement>(null);
+  const firstUse = !list.length && !open;
+  useEffect(() => {
+    if (firstUse && !document.querySelector(".sidebar :focus-visible")) firstBox.current?.focus();
+  }, [firstUse]);
   async function rename() {
     const next = title.trim();
     if (!open || !next || next === open) { setTitle(open ?? ""); return; }
@@ -195,11 +202,11 @@ export default function ScriptsPage({ onError, device, pending, onTaken, onCount
     <div className="sp-subscroll">{list.map(info => <button key={info.name} type="button" className="sp-subitem" aria-current={info.name === open ? "true" : undefined} data-shown={info.name === opens ? "" : undefined} title={info.name === opens && showKey ? s.spShownKey.replace("{key}", showKey) : s.scriptEditedOn.replace("{when}", edited(info.modified_ms))} onClick={() => void choose(info.name).catch(e => onError(String(e)))}><span>{info.name}</span>{showKey && <KbdGroup keys={showKey}/>}</button>)}</div>
     <button type="button" className="sp-subitem sp-new" title={open && !text.trim() ? s.newScriptEmpty.replace("{name}", open) : undefined} onClick={() => void create()}>+ {s.newScript}</button>
   </>, side) : null;
-  if (!list.length && !open) return <article className="document scripts">
+  if (firstUse) return <article className="document scripts">
     <div className="scripts-first">
       <h1 className="scripts-first-title">{s.scriptsFirstTitle}</h1>
       <p className="scripts-first-lead">{s.scriptsFirstLead}</p>
-      <textarea className="scripts-text scripts-first-box" aria-label={s.scriptsFirstLabel} placeholder={s.scriptsFirstPlaceholder} spellCheck autoFocus onChange={e => { const value = e.target.value; if (value.trim()) void first(value, e.target.selectionStart); }} />
+      <textarea ref={firstBox} className="scripts-text scripts-first-box" aria-label={s.scriptsFirstLabel} placeholder={s.scriptsFirstPlaceholder} spellCheck onChange={e => { const value = e.target.value; if (value.trim()) void first(value, e.target.selectionStart); }} />
       <ol className="scripts-steps">
         {[[s.scriptsStep1, s.scriptsStep1Body], [s.scriptsStep2, s.scriptsStep2Body], [s.scriptsStep3, s.scriptsStep3Body]].map(([title, body], n) => <li key={title}><span className="scripts-step-n" aria-hidden="true">{n + 1}</span><div><b>{title}</b><span>{body}</span></div></li>)}
       </ol>
