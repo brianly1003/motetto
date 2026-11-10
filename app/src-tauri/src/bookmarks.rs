@@ -114,6 +114,16 @@ pub fn update(
 }
 
 pub const LOCKED: &str = "These notes are locked. Unlock them to edit.";
+pub const DELETE_LOCKED: &str = "This meeting is locked. Unlock it to delete it.";
+
+/// Whether a meeting folder is locked, for deletion and retention. Missing or unreadable metadata
+/// counts as unlocked, so a damaged meeting can still go to Recently deleted.
+pub fn locked_folder(dir: &Path) -> bool {
+    library::text(&dir.join("meeting.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .is_some_and(|value| value["locked"] == true)
+}
 
 /// Lock or unlock a meeting's notes for review (SPEC 7.11); the user's choice, kept like the title.
 pub fn set_locked(root: &Path, id: &str, locked: bool) -> Result<MeetingSummary, String> {

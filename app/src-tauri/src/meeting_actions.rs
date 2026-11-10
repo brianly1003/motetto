@@ -39,6 +39,10 @@ pub(crate) fn move_meeting(root: &Path, id: &str, restore: bool) -> Result<(), S
         (root, deleted.as_path())
     };
     let source = library::folder(from, id)?;
+    // Every way to delete a meeting comes through here, so a locked one can't leave the library.
+    if !restore && crate::bookmarks::locked_folder(&source) {
+        return Err(crate::bookmarks::DELETE_LOCKED.into());
+    }
     let destination = to.join(id);
     if destination.exists() {
         return Err("A meeting already exists at the destination".into());
@@ -515,6 +519,31 @@ mod tests {
             fs::read_to_string(root.join("123/notes.md")).unwrap(),
             "Keep this"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_locked_meeting_is_never_deleted() {
+        let root = std::env::temp_dir().join(format!("motetto-locked-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("123")).unwrap();
+        fs::write(
+            root.join("123/meeting.json"),
+            r#"{"id":"123","title":"Review","created_ms":0,"status":"Ready","locked":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            run(&root, "123", "delete").unwrap_err(),
+            crate::bookmarks::DELETE_LOCKED
+        );
+        assert!(root.join("123/meeting.json").exists());
+        assert!(!root.join(".deleted/123").exists());
+        // Unlocked, it goes to Recently deleted as usual; unreadable metadata counts as unlocked.
+        crate::bookmarks::set_locked(&root, "123", false).unwrap();
+        run(&root, "123", "delete").unwrap();
+        fs::create_dir_all(root.join("456")).unwrap();
+        fs::write(root.join("456/meeting.json"), "{").unwrap();
+        run(&root, "456", "delete").unwrap();
+        assert!(root.join(".deleted/123").exists() && root.join(".deleted/456").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -6,7 +6,7 @@ import Duet from "@/components/MotettoMark";
 import RecentlyDeleted from "@/components/RecentlyDeleted";
 import MeetingDocument from "@/components/MeetingDocument";
 import { ImportingPage } from "@/components/RecordingPage";
-import { notesText, deletable } from "@/components/MeetingActions";
+import { notesText, deletable, deleteBlocked } from "@/components/MeetingActions";
 import { Dots, MenuIcon, MenuItem } from "@/components/MenuIcon";
 import {meetingDate,meetingGroup,meetingTitle,durationLabel,fileSize,timeLabel} from "@/lib/document";
 import { useSession } from "@/lib/useSession";
@@ -152,7 +152,7 @@ export default function Main(){
     const key=(event:KeyboardEvent)=>{
       const typing=(event.target as Element|null)?.closest?.("input, textarea, [contenteditable='true']");
       if(typing||!selected||trashOpen||!deletable(selected.summary.status))return;
-      if((event.metaKey&&event.key==="Backspace")||(event.ctrlKey&&event.key==="Delete")){event.preventDefault();void deleteMeeting(selected.summary.id);}
+      if((event.metaKey&&event.key==="Backspace")||(event.ctrlKey&&event.key==="Delete")){event.preventDefault();if(selected.summary.locked)notify(s.deleteLocked);else void deleteMeeting(selected.summary.id);}
     };
     document.addEventListener("keydown",key);return()=>document.removeEventListener("keydown",key);
   });
@@ -294,7 +294,7 @@ export default function Main(){
       <MenuItem icon="copy" label={s.copyActionItems} onClick={()=>void rowAction("copy",menuMeeting.id)}/>
       <MenuItem icon="folder" label={s.reveal} onClick={()=>void rowAction("reveal",menuMeeting.id)}/>
       <div className="sep"/>
-      <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!deletable(menuMeeting.status)} title={deletable(menuMeeting.status)?undefined:s.deleteBusy} onClick={()=>void rowAction("delete",menuMeeting.id)}/>
+      <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!!deleteBlocked(menuMeeting)} title={deleteBlocked(menuMeeting)} onClick={()=>void rowAction("delete",menuMeeting.id)}/>
     </div>}
     {palette&&<CommandPalette onClose={()=>setPalette(false)} onSelect={id=>{setPalette(false);void select(id);}} canRecord={!job} onImport={importBlocked?undefined:()=>{setPalette(false);void importRecording();}} onHome={meetings.length?()=>{setPalette(false);goHome();}:undefined}/>}
   </main></>;

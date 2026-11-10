@@ -34,6 +34,8 @@ export function notesText(notes_md: string, kind: "items" | "markdown" | "plain"
 
 /** A meeting still recording or writing its notes can't be deleted yet. */
 export const deletable = (status: string) => status !== "Recording" && status !== "Finishing";
+/** Why Delete is disabled for this meeting, or undefined when it can go to Recently deleted. */
+export const deleteBlocked = (m: { status: string; locked: boolean }) => !deletable(m.status) ? s.deleteBusy : m.locked ? s.deleteLocked : undefined;
 
 /** `shown`: the notes as on screen (a Read in translation), which Copy copies. `reading`: its
  *  language, which Write the notes again offers first; `ask` opens that question in a language. */
@@ -110,7 +112,7 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       <div className="sep"/>
       <MenuSwitch icon="lock" label={s.lockNotes} checked={locked} onChange={onLock}/>
       <div className="sep"/>
-      <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!deletable(meeting.summary.status)} title={deletable(meeting.summary.status) ? undefined : s.deleteBusy} onClick={() => { setMenu(null); onDelete(); }}/>
+      <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!!deleteBlocked(meeting.summary)} title={deleteBlocked(meeting.summary)} onClick={() => { setMenu(null); onDelete(); }}/>
     </div>}
     {confirm && <Alert variant="warning" className="doc-confirm" role="alertdialog" title={confirm === "retranscribe" ? s.retranscribe : s.regenerate} actions={<><button className="doc-action" disabled={busy} onClick={() => run(confirm)}>{busy ? s.processing : confirm === "regenerate" && language !== "same_as_call" ? s.writeInGo.replace("{lang}", nativeName(language)) : s.confirm}</button><button className="doc-action ghost" disabled={busy} onClick={() => setConfirm(null)}>{s.cancel}</button></>}>
       {confirm === "retranscribe" ? <>{corrections ? s.retranscribeEdited.replace("{n}", String(corrections)) : s.retranscribeConfirm}<label className="writein"><MicIcon/><span>{s.micModeMic}</span><select aria-label={s.micModeLabel} value={micMode} disabled={busy} onChange={event => setMicMode(event.target.value as MicMode)}>{MIC_MODES.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><span className="writein-help">{s.micModeRetx}</span></>

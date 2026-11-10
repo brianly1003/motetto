@@ -107,8 +107,12 @@ pub async fn storage_summary(app: tauri::AppHandle) -> Result<StorageSummary, St
         .await
         .map_err(|e| e.to_string())?
 }
+/// Delete all keeps locked meetings: unlocking one is the way to delete it.
 fn wipe(root: &Path) -> Result<(), String> {
     for folder in meeting_dirs(root)? {
+        if crate::bookmarks::locked_folder(&folder) {
+            continue;
+        }
         fs::remove_dir_all(folder).map_err(|e| {
             format!("Couldn't delete every meeting: {e}. Some meetings may already be deleted.")
         })?;
@@ -280,9 +284,14 @@ fn purge_video(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 /// Remove audio only from Ready meetings after their notes are complete; never follow links.
+/// A locked meeting keeps its audio and video until it is unlocked; a video the user deleted
+/// from it still expires.
 pub fn retain(root: &Path, policy: &str, keep_video: &str) -> Result<(), String> {
     for dir in meeting_dirs(root)? {
         purge_video(&dir)?;
+        if crate::bookmarks::locked_folder(&dir) {
+            continue;
+        }
         let Ok(meta) = library::text(&dir.join("meeting.json")) else {
             continue;
         };
@@ -416,6 +425,20 @@ mod tests {
         for file in ["1/notes.md", "1/transcript.txt", "2/mic.wav", "3/mic.wav"] {
             assert!(root.join(file).exists());
         }
+        // Locked: retention and Delete all both leave it alone.
+        fs::create_dir_all(root.join("4")).unwrap();
+        fs::write(
+            root.join("4/meeting.json"),
+            r#"{"id":"4","title":"Review","created_ms":0,"status":"Ready","locked":true}"#,
+        )
+        .unwrap();
+        fs::write(root.join("4/notes.md"), "notes").unwrap();
+        fs::write(root.join("4/mic.wav"), "audio").unwrap();
+        fs::write(root.join("4/part-0000.screen.mp4"), "video").unwrap();
+        retain(&root, "after_notes", "7_days").unwrap();
+        assert!(root.join("4/mic.wav").exists() && root.join("4/part-0000.screen.mp4").exists());
+        wipe(&root).unwrap();
+        assert!(!root.join("1").exists() && root.join("4/mic.wav").exists());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
