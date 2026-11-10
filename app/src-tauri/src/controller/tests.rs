@@ -836,6 +836,33 @@ fn none_and_back_to_a_device_restart_the_part() {
 }
 
 #[test]
+fn a_stopped_mic_restarts_the_part_with_the_chosen_mic() {
+    let mut e = engine();
+    let chosen = MicChoice::Device { id: "usb".into() };
+    let setup = RecordSetup {
+        mic: chosen.clone(),
+        app_sounds: true,
+        notes: true,
+        clicks: true,
+        picture: None,
+        screen: None,
+    };
+    e.action(Action::Start(Some(setup)), 0).unwrap();
+    e.action(Action::RestartPart, 60_000).unwrap();
+    // The first part's capture is told to stop and a second one starts; the mic choice stays.
+    let stops = e.host.stops.lock().unwrap().clone();
+    assert_eq!(stops.len(), 2);
+    assert!(stops[0].load(Ordering::SeqCst));
+    assert!(!stops[1].load(Ordering::SeqCst));
+    assert_eq!(e.session.app.setup.as_ref().map(|s| &s.mic), Some(&chosen));
+    assert_eq!(e.session.app.state, SessionState::Recording);
+    // Paused, there is no capture to restart.
+    e.action(Action::Pause, 61_000).unwrap();
+    e.action(Action::RestartPart, 62_000).unwrap();
+    assert_eq!(e.host.stops.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn resume_after_a_clip_window_closed_opens_the_setup_on_window() {
     let mut e = engine();
     let setup = RecordSetup {

@@ -117,7 +117,9 @@ pub fn spawn(
                                         None | Some(MicChoice::Default) => {
                                             crate::microphone::for_capture(&app)
                                         }
-                                        Some(MicChoice::Device { id }) => Some(id.clone()),
+                                        Some(MicChoice::Device { id }) => {
+                                            crate::microphone::if_connected(&app, id.clone())
+                                        }
                                         Some(MicChoice::Off) => None,
                                     };
                                     let (mut picture, progress) = crate::recording_screen::prepare(
@@ -181,6 +183,17 @@ pub fn spawn(
                                     });
                                     // The red frame outlines a window or an area while it records.
                                     crate::rec_frame::set(picture.as_ref().map(|p| p.target));
+                                    if mic_on {
+                                        let chosen = match setup.as_ref().map(|s| &s.mic) {
+                                            Some(MicChoice::Device { id }) => Some(id.clone()),
+                                            _ => app
+                                                .state::<crate::settings::Store>()
+                                                .get()
+                                                .ok()
+                                                .and_then(|s| s.mic_device),
+                                        };
+                                        watch_mic(app.clone(), stop.clone(), chosen);
+                                    }
                                     let part_began = std::time::Instant::now();
                                     let _awake = Awake::hold(picture.is_some());
                                     let result = motetto_core::capture::record_with_levels(
@@ -471,6 +484,72 @@ fn capture_part(
     let listed = write_parts(&dir, &record.parts);
     captured?;
     listed
+}
+/// Keeps the recording on a working mic, as call apps do. ScreenCaptureKit stops sending a mic
+/// that is unplugged or fails, with no error and no switch, while app sounds go on: Me goes
+/// silent and live captions stick. A new part (which opens `mics::wanted` again) starts when
+/// that answer moves off the mic this part records (unplugged, plugged back, a new default), or
+/// when the mic sent and then went quiet for `MIC_STALL_MS` (a failing mic still connected).
+/// Each move is a new part, with a short gap while the stream starts again; switching the mic
+/// on the running stream would need the WAV resampled to its first rate.
+#[cfg(target_os = "macos")]
+fn watch_mic(app: tauri::AppHandle, stop: motetto_core::events::Stop, chosen: Option<String>) {
+    use motetto_core::mics::{self, MicFollow, MicStall};
+    let buffers = app.state::<crate::live::State>().meters.mic_buffers.clone();
+    let began = std::time::Instant::now();
+    let now = move || began.elapsed().as_millis() as u64;
+    let mut stall = MicStall::new(buffers.load(Ordering::Relaxed), now());
+    let opened = mics::list()
+        .ok()
+        .and_then(|all| mics::wanted(chosen.as_deref(), &all));
+    let mut follow = MicFollow::new(opened.clone());
+    let _ = std::thread::Builder::new()
+        .name("motetto-mic-watch".into())
+        .spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let all = mics::list().ok();
+                let wanted = all
+                    .as_ref()
+                    .and_then(|all| mics::wanted(chosen.as_deref(), all));
+                // A failed device listing says nothing about the mic: only the stall rule then.
+                let moved = all.is_some() && follow.moved(wanted.clone(), now());
+                let stalled = stall.stalled(buffers.load(Ordering::Relaxed), now());
+                if !(moved || stalled) || stop.load(Ordering::Acquire) {
+                    continue;
+                }
+                let name = |id: &Option<String>| {
+                    all.iter()
+                        .flatten()
+                        .find(|m| Some(&m.id) == id.as_ref())
+                        .map_or("no microphone".to_string(), |m| m.name.clone())
+                };
+                crate::trace::error(&format!(
+                    "{} {} s into this part; starting a new part on {}",
+                    if moved {
+                        format!("the microphone changed from {}", name(&opened))
+                    } else {
+                        format!("{} stopped sending audio", name(&opened))
+                    },
+                    now() / 1000,
+                    name(&wanted),
+                ));
+                let restart = app
+                    .state::<crate::controller::Controller>()
+                    .action(crate::controller::Action::RestartPart);
+                match restart {
+                    Ok(()) if moved && wanted.is_some() => {
+                        let _ = app.emit(
+                            "motetto://notice",
+                            format!("Recording from {}.", name(&wanted)),
+                        );
+                    }
+                    Ok(()) => {}
+                    Err(error) => crate::trace::error(&error),
+                }
+                break;
+            }
+        });
 }
 fn write_parts(dir: &Path, parts: &[(Vec<String>, u64)]) -> Result<(), String> {
     fs::write(

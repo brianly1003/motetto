@@ -51,6 +51,12 @@ pub fn for_capture(app: &tauri::AppHandle) -> Option<String> {
         .get()
         .ok()?
         .mic_device?;
+    if_connected(app, chosen)
+}
+
+/// `chosen` while it's connected, else None (the system default), said once: a mic unplugged
+/// mid-call must not be opened again for the next part.
+pub fn if_connected(app: &tauri::AppHandle, chosen: String) -> Option<String> {
     let connected = mics::list()
         .map(|all| all.iter().any(|m| m.id == chosen))
         .unwrap_or(false);

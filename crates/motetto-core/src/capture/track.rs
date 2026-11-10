@@ -8,7 +8,7 @@ use std::{
     io::{BufWriter, Seek, Write},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
 };
@@ -26,10 +26,17 @@ pub(super) struct Track {
     pub(super) clips: Option<Arc<AtomicU32>>,
     /// Mic only: the live listener (`mics::Listener`).
     pub(super) listen: Option<crate::mics::Listener>,
+    /// Mic only: buffers received, so the desktop notices a mic that stops (`mics::MicStall`).
+    pub(super) buffers: Option<Arc<AtomicU64>>,
 }
 
 impl SCStreamOutputTrait for Track {
     fn did_output_sample_buffer(&self, buf: CMSampleBuffer, _: SCStreamOutputType) {
+        if let Some(buffers) = &self.buffers
+            && buf.num_samples() > 0
+        {
+            buffers.fetch_add(1, Ordering::Relaxed);
+        }
         if let Err(error) = self.write_buffer(&buf) {
             // Only a failed write is about the disk; a format the mic sends is not.
             let hint = if error.is::<hound::Error>() || error.is::<std::io::Error>() {

@@ -25,6 +25,8 @@ pub enum Action {
     Pause,
     /// Another mic was chosen: a new part when recording, nothing otherwise.
     SwitchMic,
+    /// The mic stopped sending: a new part with the same choices when recording.
+    RestartPart,
     /// The recording's mic, None included: a new part while recording or paused.
     SetMic(MicChoice),
     SetScreen(Option<ScreenPick>),
@@ -524,6 +526,10 @@ impl<H: Host> Engine<H> {
                 (SessionState::Recording, _) => Command::SwitchMicrophone,
                 _ => return Ok(()),
             },
+            Action::RestartPart if self.session.app.state == SessionState::Recording => {
+                Command::SwitchMicrophone
+            }
+            Action::RestartPart => return Ok(()),
             Action::SetMic(mic) => {
                 if !matches!(
                     self.session.app.state,

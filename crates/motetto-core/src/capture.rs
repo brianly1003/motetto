@@ -226,6 +226,10 @@ fn record_tracks(
                     .as_ref()
                     .filter(|_| suffix == "mic")
                     .map(|m| m.mic_listener.clone()),
+                buffers: meters
+                    .as_ref()
+                    .filter(|_| suffix == "mic")
+                    .map(|m| m.mic_buffers.clone()),
             },
             kind,
         )?;
