@@ -11,6 +11,9 @@ import { strings as s } from "@/lib/strings";
 import { MenuItem, MenuSwitch } from "@/components/MenuIcon";
 import { KbdGroup } from "@/components/ui/Kbd";
 import { ChevronDown } from "@/components/ui/Icon";
+import { MicIcon } from "@/components/Microphone";
+import { MIC_MODES } from "@/lib/micModes";
+import type { MicMode } from "@/lib/bindings/MicMode";
 
 /** Text for Copy: the whole notes as Markdown or plain text, or only the action items. A Read in
  *  translation has the `original`'s lines, so its action items are found where the original's are. */
@@ -38,6 +41,9 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
   const locked = meeting.summary.locked;
   const [menu, setMenu] = useState<"copy" | "more" | null>(null);
   const [confirm, setConfirm] = useState<"regenerate" | "retranscribe" | null>(null);
+  // Transcribe again's Microphone choice, starting from how this transcript was made.
+  const [micMode, setMicMode] = useState<MicMode>(meeting.summary.mic_mode);
+  useEffect(() => { setMicMode(meeting.summary.mic_mode); }, [meeting.summary.id, meeting.summary.mic_mode, confirm]);
   // Corrections Transcribe again would replace: lines that differ from what was heard.
   const heard = meeting.transcript_heard ? meeting.transcript_heard.split("\n") : [];
   const corrections = heard.length ? meeting.transcript.split("\n").filter((line, i) => line !== heard[i]).length : 0;
@@ -73,7 +79,7 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
     setBusy(true); setMenu(null);
     // The question is answered either way; a failure shows in the page's alert, not under it.
     // The menu is hidden while the job runs, so the parent shows what finished.
-    try { await meetingAction(meeting.summary.id, action, action === "regenerate" ? language : undefined); if (action !== "reveal") await onChanged(false); if (action === "retranscribe") onToast?.(s.retranscribed); }
+    try { await meetingAction(meeting.summary.id, action, action === "regenerate" ? language : undefined, action === "retranscribe" ? micMode : undefined); if (action !== "reveal") await onChanged(false); if (action === "retranscribe") onToast?.(s.retranscribed); }
     catch (error) {
       // Stop on the steps page is not a failure: nothing was replaced (owner 2026-10-25).
       if (String(error) === STOPPED) { await onChanged(false); onToast?.(action === "retranscribe" ? s.stoppedTranscript : s.stoppedNotes); }
@@ -107,7 +113,7 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!deletable(meeting.summary.status)} title={deletable(meeting.summary.status) ? undefined : s.deleteBusy} onClick={() => { setMenu(null); onDelete(); }}/>
     </div>}
     {confirm && <Alert variant="warning" className="doc-confirm" role="alertdialog" title={confirm === "retranscribe" ? s.retranscribe : s.regenerate} actions={<><button className="doc-action" disabled={busy} onClick={() => run(confirm)}>{busy ? s.processing : confirm === "regenerate" && language !== "same_as_call" ? s.writeInGo.replace("{lang}", nativeName(language)) : s.confirm}</button><button className="doc-action ghost" disabled={busy} onClick={() => setConfirm(null)}>{s.cancel}</button></>}>
-      {confirm === "retranscribe" ? corrections ? s.retranscribeEdited.replace("{n}", String(corrections)) : s.retranscribeConfirm
+      {confirm === "retranscribe" ? <>{corrections ? s.retranscribeEdited.replace("{n}", String(corrections)) : s.retranscribeConfirm}<label className="writein"><MicIcon/><span>{s.micModeMic}</span><select aria-label={s.micModeLabel} value={micMode} disabled={busy} onChange={event => setMicMode(event.target.value as MicMode)}>{MIC_MODES.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><span className="writein-help">{s.micModeRetx}</span></>
         : <>{s.regenerateConfirm}<WriteInSelect value={language} onChange={setLanguage} call={meeting.summary.language} disabled={busy}/><span className="writein-help">{s.writeInHelp}</span></>}
     </Alert>}
     <span className="sr-only" role="status">{message}</span>

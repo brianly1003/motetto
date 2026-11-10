@@ -135,6 +135,8 @@ pub struct Settings {
     pub share_check: bool,
     /// The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
     pub mic_device: Option<String>,
+    /// Settings › Audio › Microphone mode: how Motetto prepares its copy of the mic after a call.
+    pub mic_mode: motetto_core::transcribe::MicMode,
     pub sounds: bool,
     pub companion: Companion,
     pub prompter: Prompter,
@@ -187,6 +189,7 @@ impl Default for Settings {
             share_reset_on_end: true,
             share_check: true,
             mic_device: None,
+            mic_mode: Default::default(),
             sounds: true,
             companion: Companion::default(),
             prompter: Prompter::default(),

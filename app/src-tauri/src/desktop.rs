@@ -102,6 +102,7 @@ pub fn run() {
             crate::microphone::microphones,
             crate::microphone::set_microphone,
             crate::microphone::set_mic_choice,
+            crate::microphone::set_mic_mode,
             crate::microphone::set_mic_volume,
             crate::microphone::open_sound_settings,
             crate::permissions::open_permission_settings,
@@ -544,9 +545,16 @@ async fn undo_discard(app: tauri::AppHandle, id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     }
     let result = async {
-        crate::meeting_actions::meeting_action(app.clone(), id.clone(), "restore".into(), None)
-            .await?;
-        crate::meeting_actions::meeting_action(app.clone(), id, "regenerate".into(), None).await
+        crate::meeting_actions::meeting_action(
+            app.clone(),
+            id.clone(),
+            "restore".into(),
+            None,
+            None,
+        )
+        .await?;
+        crate::meeting_actions::meeting_action(app.clone(), id, "regenerate".into(), None, None)
+            .await
     }
     .await;
     // The Pill has gone by now, so the library says what went wrong.

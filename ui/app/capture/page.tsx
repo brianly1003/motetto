@@ -10,6 +10,7 @@ import type { CaptureKind } from "@/lib/bindings/CaptureKind";
 import type { CaptureMemory } from "@/lib/bindings/CaptureMemory";
 import type { CaptureWindow } from "@/lib/bindings/CaptureWindow";
 import type { MicChoice } from "@/lib/bindings/MicChoice";
+import type { MicMode } from "@/lib/bindings/MicMode";
 import { useMicReport } from "@/components/Microphone";
 import { CaptureMenu, micRow, type Which } from "@/components/capture/CaptureMenus";
 import { Countdown } from "@/components/capture/Countdown";
@@ -42,6 +43,7 @@ function Setup() {
   const [name, setName] = useState("this display");
   // Settings › Screen video: the picture while this setup hasn't chosen one.
   const [preset, setPreset] = useState("sharp");
+  const [micMode, setMicMode] = useState<MicMode | null>(null);
   // Re-renders the countdown; the seconds left are read from the clock when drawn.
   const [, setNow] = useState(0);
   const started = useRef(false);
@@ -69,7 +71,7 @@ function Setup() {
       update(fromMemory(memory, modeParam, recording, view), false);
     });
     void ipc.captureWindows().then(w => { if (active) setWindows(w); }).catch(() => {});
-    void ipc.getSettings().then(s => { if (active) setPreset(s.screen_preset); }).catch(() => {});
+    void ipc.getSettings().then(s => { if (active) { setPreset(s.screen_preset); setMicMode(s.mic_mode); } }).catch(() => {});
     void ipc.listScreenSources().then(o => {
       const d = o.find(o => o.pick.choice.kind === "Display" && o.pick.choice.id === display);
       if (active && d) setName(d.pick.name);
@@ -251,7 +253,7 @@ function Setup() {
         onMode={(m: Mode) => { setHover(null); update(capMode(cap, m)); }}
         onMenu={(which, anchor) => setMenu(menu?.which === which ? null : { which, anchor })}
         onGo={() => go()} onClose={() => void ipc.closeCapture()}/>
-      {menu && <CaptureMenu which={menu.which} cap={cap} report={report} anchor={menu.anchor} preset={preset} onSet={set} onClose={() => setMenu(null)}/>}
+      {menu && <CaptureMenu which={menu.which} cap={cap} report={report} anchor={menu.anchor} preset={preset} micMode={micMode} onMicMode={mode => { const was = micMode; setMicMode(mode); void ipc.setMicMode(mode).catch(() => setMicMode(was)); }} onSet={set} onClose={() => setMenu(null)}/>}
     </>}
     {!main && ownHover && <CapHint cap={cap} own screenName={name}/>}
     {cap.count && mine(target) && <Countdown left={countLeft(cap.count, Date.now())} total={cap.count.total} name={aim.name} noMic={cap.mic.kind === "Off"} x={aim.x} y={aim.y} onNow={startNow} onMore={() => {

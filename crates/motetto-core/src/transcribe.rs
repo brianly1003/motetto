@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use crate::events::{TranscribeProgress, Who};
 use crate::progress::{self, Kind};
-use crate::{aec, config, decode, diarize, slice};
+use crate::{aec, config, decode, denoise, diarize, slice};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Who a track belongs to, from its file name.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +93,32 @@ pub struct Transcript {
     pub language: Option<String>,
 }
 
+/// How Motetto prepares its own copy of the mic (`x.mic.wav`) after the call. The recorded WAVs
+/// and the call app's own mic processing are never touched; the system track is never changed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MicMode {
+    /// Loudspeaker echo removed (`aec`) when the mic hears the call.
+    #[default]
+    Standard,
+    /// Standard, plus a denoised copy (`x.mic.clean.wav`) to listen to and to find speech in.
+    ReduceNoise,
+    /// The mic as recorded.
+    Original,
+}
+
+/// A mode this version doesn't know (written by a newer one) reads as Standard.
+impl<'de> Deserialize<'de> for MicMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("reduce_noise") => Self::ReduceNoise,
+            Some("original") => Self::Original,
+            _ => Self::Standard,
+        })
+    }
+}
+
 /// Desktop recording parts use elapsed recording time, excluding the Stop/Resume pause.
 /// Quiet mode prevents whisper from printing private transcript text to desktop logs.
 /// `report` hears how far the work is about once a second, from another thread.
@@ -99,14 +127,24 @@ pub fn transcript_parts(
     quiet: bool,
     report: &(dyn Fn(TranscribeProgress) + Sync),
 ) -> Result<Transcript, Box<dyn Error>> {
-    let run = Run::new(parts);
+    transcript_parts_with(parts, MicMode::Standard, quiet, report)
+}
+
+/// `transcript_parts` with the mic prepared as `mode` says.
+pub fn transcript_parts_with(
+    parts: &[(Vec<String>, u64)],
+    mode: MicMode,
+    quiet: bool,
+    report: &(dyn Fn(TranscribeProgress) + Sync),
+) -> Result<Transcript, Box<dyn Error>> {
+    let run = Run::new(parts, mode);
     progress::ticking(
         || {
             if let Some(progress) = run.report() {
                 report(progress);
             }
         },
-        || transcribe_parts(parts, quiet, &run),
+        || transcribe_parts(parts, mode, quiet, &run),
     )
 }
 
@@ -121,13 +159,14 @@ struct Run {
 }
 const CONVERT: usize = 0;
 const ECHO: usize = 1;
-const SPEECH: usize = 2;
-const WHISPER: usize = 3;
-const CHECK: usize = 4;
-const RECHECK: usize = 5;
+const NOISE: usize = 2;
+const SPEECH: usize = 3;
+const WHISPER: usize = 4;
+const CHECK: usize = 5;
+const RECHECK: usize = 6;
 
 impl Run {
-    fn new(parts: &[(Vec<String>, u64)]) -> Self {
+    fn new(parts: &[(Vec<String>, u64)], mode: MicMode) -> Self {
         let vad = config::var("WHISPER_VAD_MODEL").is_some_and(|v| !v.is_empty());
         let mut items = vec![];
         let mut first = vec![];
@@ -143,11 +182,13 @@ impl Run {
                     .or_else(|| decode::seconds(Path::new(src)))
                     .unwrap_or(0.0);
                 let side = speaker.side();
-                let echo = speaker == Speaker::Me && system;
+                let echo = speaker == Speaker::Me && system && mode != MicMode::Original;
+                let noise = speaker == Speaker::Me && mode == MicMode::ReduceNoise;
                 first.push(items.len());
                 items.extend([
                     progress::Item::new(Kind::Convert, side, audio),
                     progress::Item::new(Kind::Echo, side, if echo { audio } else { 0.0 }),
+                    progress::Item::new(Kind::Noise, side, if noise { audio } else { 0.0 }),
                     progress::Item::new(Kind::Speech, side, if vad { audio } else { 0.0 }),
                     // About half a call is speech until the check says.
                     progress::Item::new(
@@ -209,6 +250,7 @@ impl Run {
 
 fn transcribe_parts(
     parts: &[(Vec<String>, u64)],
+    mode: MicMode,
     quiet: bool,
     run: &Run,
 ) -> Result<Transcript, Box<dyn Error>> {
@@ -243,10 +285,20 @@ fn transcribe_parts(
                 .map(|wav| f64::from(wav.duration()) / 16_000.0)
                 .unwrap_or(0.0);
             run.audio(track, audio);
+            // Copies made for another mode are stale now: playback must not find them.
+            if speaker == Speaker::Me {
+                if mode != MicMode::ReduceNoise {
+                    let _ = fs::remove_file(format!("{stem}.clean.wav"));
+                }
+                if mode == MicMode::Original {
+                    let _ = fs::remove_file(format!("{stem}.aec.wav"));
+                }
+            }
             // Through loudspeakers the mic records the other side again: cancel that echo
             // against the system track and transcribe (and play) the cleaned mic instead.
             let system = sources.iter().find(|s| s.ends_with(".system.wav"));
-            if let (Speaker::Me, Some(system)) = (speaker, system) {
+            if let (Speaker::Me, Some(system), false) = (speaker, system, mode == MicMode::Original)
+            {
                 run.begin(track, ECHO);
                 let system16 = decode16(system)?;
                 let cleaned = format!("{stem}.aec.wav");
@@ -262,14 +314,35 @@ fn transcribe_parts(
                     wav16 = cleaned;
                 }
             }
+            // Reduce noise: a denoised copy to play, and to find speech in without the noise.
+            let mut listen = wav16.clone();
+            if speaker == Speaker::Me && mode == MicMode::ReduceNoise {
+                run.begin(track, NOISE);
+                let clean = format!("{stem}.clean.wav");
+                denoise::clean(Path::new(&wav16), Path::new(&clean))
+                    .map_err(|e| format!("noise reduction of {}: {e}", name(src)))?;
+                listen = clean;
+            }
             // The speech whisper will hear, found once: it prices whisper and finds the long
             // silences and invented credits below.
             let speech = vad.as_deref().and_then(|vad| {
                 run.begin(track, SPEECH);
-                slice::speech(Path::new(&wav16), vad)
-                    .map_err(|e| eprintln!("Long-silence check skipped for {wav16}: {e}"))
+                slice::speech(Path::new(&listen), vad)
+                    .map_err(|e| eprintln!("Long-silence check skipped for {listen}: {e}"))
                     .ok()
             });
+            // Whisper hears the mic undenoised (denoising tends to raise its error rate), with
+            // everything outside the speech found in the denoised copy silenced.
+            let mut gated = None;
+            if listen != wav16
+                && let Some(speech) = &speech
+            {
+                let path = format!("{stem}.gated.wav");
+                denoise::gate(Path::new(&wav16), speech, Path::new(&path))
+                    .map_err(|e| format!("noise reduction of {}: {e}", name(src)))?;
+                wav16 = path.clone();
+                gated = Some(path);
+            }
             let spoken = speech.as_ref().map(|speech| {
                 speech
                     .iter()
@@ -348,6 +421,9 @@ fn transcribe_parts(
                     speaker: label,
                     text,
                 });
+            }
+            if let Some(gated) = gated {
+                let _ = fs::remove_file(gated);
             }
             track += 1;
         }
@@ -860,6 +936,18 @@ fn parse_csv(csv: &str) -> Vec<(u64, u64, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_mode_reads_unknown_as_standard() {
+        let read = |json: &str| serde_json::from_str::<MicMode>(json).unwrap();
+        assert_eq!(read("\"reduce_noise\""), MicMode::ReduceNoise);
+        assert_eq!(read("\"original\""), MicMode::Original);
+        assert_eq!(read("\"isolate_voice\""), MicMode::Standard);
+        assert_eq!(
+            serde_json::to_string(&MicMode::ReduceNoise).unwrap(),
+            "\"reduce_noise\""
+        );
+    }
 
     #[test]
     fn a_panicking_job_stops_its_progress_ticker() {

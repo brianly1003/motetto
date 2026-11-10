@@ -68,6 +68,11 @@ pub struct MeetingSummary {
     /// (its id is then `<id>-full`).
     #[serde(default)]
     pub deleted_kind: DeletedKind,
+    /// How the mic was prepared for the current transcript: chosen in Settings › Audio when the
+    /// meeting was recorded, or in Transcribe again. Meetings saved before it was kept are
+    /// Standard, as they were transcribed.
+    #[serde(default)]
+    pub mic_mode: motetto_core::transcribe::MicMode,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -384,6 +389,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         kind: Default::default(),
         facts: None,
         deleted_kind: Default::default(),
+        mic_mode: Default::default(),
         has_video: false,
     }
 }
@@ -515,6 +521,7 @@ pub fn import(
         kind: Default::default(),
         facts: None,
         deleted_kind: Default::default(),
+        mic_mode: Default::default(),
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -791,6 +798,7 @@ mod tests {
                     kind: Default::default(),
                     facts: None,
                     deleted_kind: Default::default(),
+                    mic_mode: Default::default(),
                     has_video: false,
                 },
             )
@@ -860,6 +868,7 @@ mod tests {
                 kind: Default::default(),
                 facts: None,
                 deleted_kind: Default::default(),
+                mic_mode: Default::default(),
                 has_video: false,
             };
             save(&root, &summary).unwrap();

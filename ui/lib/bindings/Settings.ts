@@ -2,6 +2,7 @@
 import type { AppRule } from "./AppRule";
 import type { CaptureMemory } from "./CaptureMemory";
 import type { Companion } from "./Companion";
+import type { MicMode } from "./MicMode";
 import type { Mode } from "./Mode";
 import type { Prompter } from "./Prompter";
 import type { SpeedResult } from "./SpeedResult";
@@ -40,7 +41,11 @@ share_check: boolean,
 /**
  * The microphone Motetto records (a `motetto_core::mics::Mic` id); None follows the system.
  */
-mic_device: string | null, sounds: boolean, companion: Companion, prompter: Prompter, spellings: Array<Spelling>, shortcuts: { [key in string]: string }, 
+mic_device: string | null, 
+/**
+ * Settings › Audio › Microphone mode: how Motetto prepares its copy of the mic after a call.
+ */
+mic_mode: MicMode, sounds: boolean, companion: Companion, prompter: Prompter, spellings: Array<Spelling>, shortcuts: { [key in string]: string }, 
 /**
  * The screen setup's last choices for Record now and for Record the screen.
  */

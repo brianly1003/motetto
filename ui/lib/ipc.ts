@@ -212,21 +212,25 @@ export const openActionItems = () => invoke<[MeetingSummary, string][]>("open_ac
 export const searchMeetings = (query: string) => invoke<SearchHit[]>("search_meetings", { query });
 
 /** `language`: Write the notes again in this code (or "same_as_call") instead of the Settings one. */
-export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "delete" | "restore" | "purge", language?: string) => invoke<void>("meeting_action", { id, action, language: language ?? null });
+export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "delete" | "restore" | "purge", language?: string, micMode?: MicMode) => invoke<void>("meeting_action", { id, action, language: language ?? null, micMode: micMode ?? null });
 export const deletedMeetings = () => invoke<MeetingSummary[]>("deleted_meetings");
 export const renameMeeting = (id: string, title: string) => invoke<MeetingSummary>("rename_meeting", { id, title });
 export const setLocked = (id: string, locked: boolean) => invoke<MeetingSummary>("set_locked", { id, locked });
 export const setUnconfirmed = (id: string, lines: string[]) => invoke<MeetingSummary>("set_unconfirmed", { id, lines });
 
 import type { MeetingMedia } from './bindings/MeetingMedia';
-export async function meetingMedia(id: string): Promise<MeetingMedia> {
-  const media = await invoke<MeetingMedia>('meeting_media', {id});
+import type { MicMode } from './bindings/MicMode';
+/** `original` plays the mic as recorded instead of the copy its transcript was made from. */
+export async function meetingMedia(id: string, original = false): Promise<MeetingMedia> {
+  const media = await invoke<MeetingMedia>('meeting_media', {id, original});
   const {convertFileSrc} = await import('@tauri-apps/api/core');
   return {...media, videos:(media.videos??[]).map(part=>({...part,path:convertFileSrc(part.path)})), moments:media.moments??[],clicks:media.clicks??[], tracks:media.tracks.map(track=>({...track,path:convertFileSrc(track.path)}))};
 }
 /** macOS plays meeting audio natively (WebKit's WAV playback can freeze the window); false
  *  where the page plays it with audio elements (Windows, fixtures). */
-export const playbackOpen=(id:string)=>invoke<boolean>('playback_open',{id}).then(native=>native===true,()=>false);
+/** Settings › Audio › Microphone mode, from the screen setup bar. */
+export const setMicMode=(mode:MicMode)=>invoke<void>('set_mic_mode',{mode});
+export const playbackOpen=(id:string,original=false)=>invoke<boolean>('playback_open',{id,original}).then(native=>native===true,()=>false);
 /** Plays or pauses at `rate`, from `atMs` when given; resolves to the meeting position in ms. */
 export const playbackSet=(id:string,playing:boolean,atMs:number|null,rate:number)=>invoke<number>('playback_set',{id,playing,atMs,rate});
 export const playbackPosition=(id:string)=>invoke<number>('playback_position',{id});

@@ -28,6 +28,7 @@ pub(crate) fn done() -> f64 {
 pub enum Kind {
     Convert,
     Echo,
+    Noise,
     Speech,
     Whisper,
     Check,
@@ -39,6 +40,8 @@ impl Kind {
             Kind::Convert => 0.0006,
             // 40.6 s and 12.5 s.
             Kind::Echo => 0.0068,
+            // Per second of audio, not yet measured on a long call: a guess from short tests.
+            Kind::Noise => 0.004,
             // 16.5 s and 3.3 s.
             Kind::Speech => 0.0025,
             // Per unit of `whisper_units`: 145 s for 4310 and 44 s for 1483.
@@ -195,6 +198,7 @@ impl Plan {
         match item.kind {
             Kind::Convert => TranscribeStep::Converting { side },
             Kind::Echo => TranscribeStep::RemovingEcho,
+            Kind::Noise => TranscribeStep::ReducingNoise,
             Kind::Speech | Kind::Whisper => TranscribeStep::Transcribing { side },
             Kind::Check => {
                 let of = item.units.round() as u32;

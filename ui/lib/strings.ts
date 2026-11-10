@@ -1,5 +1,10 @@
 export const strings = {
   videoAvailable: "Video available",
+  micModeLabel: "Microphone mode", micModeMic: "Microphone",
+  micModeHelp: "Changes only Motetto's copy, after the call, for meetings you record next. Your call app's own settings, such as noise suppression or Voice Isolation, still decide what others hear.",
+  micModeRetx: "From the saved recording. Your mic as recorded is never changed.",
+  micPlay: "Your microphone · {mode}", micPlayLabel: "Play your microphone", micCleaned: "Cleaned", micOriginal: "Original",
+  micPlayHelp: "Switch at the same moment. The transcript stays the same.", micPlayRaw: "Played and transcribed as recorded.",
   sidebarHide: "Hide sidebar", sidebarShow: "Show sidebar",
   scr_audio: "Audio", scr_audio_screen: "Audio + screen", scr_none: "The screen isn't recorded.",
   scr_record_from: "Record from", scr_menu_title: "Record the screen", scr_audio_only: "Audio only",

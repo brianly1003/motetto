@@ -126,14 +126,19 @@ pub fn open_tracks(
 
 /// True when this meeting's audio plays natively; false means the page plays it.
 #[tauri::command]
-pub async fn playback_open(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+/// `original` plays the recorded mic in place of its processed copy (the Audio tab's switch).
+pub async fn playback_open(
+    app: tauri::AppHandle,
+    id: String,
+    original: Option<bool>,
+) -> Result<bool, String> {
     if !cfg!(target_os = "macos") {
         return Ok(false);
     }
     let root = app.state::<Library>().root.clone();
     let lookup = id.clone();
     let tracks = tauri::async_runtime::spawn_blocking(move || {
-        meeting_media::audio(&library::folder(&root, &lookup)?)
+        meeting_media::audio_as(&library::folder(&root, &lookup)?, original.unwrap_or(false))
     })
     .await
     .map_err(|e| e.to_string())??;

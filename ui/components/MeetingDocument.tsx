@@ -19,6 +19,7 @@ import type {Gap} from '@/lib/useSession';
 import {transcriptLines} from '@/lib/transcript';
 import * as ipc from '@/lib/ipc';
 import {strings as s} from '@/lib/strings';
+import {micModeName} from '@/lib/micModes';
 import {MenuIcon} from './MenuIcon';
 import {Alert} from './Alert';
 import { Kbd } from "@/components/ui/Kbd";
@@ -100,6 +101,9 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
   }
   useEffect(()=>{if(renameRequest)startRename();},[renameRequest]);
   const [media,setMedia]=useState<MeetingMedia|null>(null);
+  // The Audio tab's switch: play the mic as recorded instead of the copy the transcript used.
+  const [micOriginal,setMicOriginal]=useState(false);
+  useEffect(()=>{setMicOriginal(false);},[meeting.summary.id]);
   const [mediaFailed,setMediaFailed]=useState(false);
   const hasVideo=media?!!media.videos?.length:meeting.has_video;
   const tabs=['Notes','Transcript',...(hasVideo?['Video']:[]),'Audio'];
@@ -136,10 +140,11 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
     // The tracks are still being written while it records or its notes are written.
     if(live||writing||ended)return;
     let active=true;setMediaFailed(false);
-    ipc.meetingMedia(meeting.summary.id).then(value=>{if(active){setMedia(value);if(!value.videos.length)setTab(tab=>tab==='Video'?'Audio':tab);}}).catch(error=>{if(active){setMediaFailed(true);onError(String(error));}});
+    ipc.meetingMedia(meeting.summary.id,micOriginal).then(value=>{if(active){setMedia(value);if(!value.videos.length)setTab(tab=>tab==='Video'?'Audio':tab);}}).catch(error=>{if(active){setMediaFailed(true);onError(String(error));}});
     return()=>{active=false;};
   // A trim, or its undo, changes the recording's length; a clip turns Ready once saved.
-  },[meeting.summary.id,live,writing,meeting.summary.duration_ms,meeting.summary.status]);
+  // Switching the mic reloads the tracks; the cursor, rate and play state carry over.
+  },[meeting.summary.id,live,writing,meeting.summary.duration_ms,meeting.summary.status,meeting.summary.mic_mode,micOriginal]);
   // null until known: native audio (macOS) or the audio elements below.
   const [nativeAudio,setNativeAudio]=useState<boolean|null>(null);
   useEffect(()=>{
@@ -147,7 +152,7 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
     // A screen recording without sound plays on the page's own clock.
     if(!media.tracks.length){setNativeAudio(false);return()=>setNativeAudio(null);}
     const id=meeting.summary.id;let active=true;
-    void ipc.playbackOpen(id).then(native=>{if(active)setNativeAudio(native);});
+    void ipc.playbackOpen(id,micOriginal).then(native=>{if(active)setNativeAudio(native);});
     return()=>{active=false;setNativeAudio(null);void ipc.playbackClose(id).catch(()=>{});};
   },[meeting.summary.id,media]);
   useEffect(()=>{
@@ -327,7 +332,7 @@ export default function MeetingDocument({meeting, find, at, onChange, onChanged,
       event.preventDefault();setTab(names[next]);document.getElementById(`tab-${names[next]}`)?.focus();
     }}>{name}</button>)}</div>{tab==='Notes'&&meeting.notes_md&&readIn.desktop&&<ReadInPicker readIn={readIn} meeting={meeting}/>}<DocumentFind tab={tab} body={body} start={find?.query}/>{(tab==='Notes'&&!!meeting.notes_md||tab==='Transcript')&&<Shortcuts tab={tab} readOnly={locked||tab==='Notes'&&readIn.markdown!==null} note={locked?s.lockedHint:tab==='Transcript'?s.transcriptNote:readIn.markdown!==null?(readIn.stale?s.translatedStaleHint:s.translatedHint):s.editHint}/>}</div>
     <div ref={body} className="docbody" id="meeting-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} onClick={event=>lockedTry(event.target,'.notes [data-lines], .tline .words')} onKeyDown={event=>{if(event.key==='Enter'&&!event.altKey)lockedTry(event.target,'.notes, .tline');}}>
-      {tab==='Notes'?(meeting.notes_md?<div className="readin-col"><ReadInBar readIn={readIn} onWriteIn={locked||!deletable(meeting.summary.status)?undefined:code=>setWriteIn({code})}/><NotesView key={readIn.markdown===null?'notes':readIn.view} id={meeting.summary.id} markdown={readIn.markdown??meeting.notes_md} locked={locked} translated={readIn.markdown===null?undefined:{hint:readIn.stale?s.translatedStaleHint:s.translatedHint,labelOf:line=>headings.get(line),onToggle:readIn.toggle}} durationMs={notesDuration} onSeek={notesDuration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError} transcript={meeting.transcript} check={readIn.markdown===null?check:undefined}/></div>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} clip={clipping?{...clipping,total:duration,onPick:pickLine}:undefined} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined} running={playing}/>:tab==='Video'?(media?<VideoTab media={media} position={position} playing={playing} seek={seek} scrub={scrub} togglePlay={togglePlay} rate={rate} setRate={setRate} lines={transcriptLines(meeting.transcript,[])} meetingId={meeting.summary.id} onToast={onToast} onError={onError} onMediaChange={value=>{setPlaying(false);setMedia(value);if(!value.videos.length)setTab('Audio');else setTab('Video');}}/>:<p className="muted" role={mediaFailed?'alert':'status'}>{mediaFailed?s.video_load_failed:s.video_loading}</p>):<div className="notes"><section><h3>Audio</h3>{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
+      {tab==='Notes'?(meeting.notes_md?<div className="readin-col"><ReadInBar readIn={readIn} onWriteIn={locked||!deletable(meeting.summary.status)?undefined:code=>setWriteIn({code})}/><NotesView key={readIn.markdown===null?'notes':readIn.view} id={meeting.summary.id} markdown={readIn.markdown??meeting.notes_md} locked={locked} translated={readIn.markdown===null?undefined:{hint:readIn.stale?s.translatedStaleHint:s.translatedHint,labelOf:line=>headings.get(line),onToggle:readIn.toggle}} durationMs={notesDuration} onSeek={notesDuration?ms=>{seek(ms);setTab('Transcript');}:undefined} onChange={notes_md=>onChange({...meeting,notes_md})} onError={onError} transcript={meeting.transcript} check={readIn.markdown===null?check:undefined}/></div>:<p className="muted">{s.noNotes}</p>):tab==='Transcript'?<Transcript onTogglePlay={togglePlay} clip={clipping?{...clipping,total:duration,onPick:pickLine}:undefined} id={meeting.summary.id} text={meeting.transcript} heard={meeting.transcript_heard} locked={locked} marks={meeting.summary.marks_ms} onSeek={duration?seek:undefined} onReplay={duration?replay:undefined} onChange={(transcript,transcript_heard)=>onChange({...meeting,transcript,transcript_heard})} onError={onError} position={showPlayer?position:undefined} running={playing}/>:tab==='Video'?(media?<VideoTab media={media} position={position} playing={playing} seek={seek} scrub={scrub} togglePlay={togglePlay} rate={rate} setRate={setRate} lines={transcriptLines(meeting.transcript,[])} meetingId={meeting.summary.id} onToast={onToast} onError={onError} onMediaChange={value=>{setPlaying(false);setMedia(value);if(!value.videos.length)setTab('Audio');else setTab('Video');}}/>:<p className="muted" role={mediaFailed?'alert':'status'}>{mediaFailed?s.video_load_failed:s.video_loading}</p>):<div className="notes"><section><h3>Audio</h3>{media&&tracks.some(t=>t.speaker==='You')&&<><div className="micplay"><span>{s.micPlay.replace('{mode}',micModeName(media.mic_mode))}</span>{media.mic_cleaned&&<div className="segm" role="radiogroup" aria-label={s.micPlayLabel}>{[false,true].map(original=><button key={String(original)} type="button" role="radio" aria-checked={micOriginal===original} onClick={()=>setMicOriginal(original)}>{original?s.micOriginal:s.micCleaned}</button>)}</div>}</div><p className="tip">{media.mic_cleaned?s.micPlayHelp:media.mic_mode==='original'?s.micPlayRaw:null}</p></>}{tracks.length?<div className="audio-table"><table><thead><tr><th>Track</th><th>Who</th><th>Size</th></tr></thead><tbody>{tracks.map(track=><tr key={track.path}><td className="mono"><button className="track-play" onClick={()=>seek(track.offset_ms)}>{track.name}</button></td><td>{track.speaker}</td><td className="mono">{fileSize(track.bytes)}</td></tr>)}</tbody></table></div>:<p className="tip">No saved audio is available. Notes and transcript are kept.</p>}</section></div>}
       {tab!=='Video'&&<aside className="meeting-aside">
         <div className="panel"><h5>This meeting</h5><dl className="kv"><dt>Length</dt><dd>{duration?timeLabel(duration):'Not recorded'}</dd><dt>Language</dt><dd>{languageName(meeting.summary.language)}</dd><dt>Notes in</dt><dd>{meeting.summary.notes_ms!=null?notesTime(meeting.summary.notes_ms):"Not recorded"}</dd><dt>Marks</dt><dd>{meeting.summary.marks_ms.length}</dd></dl></div>
         <div className="panel"><h5>Spellings used</h5>{meeting.summary.spellings?.length?<div className="spelling-chips">{meeting.summary.spellings.map(term=><span key={term} className="chip plain">{term}</span>)}</div>:<p className="tip">No saved spellings</p>}</div>

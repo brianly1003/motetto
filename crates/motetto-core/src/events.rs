@@ -319,6 +319,8 @@ pub enum TranscribeStep {
         side: Option<Who>,
     },
     RemovingEcho,
+    /// Reduce noise (a microphone mode): the denoised copy of the mic is being made.
+    ReducingNoise,
     Transcribing {
         side: Option<Who>,
     },

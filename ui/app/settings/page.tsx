@@ -6,6 +6,7 @@ import * as ipc from '@/lib/ipc';
 import type {Settings} from '@/lib/bindings/Settings';
 import {fileSize} from '@/lib/document';
 import {strings as str} from '@/lib/strings';
+import {MIC_MODES} from '@/lib/micModes';
 import type {Catalog} from '@/lib/bindings/Catalog';
 import type {SetupState} from '@/lib/bindings/SetupState';
 import type {Hardware} from '@/lib/bindings/Hardware';
@@ -136,7 +137,9 @@ export default function SettingsPage(){
         // The microphone (DESIGN 4.15): the level moves only while Motetto records; it never opens the mic just to show it.
         const r=mic.report,m=r?.active,mac=info?.platform!=='windows';
         const sound=<button className="btn sm" onClick={()=>void ipc.openSoundSettings().catch(e=>setError(String(e)))}>Open Sound settings…</button>;
-        if(!mac)return <Row label="Microphone" help="Motetto records the default microphone. Choose it in Windows sound settings.">{sound}</Row>;
+        // How Motetto prepares its own copy of the mic after a call; never the call app's mic.
+        const mode=<Row label={str.micModeLabel} help={str.micModeHelp}><fieldset className="micmodes" aria-label={str.micModeLabel}>{MIC_MODES.map(([id,name,sub])=><label key={id} className="micmode"><input type="radio" name="micmode" value={id} checked={settings.mic_mode===id} onChange={()=>void save({mic_mode:id})}/><span><b>{name}</b><small>{sub}</small></span></label>)}</fieldset></Row>;
+        if(!mac)return <><Row label="Microphone" help="Motetto records the default microphone. Choose it in Windows sound settings.">{sound}</Row>{mode}</>;
         if(!r)return <p role="status">Loading microphones…</p>;
         const {system,others,chosen}=micChoices(r);
         return <>
@@ -153,6 +156,7 @@ export default function SettingsPage(){
             {m&&volume!==null?<label className="volrow"><input type="range" min={0} max={100} value={Math.round(volume*100)} style={{"--v":volume} as CSSProperties} aria-label={`Input volume for ${m.name}`} onChange={e=>{const v=Number(e.target.value)/100;setVolume(v);clearTimeout(volumeTimer.current);volumeTimer.current=setTimeout(()=>void ipc.setMicVolume(m.id,v).then(()=>micSaved('Saved')).catch(err=>setError(String(err))),150);}}/><output>{Math.round(volume*100)}%</output></label>
               :<span className="help" style={{margin:0}}>{m?`${m.name} sets its own level.`:''}</span>}
           </Row>
+          {mode}
           <Row label="All apps" help="Changes the default microphone for every app, including your call app.">{sound}</Row>
         </>;
       })()}

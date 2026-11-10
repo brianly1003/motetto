@@ -92,6 +92,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let step = match p.step {
             Converting { .. } => "converting".to_string(),
             RemovingEcho => "removing echo".to_string(),
+            ReducingNoise => "reducing noise".to_string(),
             Transcribing { .. } => "transcribing".to_string(),
             Checking { piece, of, .. } => format!("checking piece {piece} of {of}"),
         };

@@ -4,4 +4,4 @@ import type { Who } from "./Who";
 /**
  * The work a transcription is doing now.
  */
-export type TranscribeStep = { "type": "Converting", side: Who | null, } | { "type": "RemovingEcho" } | { "type": "Transcribing", side: Who | null, } | { "type": "Checking", side: Who | null, piece: number, of: number, };
+export type TranscribeStep = { "type": "Converting", side: Who | null, } | { "type": "RemovingEcho" } | { "type": "ReducingNoise" } | { "type": "Transcribing", side: Who | null, } | { "type": "Checking", side: Who | null, piece: number, of: number, };

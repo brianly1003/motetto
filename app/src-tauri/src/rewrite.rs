@@ -2,6 +2,7 @@
 //! notes again (the transcript). Both run one at a time under `busy` and report `Stage`s.
 use crate::library;
 use motetto_core::events::Stage;
+use motetto_core::transcribe::MicMode;
 use std::{fs, io, path::Path};
 
 /// A file error that names the file: a bare "No such file or directory" can't be traced.
@@ -69,9 +70,12 @@ fn saved_audio(folder: &Path) -> Result<Vec<(Vec<String>, u64)>, String> {
 /// Transcribe again (owner 2026-10-21): whisper runs on the saved audio once more and replaces
 /// the transcript, the user's corrections included (the UI asks first); what was shown before is
 /// kept in `transcript.prev.txt`. The notes don't change: Write the notes again is separate.
+/// `mic_mode` prepares the mic another way (the confirmation's Microphone choice); None keeps the
+/// meeting's own. The meeting keeps the new mode only when the new transcript is saved.
 pub(crate) fn retranscribe(
     root: &Path,
     id: &str,
+    mic_mode: Option<MicMode>,
     stage: &(dyn Fn(Stage) + Sync),
 ) -> Result<(), String> {
     let folder = library::folder(root, id)?;
@@ -82,14 +86,19 @@ pub(crate) fn retranscribe(
     if parts.is_empty() {
         return Err("This meeting has no saved audio to transcribe".into());
     }
+    let mic_mode = match mic_mode {
+        Some(mode) => mode,
+        None => library::summary(root, id)?.mic_mode,
+    };
     motetto_core::tools::reset();
     stage(Stage::Transcribing { progress: None });
-    let heard = motetto_core::transcribe::transcript_parts(&parts, true, &|progress| {
-        stage(Stage::Transcribing {
-            progress: Some(progress),
+    let heard =
+        motetto_core::transcribe::transcript_parts_with(&parts, mic_mode, true, &|progress| {
+            stage(Stage::Transcribing {
+                progress: Some(progress),
+            })
         })
-    })
-    .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     let transcript = heard.text;
     if transcript.trim().is_empty() {
         return Err("No speech was heard in the saved audio. The transcript is unchanged.".into());
@@ -104,6 +113,7 @@ pub(crate) fn retranscribe(
     save_transcript(&folder, &transcript, fixed)?;
     let mut summary = library::summary(root, id)?;
     summary.language = heard.language;
+    summary.mic_mode = mic_mode;
     library::save(root, &summary)
 }
 
@@ -153,11 +163,16 @@ pub(crate) fn regenerate(
         let parts = saved_audio(&folder)?;
         motetto_core::tools::reset();
         stage(Stage::Transcribing { progress: None });
-        let heard = motetto_core::transcribe::transcript_parts(&parts, true, &|progress| {
-            stage(Stage::Transcribing {
-                progress: Some(progress),
-            })
-        })
+        let heard = motetto_core::transcribe::transcript_parts_with(
+            &parts,
+            meeting.summary.mic_mode,
+            true,
+            &|progress| {
+                stage(Stage::Transcribing {
+                    progress: Some(progress),
+                })
+            },
+        )
         .map_err(|e| e.to_string())?;
         let path = folder.join("transcript.txt");
         fs::write(&path, &heard.text).map_err(on(&path))?;
@@ -317,7 +332,7 @@ mod tests {
         .unwrap();
         fs::write(root.join("789/transcript.txt"), "[00:01] Me: keep").unwrap();
         assert!(saved_audio(&root.join("789")).unwrap().is_empty());
-        let error = retranscribe(&root, "789", &|_| {}).unwrap_err();
+        let error = retranscribe(&root, "789", None, &|_| {}).unwrap_err();
         assert!(error.contains("no saved audio"), "{error}");
         assert_eq!(
             fs::read_to_string(root.join("789/transcript.txt")).unwrap(),

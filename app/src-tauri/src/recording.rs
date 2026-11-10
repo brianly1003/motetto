@@ -47,6 +47,13 @@ pub fn spawn(
                                 id: id.clone(),
                                 parts: vec![],
                                 failure: None,
+                                // Kept for the whole meeting: pause, resume and a mic switch
+                                // don't change how it is transcribed.
+                                mic_mode: app
+                                    .state::<crate::settings::Store>()
+                                    .get()
+                                    .map(|s| s.mic_mode)
+                                    .unwrap_or_default(),
                             });
                         }
                         let Some(record) = recording.as_mut() else {
@@ -362,6 +369,7 @@ struct Recording {
     id: String,
     parts: Vec<(Vec<String>, u64)>,
     failure: Option<String>,
+    mic_mode: motetto_core::transcribe::MicMode,
 }
 const CLIP_SAVED: &str = "Saved to your library. Just the video: no transcript, no notes.";
 /// The picture preset: the one chosen on the setup bar, else Settings › Screen video.
@@ -424,7 +432,7 @@ fn capture_part(
     if let Some(e) = &record.failure {
         return Err(e.clone());
     }
-    let dir = create(root, &record.id, setup)?;
+    let dir = create(root, &record.id, setup, record.mic_mode)?;
     if stop.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -471,7 +479,12 @@ fn write_parts(dir: &Path, parts: &[(Vec<String>, u64)]) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())
 }
-fn create(root: &Path, id: &str, setup: Option<&RecordSetup>) -> Result<PathBuf, String> {
+fn create(
+    root: &Path,
+    id: &str,
+    setup: Option<&RecordSetup>,
+    mic_mode: motetto_core::transcribe::MicMode,
+) -> Result<PathBuf, String> {
     let dir = root.join(id);
     if !dir.exists() {
         fs::create_dir(&dir).map_err(|e| e.to_string())?;
@@ -529,6 +542,7 @@ fn create(root: &Path, id: &str, setup: Option<&RecordSetup>) -> Result<PathBuf,
                 },
                 facts,
                 deleted_kind: Default::default(),
+                mic_mode,
                 has_video: false,
             },
         )?;
@@ -615,11 +629,16 @@ fn finish(
     let dir = library::folder(root, &record.id)?;
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
         stage(Stage::Transcribing { progress: None });
-        let heard = transcribe::transcript_parts(&record.parts, true, &|progress| {
-            stage(Stage::Transcribing {
-                progress: Some(progress),
-            })
-        })?;
+        let heard = transcribe::transcript_parts_with(
+            &record.parts,
+            summary.mic_mode,
+            true,
+            &|progress| {
+                stage(Stage::Transcribing {
+                    progress: Some(progress),
+                })
+            },
+        )?;
         let transcript = heard.text;
         fs::write(dir.join("transcript.txt"), &transcript)?;
         let text = match config::var("FIX_MODEL").filter(|v| !v.is_empty()) {
@@ -734,6 +753,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         for offset in [0, 25_000] {
             capture_part(
@@ -766,6 +786,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         let listed = |root: &Path| -> Vec<(Vec<String>, u64)> {
             serde_json::from_slice(&fs::read(root.join("123/parts.json")).unwrap()).unwrap()
@@ -848,6 +869,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         let setup = clip(MicChoice::Off, true);
         let listed = |root: &Path| -> Vec<(Vec<String>, u64)> {
@@ -887,6 +909,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         let setup = clip(MicChoice::Off, false);
         capture_part(
@@ -943,7 +966,13 @@ mod tests {
     fn a_clip_is_saved_with_the_tracks_and_source_it_recorded() {
         let root = root();
         // Started with no mic and no app sounds; the mic was turned on for the second part.
-        create(&root, "123", Some(&clip(MicChoice::Off, false))).unwrap();
+        create(
+            &root,
+            "123",
+            Some(&clip(MicChoice::Off, false)),
+            Default::default(),
+        )
+        .unwrap();
         let dir = root.join("123");
         assert!(!has_picture(&root, "123"));
         let mic = dir.join("part-0001.mic.wav");
@@ -986,6 +1015,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         capture_part(
             &root,
@@ -1006,6 +1036,7 @@ mod tests {
             id: "123".into(),
             parts: vec![],
             failure: Some("disk failed".into()),
+            mic_mode: Default::default(),
         };
         assert_eq!(
             capture_part(&root, &mut record, 0, Stop::default(), None, |_, _| panic!(
@@ -1025,11 +1056,12 @@ mod tests {
     fn real_resumed_recording_writes_notes_with_offsets() {
         let source = PathBuf::from(std::env::var("MOTETTO_TEST_RECORDING").unwrap());
         let root = root();
-        let dir = create(&root, "123", None).unwrap();
+        let dir = create(&root, "123", None, Default::default()).unwrap();
         let mut record = Recording {
             id: "123".into(),
             parts: vec![],
             failure: None,
+            mic_mode: Default::default(),
         };
         for (part, offset) in [(0, 0), (1, 60_000)] {
             let file = dir.join(format!("part-{part:04}.mic.wav"));

@@ -1,5 +1,6 @@
 //! Local playback manifests and bounded waveform previews for the document view.
 use crate::{library, library_commands::Library};
+use motetto_core::transcribe::MicMode;
 use serde::Serialize;
 use std::{
     fs,
@@ -42,6 +43,10 @@ pub struct MeetingMedia {
     pub tracks: Vec<AudioTrack>,
     pub videos: Vec<VideoPart>,
     pub moments: Vec<crate::screen::Moment>,
+    /// How the mic was prepared for the transcript (Settings › Audio, or Transcribe again).
+    pub mic_mode: MicMode,
+    /// A processed mic copy exists, so the Audio tab can switch between it and the recorded mic.
+    pub mic_cleaned: bool,
     /// Mouse clicks while a screen recording ran, in meeting time (the scrubber's dots).
     #[ts(type = "Array<number>")]
     pub clicks: Vec<u64>,
@@ -50,7 +55,37 @@ pub struct MeetingMedia {
     pub folder: String,
 }
 
-fn files(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
+/// The mode the meeting's transcript was made with; Standard when `meeting.json` doesn't say.
+fn mic_mode(dir: &Path) -> MicMode {
+    library::text(&dir.join("meeting.json"))
+        .ok()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|meeting| serde_json::from_value(meeting["mic_mode"].clone()).ok())
+        .unwrap_or_default()
+}
+
+/// The mic file to play for `mode`: the copy transcribing made (the denoised one for Reduce
+/// noise, else the echo-cancelled one), or the recorded mic for Original and when there is none.
+/// Chosen by the meeting's mode, never by whichever copy exists: a copy left by another mode
+/// must not play.
+fn mic_file(file: PathBuf, mode: MicMode, original: bool) -> PathBuf {
+    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if original || mode == MicMode::Original || !name.ends_with(".mic.wav") {
+        return file;
+    }
+    let clean = file.with_extension("clean.wav");
+    let aec = file.with_extension("aec.wav");
+    if mode == MicMode::ReduceNoise && clean.exists() {
+        clean
+    } else if aec.exists() {
+        aec
+    } else {
+        file
+    }
+}
+
+fn files(dir: &Path, original: bool) -> Result<Vec<(PathBuf, u64)>, String> {
+    let mode = mic_mode(dir);
     let mut files = Vec::new();
     if dir.join("parts.json").exists() {
         let parts: Vec<(Vec<String>, u64)> =
@@ -62,11 +97,9 @@ fn files(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
                 let name = Path::new(&path)
                     .file_name()
                     .ok_or("Invalid audio filename")?;
-                // Plays the mic without loudspeaker echo when transcribing made one, so the
-                // audio says what the transcript says; the recorded mic stays as it was.
-                let file = dir.join(name);
-                let cleaned = file.with_extension("aec.wav");
-                files.push((if cleaned.exists() { cleaned } else { file }, offset));
+                // Plays the mic as transcribing prepared it, so the audio says what the
+                // transcript says; the recorded mic stays as it was.
+                files.push((mic_file(dir.join(name), mode, original), offset));
             }
         }
     } else if dir.join("source.16k.wav").exists() {
@@ -76,8 +109,12 @@ fn files(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
 }
 /// The meeting's existing audio files with their offsets, each checked to sit in its folder.
 pub fn audio(dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
+    audio_as(dir, false)
+}
+/// `audio`, with the recorded mic in place of its processed copy when `original`.
+pub fn audio_as(dir: &Path, original: bool) -> Result<Vec<(PathBuf, u64)>, String> {
     let mut checked = Vec::new();
-    for (file, offset) in files(dir)? {
+    for (file, offset) in files(dir, original)? {
         if !file.try_exists().map_err(|e| e.to_string())? {
             continue;
         }
@@ -132,19 +169,27 @@ pub fn has_video(dir: &Path) -> bool {
         .any(|(_, path)| fs::metadata(path).is_ok_and(|m| m.len() > 0))
 }
 
+#[cfg(test)]
 pub fn read(root: &Path, id: &str) -> Result<MeetingMedia, String> {
-    read_with(root, id, motetto_core::trim::duration_ms)
+    read_as(root, id, false)
+}
+/// `read`, with the recorded mic in place of its processed copy when `original`.
+pub fn read_as(root: &Path, id: &str, original: bool) -> Result<MeetingMedia, String> {
+    read_with(root, id, original, motetto_core::trim::duration_ms)
 }
 
 /// `length` reads a video file's length (AVFoundation; tests stand in for it).
 fn read_with(
     root: &Path,
     id: &str,
+    original: bool,
     length: fn(&Path) -> Result<u64, String>,
 ) -> Result<MeetingMedia, String> {
     let dir = library::folder(root, id)?;
     let mut tracks = Vec::new();
-    for (path, offset_ms) in audio(&dir)? {
+    let played = audio_as(&dir, original)?;
+    let mic_cleaned = audio_as(&dir, false)? != audio_as(&dir, true)?;
+    for (path, offset_ms) in played {
         let mut reader = hound::WavReader::open(&path).map_err(|e| e.to_string())?;
         let spec = reader.spec();
         if spec.sample_rate == 0 || spec.channels == 0 {
@@ -260,6 +305,8 @@ fn read_with(
         .filter(|ms| shown(*ms))
         .collect();
     Ok(MeetingMedia {
+        mic_mode: mic_mode(&dir),
+        mic_cleaned,
         videos,
         moments,
         clicks,
@@ -270,9 +317,14 @@ fn read_with(
 }
 
 #[tauri::command]
-pub async fn meeting_media(app: tauri::AppHandle, id: String) -> Result<MeetingMedia, String> {
+pub async fn meeting_media(
+    app: tauri::AppHandle,
+    id: String,
+    original: Option<bool>,
+) -> Result<MeetingMedia, String> {
     let root = app.state::<Library>().root.clone();
-    let media = tauri::async_runtime::spawn_blocking(move || read(&root, &id))
+    let original = original.unwrap_or(false);
+    let media = tauri::async_runtime::spawn_blocking(move || read_as(&root, &id, original))
         .await
         .map_err(|e| e.to_string())??;
     for path in media
@@ -291,6 +343,45 @@ pub async fn meeting_media(app: tauri::AppHandle, id: String) -> Result<MeetingM
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_playback_follows_the_meetings_mode() {
+        let dir = std::env::temp_dir().join(format!("motetto-micmode-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mic = dir.join("part-0000.mic.wav");
+        let (aec, clean) = (
+            dir.join("part-0000.mic.aec.wav"),
+            dir.join("part-0000.mic.clean.wav"),
+        );
+        for file in [&mic, &aec, &clean] {
+            fs::write(file, b"").unwrap();
+        }
+        let play = |mode, original| mic_file(mic.clone(), mode, original);
+        // Original plays the recorded mic even when copies exist.
+        assert_eq!(play(MicMode::Original, false), mic);
+        // Standard ignores a denoised copy left by an earlier Reduce noise.
+        assert_eq!(play(MicMode::Standard, false), aec);
+        assert_eq!(play(MicMode::ReduceNoise, false), clean);
+        // The Audio tab's Original switch, whatever the mode.
+        assert_eq!(play(MicMode::ReduceNoise, true), mic);
+        // Without its copy, Reduce noise falls back to the echo-cancelled mic, then the recording.
+        fs::remove_file(&clean).unwrap();
+        assert_eq!(play(MicMode::ReduceNoise, false), aec);
+        fs::remove_file(&aec).unwrap();
+        assert_eq!(play(MicMode::ReduceNoise, false), mic);
+        // The call side is never swapped.
+        let system = dir.join("part-0000.system.wav");
+        assert_eq!(
+            mic_file(system.clone(), MicMode::ReduceNoise, false),
+            system
+        );
+        // The mode comes from meeting.json; missing or unknown is Standard.
+        assert_eq!(mic_mode(&dir), MicMode::Standard);
+        fs::write(dir.join("meeting.json"), r#"{"mic_mode":"reduce_noise"}"#).unwrap();
+        assert_eq!(mic_mode(&dir), MicMode::ReduceNoise);
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn waveform_duration_offsets_and_scope() {
         let root = std::env::temp_dir().join(format!("motetto-media-{}", std::process::id()));
@@ -556,7 +647,7 @@ mod tests {
                 .parse()
                 .map_err(|_| "not a length".to_string())
         };
-        let media = read_with(&root, "1", length).unwrap();
+        let media = read_with(&root, "1", false, length).unwrap();
         let spans: Vec<_> = media
             .videos
             .iter()

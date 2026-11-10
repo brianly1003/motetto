@@ -90,6 +90,22 @@ pub async fn set_microphone(
     .map_err(|e| e.to_string())?
 }
 
+/// Settings › Audio › Microphone mode, from the screen setup bar's mic menu: how Motetto prepares
+/// its copy of the mic after the call (meetings started from now on).
+#[tauri::command]
+pub async fn set_mic_mode(
+    app: tauri::AppHandle,
+    mode: motetto_core::transcribe::MicMode,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<crate::settings::Store>()
+            .change(|s| s.mic_mode = mode)
+            .map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The recording's own mic, None included (a screen recording, or a call where only the other
 /// side matters): the next part records with it. The saved choice in Settings stays as it is.
 #[tauri::command]

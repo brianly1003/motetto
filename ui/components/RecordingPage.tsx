@@ -151,8 +151,8 @@ export function progressLabel({ percent, eta_s }: { percent: number; eta_s: numb
 // What the transcription does now, for whose side: "Them: checking long lines, 37 of 148".
 export function stepLabel({ step }: TranscribeProgress): string {
   const who = "side" in step && step.side ? `${step.side}: ` : "";
-  const what = step.type === "Converting" ? "preparing the audio" : step.type === "RemovingEcho" ? "removing the call's echo" : step.type === "Checking" ? `checking long lines, ${step.piece} of ${step.of}` : "transcribing";
-  const text = (step.type === "RemovingEcho" ? "You: " : who) + what;
+  const what = step.type === "Converting" ? "preparing the audio" : step.type === "RemovingEcho" ? "removing the call's echo" : step.type === "ReducingNoise" ? "reducing background noise" : step.type === "Checking" ? `checking long lines, ${step.piece} of ${step.of}` : "transcribing";
+  const text = (step.type === "RemovingEcho" || step.type === "ReducingNoise" ? "You: " : who) + what;
   return text[0].toUpperCase() + text.slice(1);
 }
 const measuredOf = (stage: Stage | null): Live | null => stage?.type === "Transcribing" && stage.progress ? { right: progressLabel(stage.progress), line: stepLabel(stage.progress), share: stage.progress.percent / 100 } : null;

@@ -7,11 +7,15 @@ import type { MicChoice } from "@/lib/bindings/MicChoice";
 import type { MicReport } from "@/lib/bindings/MicReport";
 import { micChoices, micSub } from "@/components/Microphone";
 import { sizeLabel } from "@/lib/screen";
+import type { MicMode } from "@/lib/bindings/MicMode";
+import { MIC_MODES } from "@/lib/micModes";
 import { CHECK_IC, CLICK_IC, Dial, FILM_IC, K, LOCK_IC, MIC_IC, MICOFF_IC, NOTES_IC, SCR_IC, SPK_IC } from "./icons";
 
 export type Which = "mic" | "opts" | "timer";
 /** Settings › Screen video's presets, smallest first. */
 const PICTURE: [string, string, string][] = [["smaller", "Smaller", "720p · 10 fps"], ["sharp", "Sharp", "1080p · 15 fps"], ["high", "High", "1440p · 30 fps"]];
+/** The mic menu's line under Microphone mode: one short line, the full one is the tooltip. */
+const MODE_LINE: Record<MicMode, string> = { standard: "Removes your speakers' echo.", reduce_noise: "Also lowers background noise.", original: "Your mic exactly as recorded." };
 const SUB: Record<number, string> = { 0: "The moment you press Record", 3: "Time to bring the window forward", 5: "Time to put the pointer in place", 10: "Time to set the scene" };
 
 /** The device the mic choice records from: `null` is the system default's row. */
@@ -30,10 +34,12 @@ export function micName(mic: MicChoice, report: MicReport | null) {
   return report?.mics.find(m => m.id === row)?.name ?? "Microphone";
 }
 
-export function CaptureMenu({ which, cap, report, anchor, preset, onSet, onClose }: {
+export function CaptureMenu({ which, cap, report, anchor, preset, micMode, onMicMode, onSet, onClose }: {
   which: Which; cap: Cap; report: MicReport | null; anchor: HTMLElement | null;
   /** Settings › Screen video, used while this setup has no picture of its own. */
   preset: string;
+  /** Settings › Audio › Microphone mode; null until read. */
+  micMode: MicMode | null; onMicMode: (mode: MicMode) => void;
   onSet: (key: string, mic?: MicChoice) => void; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -66,8 +72,15 @@ export function CaptureMenu({ which, cap, report, anchor, preset, onSet, onClose
       {row("mic:off", MICOFF_IC, "None", at === "off", "Your voice isn't recorded", { kind: "Off" })}
       {choices?.system && row("mic:", MIC_IC, `System default (${choices.system.name})`, at === null, "", systemPick)}
       {choices?.others.map(m => row("mic:" + m.id, MIC_IC, m.name, at === m.id, micSub(m), { kind: "Device", id: m.id }))}
+      {at !== "off" && micMode && <>
+        <div className="sep"/><div className="mh">Microphone mode</div>
+        <div className="capseg" role="group" aria-label="Microphone mode">
+          {MIC_MODES.map(([id, name, sub]) => <button key={id} type="button" role="menuitemradio" aria-checked={micMode === id} data-capset={"micmode:" + id} title={sub} onClick={() => onMicMode(id)}>{name}</button>)}
+        </div>
+        <p className="note">{MODE_LINE[micMode]}</p>
+      </>}
       <div className="sep"/><div className="mh">Computer audio</div>
-      {row("sys", SPK_IC, "Sounds from apps", cap.sys, cap.sys ? "Videos, calls and alerts, on their own track" : "Off: the video is silent unless the mic is on")}
+      {row("sys", SPK_IC, "Sounds from apps", cap.sys)}
     </>;
   } else {
     const silent = cap.mic.kind === "Off" && !cap.sys, picture = cap.picture ?? preset;

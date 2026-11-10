@@ -242,7 +242,7 @@ fn run(root: &Path, id: &str, action: &str) -> Result<(), String> {
             }
         }
         "regenerate" => crate::rewrite::regenerate(root, id, None, &|_| {}),
-        "retranscribe" => crate::rewrite::retranscribe(root, id, &|_| {}),
+        "retranscribe" => crate::rewrite::retranscribe(root, id, None, &|_| {}),
         _ => Err("Unknown meeting action".into()),
     }
 }
@@ -264,7 +264,11 @@ pub async fn meeting_action(
     id: String,
     action: String,
     language: Option<String>,
+    mic_mode: Option<motetto_core::transcribe::MicMode>,
 ) -> Result<(), String> {
+    if mic_mode.is_some() && action != "retranscribe" {
+        return Err("A microphone mode applies only to Transcribe again".into());
+    }
     // Write the notes again in a language picked for this meeting (SPEC 7.12).
     if let Some(code) = &language
         && (action != "regenerate"
@@ -325,7 +329,7 @@ pub async fn meeting_action(
             let _ = worker.emit("motetto://event", Event::stage(id.clone(), stage));
         };
         if action == "retranscribe" {
-            crate::rewrite::retranscribe(&root, &id, &stage)
+            crate::rewrite::retranscribe(&root, &id, mic_mode, &stage)
         } else {
             crate::rewrite::regenerate(&root, &id, language.as_deref(), &stage)
         }

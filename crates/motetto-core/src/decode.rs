@@ -14,7 +14,7 @@ use symphonia::core::{
     io::MediaSourceStream,
 };
 
-type Writer = hound::WavWriter<BufWriter<File>>;
+pub(crate) type Writer = hound::WavWriter<BufWriter<File>>;
 
 /// Decode one audio track without loading the entire recording into memory.
 pub fn to_wav(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
@@ -217,7 +217,7 @@ fn ffmpeg(
 
 /// A mono stream at `rate` written at `to`, block by block, with the filter's delay removed and
 /// exactly as many samples as the input's length at `to`.
-struct Mono {
+pub(crate) struct Mono {
     rate: u32,
     to: u32,
     filter: Option<FftFixedIn<f32>>,
@@ -228,7 +228,7 @@ struct Mono {
 }
 
 impl Mono {
-    fn new(rate: u32, to: u32) -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn new(rate: u32, to: u32) -> Result<Self, Box<dyn Error>> {
         let filter = if rate == to {
             None
         } else {
@@ -246,7 +246,7 @@ impl Mono {
         })
     }
 
-    fn push(&mut self, sample: f32, writer: &mut Writer) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn push(&mut self, sample: f32, writer: &mut Writer) -> Result<(), Box<dyn Error>> {
         self.input += 1;
         if self.filter.is_none() {
             writer.write_sample(sample)?;
@@ -278,7 +278,7 @@ impl Mono {
         Ok(())
     }
 
-    fn finish(&mut self, writer: &mut Writer) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn finish(&mut self, writer: &mut Writer) -> Result<(), Box<dyn Error>> {
         if self.input == 0 {
             return Err("file contains no audio samples".into());
         }
