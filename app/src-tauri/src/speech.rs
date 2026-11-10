@@ -2,8 +2,8 @@
 use motetto_core::{config, whisper};
 use std::{
     io::{BufRead, BufReader},
-    net::{TcpListener, TcpStream},
-    process::{Child, Stdio},
+    net::TcpStream,
+    process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -47,15 +47,25 @@ impl Server {
         model: String,
         vad: Option<String>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
-        let port = listener.local_addr()?.port();
-        drop(listener);
+        // Port 0 lets whisper-server pick and keep its own port, so no other process can take it
+        // before audio is sent. It logs `:0`, so the port is read back from the open socket.
+        // Windows has no lsof: there the port is picked and released first, leaving that gap
+        // (`netstat -ano` for the child's pid would close it).
+        let fixed = if cfg!(windows) {
+            Some(
+                std::net::TcpListener::bind(("127.0.0.1", 0))?
+                    .local_addr()?
+                    .port(),
+            )
+        } else {
+            None
+        };
         let mut command = motetto_core::tools::command("whisper-server");
         command.args([
             "--host",
             "127.0.0.1",
             "--port",
-            &port.to_string(),
+            &fixed.unwrap_or(0).to_string(),
             "-m",
             &model,
             "-l",
@@ -101,36 +111,21 @@ impl Server {
             .lock()
             .map_err(|_| "Speech process lock failed")?
             .push(child.clone());
-        let server = Self {
+        let client = match wait_ready(&child, fixed, stop).and_then(whisper::Client::new) {
+            Ok(client) => client,
+            Err(e) => {
+                reap(&child, Some(diagnostics));
+                return Err(e);
+            }
+        };
+        Ok(Self {
             child,
-            client: whisper::Client::new(port)?,
+            client,
             empty_vad,
             diagnostics: Some(diagnostics),
             model,
             vad,
-        };
-        let deadline = Instant::now() + Duration::from_secs(90);
-        while Instant::now() < deadline && !stop.load(std::sync::atomic::Ordering::SeqCst) {
-            if server
-                .child
-                .lock()
-                .map_err(|_| "Speech process lock failed")?
-                .try_wait()?
-                .is_some()
-            {
-                return Err("The local speech server could not start".into());
-            }
-            if TcpStream::connect_timeout(
-                &format!("127.0.0.1:{port}").parse()?,
-                Duration::from_millis(100),
-            )
-            .is_ok()
-            {
-                return Ok(server);
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Err("The local speech server did not become ready".into())
+        })
     }
 
     pub fn transcribe(
@@ -176,22 +171,114 @@ impl Server {
 }
 impl Drop for Server {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        if let Ok(mut active) = ACTIVE.lock() {
-            active.retain(|other| !Arc::ptr_eq(other, &self.child));
-        }
-        if let Some(reader) = self.diagnostics.take() {
-            let _ = reader.join();
-        }
+        reap(&self.child, self.diagnostics.take());
     }
+}
+
+/// Kills and waits for a speech process, forgets it and ends its diagnostics reader.
+fn reap(child: &Arc<Mutex<Child>>, diagnostics: Option<JoinHandle<()>>) {
+    if let Ok(mut running) = child.lock() {
+        let _ = running.kill();
+        let _ = running.wait();
+    }
+    if let Ok(mut active) = ACTIVE.lock() {
+        active.retain(|other| !Arc::ptr_eq(other, child));
+    }
+    if let Some(reader) = diagnostics {
+        let _ = reader.join();
+    }
+}
+
+/// The port once the server accepts connections on it; an error if it exits, Stop is pressed
+/// or 90 s pass first.
+fn wait_ready(
+    child: &Mutex<Child>,
+    mut port: Option<u16>,
+    stop: &motetto_core::events::Stop,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    let pid = child.lock().map_err(|_| "Speech process lock failed")?.id();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < deadline && !stop.load(Ordering::SeqCst) {
+        if child
+            .lock()
+            .map_err(|_| "Speech process lock failed")?
+            .try_wait()?
+            .is_some()
+        {
+            return Err("The local speech server could not start".into());
+        }
+        port = port.or_else(|| listening_port(pid));
+        if let Some(port) = port
+            && TcpStream::connect_timeout(
+                &([127, 0, 0, 1], port).into(),
+                Duration::from_millis(100),
+            )
+            .is_ok()
+        {
+            return Ok(port);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err("The local speech server did not become ready".into())
+}
+
+/// The loopback TCP port `pid` listens on, as lsof reports it; None until it binds.
+fn listening_port(pid: u32) -> Option<u16> {
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-a", "-p", &pid.to_string()])
+        .args(["-iTCP@127.0.0.1", "-sTCP:LISTEN", "-Fn"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    lsof_port(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The port of the first `n127.0.0.1:PORT` line of `lsof -Fn` output.
+fn lsof_port(text: &str) -> Option<u16> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .find_map(|name| name.rsplit_once(':')?.1.parse().ok())
+        .filter(|&port| port != 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lsof_port_reads_the_listening_address() {
+        assert_eq!(lsof_port("p4242\nf3\nn127.0.0.1:63474\n"), Some(63474));
+        assert_eq!(lsof_port("p4242\n"), None);
+        assert_eq!(lsof_port("p4242\nf3\nn127.0.0.1:0\n"), None);
+        assert_eq!(lsof_port("p4242\nf3\nn127.0.0.1:http\n"), None);
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn listening_port_finds_the_childs_socket() {
+        // A child with one listening socket, like whisper-server; the test process itself also
+        // holds other tests' listeners.
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut nc = Command::new("/usr/bin/nc")
+            .args(["-l", "127.0.0.1", &port.to_string()])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut found = None;
+        while found.is_none() && Instant::now() < deadline {
+            found = listening_port(nc.id());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = nc.kill();
+        let _ = nc.wait();
+        assert_eq!(found, Some(port));
+        assert_eq!(listening_port(nc.id()), None);
+    }
     #[test]
     #[ignore = "requires whisper-server, WHISPER_MODEL, WHISPER_VAD_MODEL and MOTETTO_TEST_SPEECH WAV"]
     fn managed_server_transcribes_synthetic_speech_and_reaps_child() {
