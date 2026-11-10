@@ -1182,6 +1182,44 @@ fn switching_the_mic_starts_a_new_part_only_while_recording() {
 }
 
 #[test]
+fn a_long_recording_starts_a_new_part_every_three_recorded_hours() {
+    let rotate = vec![
+        Effect::StopCapture,
+        Effect::StartCapture {
+            meeting_id: "m1".into(),
+            resume: true,
+        },
+    ];
+    let s = start(fresh(), false);
+    let (s, effects) = step(s, PART_MAX_MS - 1, Command::Tick);
+    assert!(work(effects).is_empty());
+    let (s, effects) = step(s, PART_MAX_MS, Command::Tick);
+    assert_eq!(work(effects), rotate);
+    assert_eq!(s.app.state, SessionState::Recording);
+    // The clock restarts with the new part: nothing until three more hours.
+    let (s, effects) = step(s, 2 * PART_MAX_MS - 1, Command::Tick);
+    assert!(work(effects).is_empty());
+    let (_, effects) = step(s, 2 * PART_MAX_MS, Command::Tick);
+    assert_eq!(work(effects), rotate);
+
+    // Paused time is not recorded: an hour paused moves the next part an hour later, and the
+    // resumed part counts from the Resume.
+    let hour = 60 * 60 * 1000;
+    let s = step(start(fresh(), false), hour, Command::PauseRecording).0;
+    let s = step(s, 2 * hour, Command::ResumeRecording).0;
+    let (s, effects) = step(s, 2 * hour + PART_MAX_MS - 1, Command::Tick);
+    assert!(work(effects).is_empty());
+    assert_eq!(
+        work(step(s, 2 * hour + PART_MAX_MS, Command::Tick).1),
+        rotate
+    );
+
+    // Notes only records no audio, so it has no WAV to split.
+    let notes = start(fresh(), true);
+    assert!(work(step(notes, PART_MAX_MS, Command::Tick).1).is_empty());
+}
+
+#[test]
 fn stop_while_paused_starts_the_resume_window_without_stopping_capture_twice() {
     let s = step(start(fresh(), false), 30_000, Command::PauseRecording).0;
     let (s, effects) = step(s, 40_000, Command::StopRecording);

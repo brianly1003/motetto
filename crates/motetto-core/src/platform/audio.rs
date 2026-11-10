@@ -22,6 +22,7 @@ pub(super) fn packet<W: Write + Seek>(
         return Err("invalid float audio packet".into());
     }
     while *written < start {
+        super::wav_room(writer.len())?;
         writer.write_sample(0.0_f32)?;
         *written += 1;
     }
@@ -43,6 +44,7 @@ pub(super) fn packet<W: Write + Seek>(
             }
             (sum / channels as f64) as f32
         };
+        super::wav_room(writer.len())?;
         writer.write_sample(value)?;
         *written += 1;
     }

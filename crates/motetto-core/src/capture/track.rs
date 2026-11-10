@@ -216,8 +216,9 @@ fn rms(samples: impl Iterator<Item = f32>) -> f32 {
 fn write_samples<W: Write + Seek>(
     writer: &mut hound::WavWriter<W>,
     samples: impl Iterator<Item = f32>,
-) -> Result<(), hound::Error> {
+) -> Result<(), Box<dyn Error>> {
     for sample in samples {
+        crate::platform::wav_room(writer.len())?;
         writer.write_sample(sample)?;
     }
     Ok(())

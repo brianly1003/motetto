@@ -88,6 +88,11 @@ struct PendingAsk {
 }
 
 /// Reducer state, including private timers and the full problem queue behind `AppState`.
+/// Recorded time after which a new part starts. A track is a 32-bit float WAV, whose sizes are
+/// 32-bit: 4 GiB is about 3.1 h at 96 kHz and 6.2 h at 48 kHz. A rate above 96 kHz would reach
+/// the writers' own stop (`platform::wav_room`) first; rotating by bytes would lift that.
+pub const PART_MAX_MS: u64 = 3 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub app: AppState,
@@ -113,6 +118,8 @@ pub struct Session {
     share_video_ask: bool,
     pause_remind_at: Option<u64>,
     share_reset: bool,
+    /// The recording clock (`elapsed_ms`) when the current capture part started.
+    part_from_ms: u64,
 }
 
 impl Session {
@@ -137,6 +144,7 @@ impl Session {
             share_video_ask: true,
             pause_remind_at: None,
             share_reset: true,
+            part_from_ms: 0,
         }
     }
 
@@ -461,6 +469,10 @@ impl Session {
                     .is_some_and(|t| now.saturating_sub(t) >= u64::from(self.idle_stop_s) * 1000)
             {
                 self.stop(now, effects);
+            } else if self.app.state == SessionState::Recording
+                && self.app.elapsed_ms.saturating_sub(self.part_from_ms) >= PART_MAX_MS
+            {
+                self.restart_part(effects);
             }
         }
         self.last_ms = now;
@@ -1174,6 +1186,12 @@ pub fn next(mut session: Session, input: Input) -> (Session, Vec<Effect>) {
         .as_ref()
         .and_then(|a| a.clip.as_ref())
         .map(|(_, state)| state.clone());
+    if effects
+        .iter()
+        .any(|e| matches!(e, Effect::StartCapture { .. }))
+    {
+        session.part_from_ms = session.app.elapsed_ms;
+    }
     session.problems.sort_by_key(|p| priority(&p.problem));
     session.app.problem = session.problems.first().cloned();
     session.app.more_problems = session.problems.len().saturating_sub(1) as u32;
