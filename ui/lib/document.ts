@@ -68,10 +68,11 @@ export function noteSections(markdown: string) {
   return sections.filter(s => s.title || s.lines.some(l=>l.text.trim()));
 }
 /** An item that only says "nothing": "None", or what small models write instead by copying the
- *  prompt's <...> placeholders ("<none>", "(none)", "None.", "N/A"). Same list as the notes
- *  writer's `summarize::none_item`, so notes saved before it shows "None" too. */
+ *  prompt's <...> placeholders ("<none>", "(none)", "None.", "N/A"), with or without a task box
+ *  ("[ ] None"). Same list as the notes writer's `summarize::none_item`, so notes saved before it
+ *  show "None" too. */
 export function noneItem(text: string) {
-  const t = text.trim().replace(/&lt;/g, "<").replace(/\.+$/, "").replace(/^[<>()[\]*_]+|[<>()[\]*_]+$/g, "").trim().toLowerCase();
+  const t = text.trim().replace(/^\[[ xX]\] /, "").replace(/&lt;/g, "<").replace(/\.+$/, "").replace(/^[<>()[\]*_]+|[<>()[\]*_]+$/g, "").trim().toLowerCase();
   return ["none", "n/a", "nothing", "-"].includes(t);
 }
 

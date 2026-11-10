@@ -437,9 +437,15 @@ fn labeled(transcript: &str) -> bool {
 }
 
 /// True for an item that only says "nothing": the prompt's "- None", and what small models write
-/// instead by copying the layout's <...> placeholders (`<none>`, `(none)`, `None.`, `N/A`).
+/// instead by copying the layout's <...> placeholders (`<none>`, `(none)`, `None.`, `N/A`), with
+/// or without a task box (`[ ] None` under Decisions).
 /// The desktop shows saved notes through the same list (ui/lib/document.ts `noneItem`).
 pub fn none_item(text: &str) -> bool {
+    let text = text.trim();
+    let text = ["[ ] ", "[x] ", "[X] "]
+        .iter()
+        .find_map(|task| text.strip_prefix(task))
+        .unwrap_or(text);
     let text = text.trim().replace("&lt;", "<");
     let text = text
         .trim_end_matches('.')
@@ -1218,14 +1224,21 @@ mod tests {
             "N/A",
             "*None*",
             "nothing",
+            "[ ] None",
+            "[x] None",
         ] {
             assert!(none_item(none), "{none}");
         }
-        for real in ["None of the options fit", "Keep FCM [00:10]", "No"] {
+        for real in [
+            "None of the options fit",
+            "Keep FCM [00:10]",
+            "No",
+            "[ ] Ship it",
+        ] {
             assert!(!none_item(real), "{real}");
         }
         let notes =
-            "### Action items\n- <none>\n### Decisions\n- <none>\n### Overview\n- A sound check.";
+            "### Action items\n- <none>\n### Decisions\n- [ ] None\n### Overview\n- A sound check.";
         assert_eq!(
             grounded(&plain_none(notes), "[00:01] Me: Hello"),
             "### Action items\n- None\n### Overview\n- A sound check."
