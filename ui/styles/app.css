@@ -8,11 +8,12 @@
   --accent-soft: #f4e5c9;
   --accent-ink: #7b4e08;
   --hl: #fff1c9;
+  --sel-wash: 13%; --sel-time: 85%; /* selected transcript line */
   --rec-soft: #fbe1dd;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --rec-soft: #3d1714; color-scheme: dark; }
- } :root[data-theme="dark"] { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --rec-soft: #3d1714; color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --sel-wash: 10%; --sel-time: 100%; --rec-soft: #3d1714; color-scheme: dark; }
+ } :root[data-theme="dark"] { --line-2: #3b4137; --ok-soft: #173123; --accent-soft: #3a2d16; --accent-ink: #f0c27c; --hl: #4a3d16; --sel-wash: 10%; --sel-time: 100%; --rec-soft: #3d1714; color-scheme: dark; }
 
 /* No focus rings anywhere, mouse or keyboard: no outline, ring shadow or
    focus border. Keyboard focus may still show as a background or text colour. */
@@ -218,7 +219,7 @@ svg.duet path.them { stroke: var(--voice-them); } svg.duet circle.them { fill: v
 .tline.me { --voice: var(--voice-me); }
 /* Scrolling a line into view (a cited time, playback, arrows) keeps one line showing above it, so
    it is plain there is more to scroll back to, and stops above the floating player. */
-.tline { scroll-margin: 46px 0 76px; }
+.tline { scroll-margin: 46px 0 76px; --sel: color-mix(in srgb, var(--ink) var(--sel-wash), var(--surface)); }
 .tline.playing { background: var(--hl); }
 .tline .ts { color: var(--ink-3); font: 400 12px/22px var(--font-data); font-feature-settings: "tnum"; }
 .who { font: 500 11px/1.8 var(--font-data); font-feature-settings: "tnum"; }
@@ -367,7 +368,8 @@ input.ownerin { font: inherit; font-weight: 500; font-size: 12.5px; line-height:
 .tline .flag { font: 400 12px/22px var(--font-data); }
 .tline .tx { display: grid; grid-template-columns: minmax(0,1fr) auto; column-gap: 8px; align-items: start; min-width: 0; }
 /* The line the keyboard is on (↑↓): the hover tone, no ring, so it reads as "here", not "selected". */
-.tline:focus:not(.playing) { outline: none; background: var(--surface-2); }
+.tline:focus:not(.playing) { outline: none; background: var(--sel); }
+.tline:focus .ts { color: color-mix(in srgb, var(--voice) var(--sel-time), var(--ink)); } /* the selected line: a clearer wash than hover, its time in the speaker's colour */
 .tline .tx-end { display: inline-flex; gap: 6px; align-items: center; height: 1lh; } /* one text line tall, so the edited dot and flags sit on its middle */
 .tline .words { font: inherit; color: inherit; display: block; border-radius: 4px; outline: none; cursor: text; transition: background-color .12s, box-shadow .12s; }
 .tline .words:hover { background-color: var(--surface-2); box-shadow: 0 0 0 3px var(--surface-2); }
