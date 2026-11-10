@@ -1,5 +1,5 @@
 // Transcribe again (owner 2026-10-21): in •••, disabled without audio; the question counts the
-// corrections it replaces; the steps follow Stage events; the new transcript and a toast follow.
+// corrections it keeps; the steps follow Stage events; the new transcript and a toast follow.
 async (page) => {
   const fails = [];
   const open = async (withAudio) => {
@@ -47,8 +47,8 @@ async (page) => {
   for (let i = 0; i < 20 && await item.isDisabled(); i++) await p.waitForTimeout(50); // waits for the audio list
   await item.click();
   const ask = await p.getByRole('alertdialog').innerText();
-  // Only the question and what it replaces, like Write the notes again (owner 2026-10-25).
-  if (!/Your 2 corrections to the transcript will be replaced\./.test(ask) || /transcript\.prev\.txt/.test(ask)) fails.push('question: ' + ask);
+  // Only the question and what it keeps, like Write the notes again (owner 2026-10-25).
+  if (!/Your 2 corrections are kept: lines heard the same way keep your text, and the names you fixed guide the new transcript\./.test(ask) || /transcript\.prev\.txt/.test(ask)) fails.push('question: ' + ask);
   await p.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click();
   await p.locator('.writing').getByText('Transcribing again').waitFor();
   const steps = () => p.locator('.writing .step').evaluateAll(rows => rows.map(r => `${r.className.replace('step', '').trim() || 'todo'}:${r.children[1].textContent}`).join(' | '));

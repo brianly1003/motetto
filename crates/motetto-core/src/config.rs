@@ -117,7 +117,7 @@ pub fn terms() -> Option<String> {
     var("TERMS").and_then(|t| clean_terms(&t))
 }
 
-fn clean_terms(raw: &str) -> Option<String> {
+pub(crate) fn clean_terms(raw: &str) -> Option<String> {
     let terms: Vec<String> = raw
         .split(',')
         .map(|term| {

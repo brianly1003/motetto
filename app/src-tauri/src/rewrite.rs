@@ -68,8 +68,9 @@ fn saved_audio(folder: &Path) -> Result<Vec<(Vec<String>, u64)>, String> {
 }
 
 /// Transcribe again (owner 2026-10-21): whisper runs on the saved audio once more and replaces
-/// the transcript, the user's corrections included (the UI asks first); what was shown before is
-/// kept in `transcript.prev.txt`. The notes don't change: Write the notes again is separate.
+/// the transcript; what was shown before is kept in `transcript.prev.txt`. The user's corrections
+/// carry over (`learned_edits`): the names they fixed bias whisper, and their edits are put back
+/// where the same words are heard again. The notes don't change: Write the notes again is separate.
 /// `mic_mode` prepares the mic another way (the confirmation's Microphone choice); None keeps the
 /// meeting's own. The meeting keeps the new mode only when the new transcript is saved.
 pub(crate) fn retranscribe(
@@ -90,15 +91,21 @@ pub(crate) fn retranscribe(
         Some(mode) => mode,
         None => library::summary(root, id)?.mic_mode,
     };
+    let edits = learned(&folder)?;
     motetto_core::tools::reset();
     stage(Stage::Transcribing { progress: None });
-    let heard =
-        motetto_core::transcribe::transcript_parts_with(&parts, mic_mode, true, &|progress| {
+    let heard = motetto_core::transcribe::transcript_parts_hinted(
+        &parts,
+        mic_mode,
+        true,
+        &edits.hints(),
+        &|progress| {
             stage(Stage::Transcribing {
                 progress: Some(progress),
             })
-        })
-        .map_err(|e| e.to_string())?;
+        },
+    )
+    .map_err(|e| e.to_string())?;
     let transcript = heard.text;
     if transcript.trim().is_empty() {
         return Err("No speech was heard in the saved audio. The transcript is unchanged.".into());
@@ -110,17 +117,36 @@ pub(crate) fn retranscribe(
         None => None,
     };
     stage(Stage::Saving);
-    save_transcript(&folder, &transcript, fixed)?;
+    let edited = Some(edits.apply(&transcript)).filter(|edited| *edited != transcript);
+    save_transcript(&folder, &transcript, edited, fixed)?;
     let mut summary = library::summary(root, id)?;
     summary.language = heard.language;
     summary.mic_mode = mic_mode;
     library::save(root, &summary)
 }
 
-/// Replaces the transcript, keeping what was shown in `transcript.prev.txt`. A meeting cut off
+/// This meeting's corrections: the heard transcript against the edited copy, when there is one.
+fn learned(folder: &Path) -> Result<crate::learned_edits::Edits, String> {
+    let edited = folder.join(crate::transcript_edits::EDITED);
+    if !edited.exists() {
+        return Ok(Default::default());
+    }
+    Ok(crate::learned_edits::Edits::learn(
+        &library::text(&folder.join("transcript.txt"))?,
+        &library::text(&edited)?,
+    ))
+}
+
+/// Replaces the transcript, keeping what was shown in `transcript.prev.txt`; `edited` is the new
+/// edited copy (the user's corrections put back), if any. A meeting cut off
 /// before its first transcript (Interrupted, notes stopped) has none to keep: reading it failed
 /// after the whole transcription, every time (2026-10-28).
-fn save_transcript(folder: &Path, transcript: &str, fixed: Option<String>) -> Result<(), String> {
+fn save_transcript(
+    folder: &Path,
+    transcript: &str,
+    edited: Option<String>,
+    fixed: Option<String>,
+) -> Result<(), String> {
     if folder.join("transcript.txt").exists()
         || folder.join(crate::transcript_edits::EDITED).exists()
     {
@@ -135,6 +161,10 @@ fn save_transcript(folder: &Path, transcript: &str, fixed: Option<String>) -> Re
         if folder.join(stale).exists() {
             fs::remove_file(folder.join(stale)).map_err(on(&folder.join(stale)))?;
         }
+    }
+    if let Some(edited) = edited {
+        let path = folder.join(crate::transcript_edits::EDITED);
+        fs::write(&path, edited).map_err(on(&path))?;
     }
     if let Some(fixed) = fixed {
         let path = folder.join("transcript.fixed.txt");
@@ -346,18 +376,42 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("motetto-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         // Never transcribed (the owner's 100-minute call): saved, nothing to keep.
-        save_transcript(&dir, "[00:01] Me: first", None).unwrap();
+        save_transcript(&dir, "[00:01] Me: first", None, None).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join("transcript.txt")).unwrap(),
             "[00:01] Me: first"
         );
         assert!(!dir.join("transcript.prev.txt").exists());
         // Again: the first one is kept.
-        save_transcript(&dir, "[00:01] Me: second", None).unwrap();
+        save_transcript(&dir, "[00:01] Me: second", None, None).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join("transcript.prev.txt")).unwrap(),
             "[00:01] Me: first"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn transcribe_again_puts_the_corrections_back() {
+        let dir = std::env::temp_dir().join(format!("motetto-learn-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let edited = dir.join(crate::transcript_edits::EDITED);
+        fs::write(dir.join("transcript.txt"), "[00:01] Them: ask kenvin").unwrap();
+        fs::write(&edited, "[00:01] Them: ask Kevin").unwrap();
+        let edits = learned(&dir).unwrap();
+        assert_eq!(edits.hints(), ["Kevin"]);
+        let again = "[00:01] Them: ask kenvin today\n[00:04] Me: kenvin agreed";
+        save_transcript(&dir, again, Some(edits.apply(again)), None).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("transcript.txt")).unwrap(),
+            again
+        );
+        assert_eq!(
+            fs::read_to_string(&edited).unwrap(),
+            "[00:01] Them: ask Kevin today\n[00:04] Me: Kevin agreed"
+        );
+        // Without corrections there is no edited copy afterwards.
+        save_transcript(&dir, "[00:01] Me: x", None, None).unwrap();
+        assert!(!edited.exists());
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

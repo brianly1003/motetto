@@ -14,6 +14,7 @@ mod follow;
 #[cfg(target_os = "macos")]
 mod follow_macos;
 mod hardware;
+mod learned_edits;
 mod library;
 mod library_commands;
 mod live;

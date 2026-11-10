@@ -77,6 +77,13 @@ struct Segment {
 /// A whisper row: start and end in ms, text.
 type Row = (u64, u64, String);
 
+thread_local! {
+    /// Whisper's prompt for the transcription running on this thread: `TERMS` and the run's
+    /// hints. Set for one `transcript_parts_hinted` call so every whisper run in it (whole
+    /// track, pieces, language reruns) uses it; `None` outside one falls back to `TERMS`.
+    static PROMPT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 fn run(cmd: &mut Command) -> Result<(), Box<dyn Error>> {
     let status = crate::tools::status(cmd)?;
     if !status.success() {
@@ -137,6 +144,28 @@ pub fn transcript_parts_with(
     quiet: bool,
     report: &(dyn Fn(TranscribeProgress) + Sync),
 ) -> Result<Transcript, Box<dyn Error>> {
+    transcript_parts_hinted(parts, mode, quiet, &[], report)
+}
+
+/// `transcript_parts_with`, also biasing whisper toward `hints` (spellings the user fixed in this
+/// meeting) for this run only. They are cleaned like `TERMS` and go after it in whisper's prompt,
+/// whose last ~224 tokens are the ones it keeps.
+pub fn transcript_parts_hinted(
+    parts: &[(Vec<String>, u64)],
+    mode: MicMode,
+    quiet: bool,
+    hints: &[String],
+    report: &(dyn Fn(TranscribeProgress) + Sync),
+) -> Result<Transcript, Box<dyn Error>> {
+    let prompt = run_prompt(config::terms(), hints);
+    PROMPT.with(|p| *p.borrow_mut() = prompt);
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            PROMPT.with(|p| *p.borrow_mut() = None);
+        }
+    }
+    let _clear = Clear;
     let run = Run::new(parts, mode);
     progress::ticking(
         || {
@@ -477,6 +506,16 @@ fn name(path: &str) -> std::borrow::Cow<'_, str> {
         .map_or(path.into(), |n| n.to_string_lossy())
 }
 
+/// `TERMS`, then the run's hints, cleaned by the same rules: whisper keeps the end of its prompt.
+fn run_prompt(terms: Option<String>, hints: &[String]) -> Option<String> {
+    let prompt = [terms, config::clean_terms(&hints.join(","))]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!prompt.is_empty()).then_some(prompt)
+}
+
 /// whisper-cli on one 16 kHz WAV: rows written to `<stem>.csv` and returned. With `progress`,
 /// its own percent becomes the stage's progress.
 fn whisper(
@@ -517,8 +556,8 @@ fn whisper(
     // Names whisper can't know (new products, people, project codes) bias it toward the right
     // spelling; tested not to push English words into a Vietnamese call.
     // whisper keeps only the last ~224 prompt tokens; long lists lose their start.
-    if let Some(terms) = config::terms() {
-        whisper.args(["--prompt", &terms]);
+    if let Some(prompt) = PROMPT.with(|p| p.borrow().clone()).or_else(config::terms) {
+        whisper.args(["--prompt", &prompt]);
     }
     if quiet {
         whisper
@@ -994,6 +1033,20 @@ mod tests {
             vec![14_500]
         );
         assert_eq!(cuts(0, 10_000, &[]), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn hints_follow_terms_and_are_cleaned() {
+        let hints = ["Pusher Beams".to_string(), "Kevin\n<b>".to_string()];
+        assert_eq!(
+            run_prompt(Some("Motetto".into()), &hints).as_deref(),
+            Some("Motetto, Pusher Beams, Kevinb")
+        );
+        assert_eq!(run_prompt(None, &[]), None);
+        assert_eq!(
+            run_prompt(None, &hints[..1]).as_deref(),
+            Some("Pusher Beams")
+        );
     }
 
     #[test]
