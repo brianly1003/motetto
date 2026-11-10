@@ -71,6 +71,7 @@ pub fn run() {
             crate::rehearse::rehearse_start,
             crate::rehearse::rehearse_stop,
             crate::rehearse::rehearsal_transcript,
+            crate::rehearse::rehearsal_stop_report,
             crate::rehearse::rehearsal_audio,
             crate::scripts::script_reveal,
             crate::rehearse::rehearsal_discard,

@@ -119,7 +119,8 @@ export function RecordingPage({ session: { state, gaps, pending, act }, onToast 
 // the row's percent and time left (`right`, its elapsed time until those are known), what it does now
 // (`line`) and the share of the step done (`share`), else `done` (parts finished).
 type Live = { right: string | null; line: string; share: number | null };
-function StepsPage({ title, steps, at, bar, tip, began, stop, measured, done, cancel }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string; began: () => (number | undefined)[]; stop?: { id: string; hint: string }; measured?: Live | null; done?: number; cancel?: { pending: boolean; run: () => void } }) {
+// `stop.run` replaces stopping a meeting's job (a rehearsal's report stops its own way).
+export function StepsPage({ title, steps, at, bar, tip, began, stop, measured, done, cancel }: { title: string; steps: [string, string][]; at: number; bar: number[]; tip: string; began: () => (number | undefined)[]; stop?: { id?: string; run?: () => void; hint: string }; measured?: Live | null; done?: number; cancel?: { pending: boolean; run: () => void } }) {
   const [now, setNow] = useState(Date.now);
   const [stopping, setStopping] = useState(false);
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
@@ -136,7 +137,7 @@ function StepsPage({ title, steps, at, bar, tip, began, stop, measured, done, ca
     <div className="procbar"><i style={{ width: `${(bar[at - 1] ?? 0) + (bar[at] - (bar[at - 1] ?? 0)) * (measured?.share ?? done ?? 0)}%` }}/></div>
     <p className="tip">{tip}</p>
     {cancel ? <div className="proc-cancel"><button className="btn" disabled={cancel.pending || !ipc.desktopAvailable()} onClick={cancel.run}>{cancel.pending ? s.importStopping : s.importCancel}</button><span className="hint">{s.importCancelHint}</span></div>
-      : stop && <div className="proc-cancel"><button className="btn" disabled={stopping || !ipc.desktopAvailable()} onClick={() => { setStopping(true); ipc.stopProcessing(stop.id).catch(() => setStopping(false)); }}>{stopping ? s.stoppingJob : s.stopJob}</button><span className="hint">{stop.hint}</span></div>}
+      : stop && <div className="proc-cancel"><button className="btn" disabled={stopping || !ipc.desktopAvailable()} onClick={() => { if (stop.run) { stop.run(); return; } setStopping(true); ipc.stopProcessing(stop.id!).catch(() => setStopping(false)); }}>{stopping ? s.stoppingJob : s.stopJob}</button><span className="hint">{stop.hint}</span></div>}
   </div>;
 }
 

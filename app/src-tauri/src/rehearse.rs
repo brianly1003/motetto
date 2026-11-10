@@ -263,18 +263,51 @@ pub async fn rehearsal_audio(app: tauri::AppHandle, id: String) -> Result<Option
     Ok(Some(mic.to_string_lossy().into_owned()))
 }
 
-/// What you said, as `[mm:ss] Me: …` lines, from the whole rehearsal at full quality.
+/// What you said, as `[mm:ss] Me: …` lines, from the whole rehearsal at full quality. Its
+/// progress goes out as `motetto://rehearsal-progress`; Stop ends it with `STOPPED`.
 #[tauri::command]
 pub async fn rehearsal_transcript(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    // The stop flag is shared with meeting jobs: reset it only when none runs, as Read in does.
+    if !meeting_job(&app) {
+        motetto_core::tools::reset();
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let dir = folder(&root(&app)?, &id)?;
         let mic = dir.join("rehearsal.mic.wav").to_string_lossy().into_owned();
-        motetto_core::transcribe::transcript_parts(&[(vec![mic], 0)], true, &|_| {})
+        let report = |progress| {
+            let _ = app.emit(
+                "motetto://rehearsal-progress",
+                serde_json::json!({ "id": id, "progress": progress }),
+            );
+        };
+        motetto_core::transcribe::transcript_parts(&[(vec![mic], 0)], true, &report)
             .map(|t| t.text)
-            .map_err(|e| e.to_string())
+            .map_err(|e| {
+                if motetto_core::tools::cancelled() {
+                    crate::meeting_actions::STOPPED.to_string()
+                } else {
+                    e.to_string()
+                }
+            })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Stop on the report's steps page. Whisper stops at once unless a meeting job is running, which
+/// the shared flag would stop too; then the page stops waiting and the transcription finishes
+/// unseen. A stop token per job would let it end here as well.
+#[tauri::command]
+pub fn rehearsal_stop_report(app: tauri::AppHandle) {
+    if !meeting_job(&app) {
+        motetto_core::tools::cancel();
+    }
+}
+
+fn meeting_job(app: &tauri::AppHandle) -> bool {
+    app.state::<crate::library_commands::Library>()
+        .busy
+        .load(Ordering::SeqCst)
 }
 
 /// A shorter version of a line that ran long, from the notes model on this computer; None when

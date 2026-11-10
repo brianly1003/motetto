@@ -188,6 +188,7 @@ import type { Rehearsal } from "./bindings/Rehearsal";
 export const rehearseStart = (script: string) => invoke<Rehearsal>("rehearse_start", { script });
 export const rehearseStop = () => invoke<Rehearsal>("rehearse_stop");
 export const rehearsalTranscript = (id: string) => invoke<string>("rehearsal_transcript", { id });
+export const rehearsalStopReport = () => invoke<void>("rehearsal_stop_report");
 export const rehearsalDiscard = (id: string) => invoke<void>("rehearsal_discard", { id });
 /** Opens a rehearsal to listen back: null when it plays natively as `rehearsal:<id>` (macOS),
  *  else the file's address for an audio element. */

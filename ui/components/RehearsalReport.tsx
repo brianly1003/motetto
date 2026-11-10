@@ -8,7 +8,12 @@ import { follow, parseScript } from "@/lib/script";
 import { report as measure, type Report } from "@/lib/rehearsal";
 import { meetingDate } from "@/lib/document";
 import type { Rehearsal } from "@/lib/bindings/Rehearsal";
+import type { TranscribeProgress } from "@/lib/bindings/TranscribeProgress";
+import { StepsPage, progressLabel, stepLabel } from "./RecordingPage";
+import { Alert } from "./Alert";
 
+// The mic is the only side, so the step reads "Transcribing", not "Me: transcribing".
+const doing = (p: TranscribeProgress) => { const t = stepLabel(p).replace(/^\w+: /, ""); return t[0].toUpperCase() + t.slice(1); };
 const fmt = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
 const clock = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 // Earlier totals of each script in this session, for "vs rehearsal N".
@@ -73,6 +78,12 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
 }) {
   const [result, setResult] = useState<Report | null>(null);
   const [failed, setFailed] = useState("");
+  // Writing it: the steps page of the meeting jobs, with whisper's own progress and Stop.
+  const [attempt, setAttempt] = useState(0);
+  const [progress, setProgress] = useState<TranscribeProgress | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const began = useRef(Date.now());
+  const live = useRef(0);
   const [shorter, setShorter] = useState<Record<number, string | null>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   // Used lines, each with its Undo.
@@ -85,8 +96,11 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
   const earlier = history.get(rehearsal.script) ?? [];
   useEffect(() => {
     let active = true;
+    live.current = attempt; began.current = Date.now(); setProgress(null);
+    const current = () => active && live.current === attempt;
+    const unlisten = ipc.listen<{ id: string; progress: TranscribeProgress }>("motetto://rehearsal-progress", p => { if (current() && p.id === rehearsal.id) setProgress(p.progress); });
     ipc.rehearsalTranscript(rehearsal.id).then(transcript => {
-      if (!active) return;
+      if (!current()) return;
       const r = measure(script, transcript, rehearsal.duration_ms ?? 0, follow);
       setResult(r);
       history.set(rehearsal.script, [...earlier, r.totalS]);
@@ -99,10 +113,13 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
           setShorter(v => ({ ...v, [k]: answer }));
         }
       })();
-    }).catch(e => active && setFailed(String(e)));
-    // Leaving the report deletes the audio unless it was kept.
-    return () => { active = false; if (!keptRef.current) void ipc.rehearsalDiscard(rehearsal.id).catch(() => {}); };
-  }, [rehearsal.id]);
+    }).catch(e => { if (!current()) return; if (String(e) === "stopped") setStopped(true); else setFailed(String(e)); });
+    return () => { active = false; void unlisten.then(off => off()); };
+  }, [rehearsal.id, attempt]);
+  // Leaving the report deletes the audio unless it was kept.
+  useEffect(() => () => { if (!keptRef.current) void ipc.rehearsalDiscard(rehearsal.id).catch(() => {}); }, [rehearsal.id]);
+  // Stop: the page stops waiting at once; whisper stops too unless a meeting job shares its flag.
+  function stop() { live.current = -1; setStopped(true); void ipc.rehearsalStopReport().catch(() => {}); }
   async function keep() {
     // Set first: leaving while Keep runs must not delete what is being kept.
     keptRef.current = true;
@@ -115,7 +132,11 @@ export default function RehearsalReport({ rehearsal, text, onUse, onAgain, onEdi
     {actions && <div className="sp-actions"><button type="button" className="btn" onClick={onEdit}>{s.rehearsalEdit}</button><button type="button" className="btn primary" onClick={onAgain}>{MIC}{s.rehearsalAgain}</button></div>}
   </header>;
   if (failed) return <>{head(true)}<div className="sp-scroll"><p className="scripts-hint" role="alert">{s.rehearsalFailed.replace("{error}", failed)}</p></div></>;
-  if (!result) return <>{head(false)}<div className="sp-scroll"><p className="scripts-hint" role="status" aria-busy="true">{s.rehearsalWriting}</p></div></>;
+  if (stopped) return <>{head(true)}<div className="sp-scroll"><Alert variant="warning" title={s.rehearsalStopped} actions={<button type="button" className="doc-action" onClick={() => { setStopped(false); setAttempt(n => n + 1); }}>{s.rehearsalWriteReport}</button>}>{s.rehearsalStoppedBody}</Alert></div></>;
+  if (!result) return <>{head(false)}<div className="sp-scroll"><StepsPage title={s.rehearsalWriting} at={0} bar={[95, 100]}
+    steps={[[s.rehearsalTranscribing, ""], [s.rehearsalComparing, ""]]} began={() => [began.current]}
+    measured={progress && { right: progressLabel(progress), line: doing(progress), share: progress.percent / 100 }}
+    tip={s.rehearsalWritingTip.replace("{device}", device)} stop={{ run: stop, hint: s.rehearsalStopHint }}/></div></>;
   const planned = script.sections.reduce((sum, x) => sum + x.minutes * 60, 0);
   const previous = earlier.at(-2);
   const fillers = Object.entries(result.fillers);

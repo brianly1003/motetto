@@ -975,6 +975,7 @@ input.sp-name:hover { background: var(--surface-2); }
 .sp-foot { display: flex; align-items: center; gap: 6px; padding: 8px 22px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
 .sp-foot svg { width: 12px; height: 12px; }
 .sp-scroll { flex: 1; overflow: auto; padding: 16px 22px; }
+.sp-scroll > .writing { padding: 6px 0 0; } .sp-scroll > .banner { margin: 6px 0 0; } /* the steps page or a notice under a report title: one left edge */
 .scripts-hint { margin: 0; font-size: 12px; color: var(--ink-3); }
 /* Rehearsal report (mockup Script screen › report) */
 .ptrep { display: grid; gap: 12px; font-size: 13px; }
