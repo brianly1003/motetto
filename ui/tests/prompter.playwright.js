@@ -48,7 +48,8 @@ async (page) => {
   await p.evaluate(() => { window.emit('motetto://prompter-marker', false); window.emit('motetto://prompter-through', false); });
   await p.evaluate(() => window.emit('motetto://prompter-check', 'hidden'));
   if (await p.locator('.ptlines').evaluate(e => getComputedStyle(e).visibility) !== 'visible') fails.push('text hidden after the check passed');
-  if (await p.locator('.ptchip').innerText() !== 'Demo · 1/2 Opening ▾') fails.push('chip: ' + await p.locator('.ptchip').innerText());
+  // The chevron is drawn (an svg), not a character.
+  if (await p.locator('.ptchip').innerText() !== 'Demo · 1/2 Opening' || !await p.locator('.ptchip .chev').count()) fails.push('chip: ' + await p.locator('.ptchip').innerText());
   // The chip switches script: the list with ✓ on this one, then Open Scripts in Motetto.
   await p.locator('.ptchip').click();
   const picks = (await p.locator('.ptmenu button').allInnerTexts()).map(t => t.replace(/\n/g, ''));
@@ -66,7 +67,9 @@ async (page) => {
   if (!said || !me) fails.push('no Me colour');
   await p.evaluate(() => window.emit('motetto://follow-heard', { text: 'for having us today the short', end_ms: 5000, inference_ms: 800 }));
   await p.waitForFunction(() => /The short version/.test(document.querySelector('.ptln.cur')?.textContent || ''), null, { timeout: 3000 }).catch(() => fails.push('did not move to the next line'));
-  if (!/Thanks for having us/.test(await p.locator('.ptln.prev').innerText().catch(() => ''))) fails.push('previous line not shown');
+  // Presenting and rehearsing share one layout: no previous-paragraph line, the chip in the footer.
+  if (await p.locator('.ptln.prev').count()) fails.push('previous line shown');
+  if (!await p.locator('.ptfoot .ptchip').count() || await p.locator('.pth .ptchip, .pth .ptpace').count()) fails.push('chip or pace not in the footer');
   // Keys from Rust move by line and by section.
   await p.evaluate(() => window.emit('motetto://prompter-key', 'ShiftDown'));
   if (!/This is the reports page/.test(await cur())) fails.push('next section: ' + await cur());

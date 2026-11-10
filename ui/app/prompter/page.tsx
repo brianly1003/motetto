@@ -231,10 +231,7 @@ export default function Prompter() {
       const noAhead = innerHeight - fixed - nextLine < line;
       strip.classList.toggle("noahead", noAhead);
       if (noAhead) nextLine = 0;
-      const prevLine = rehearsing ? 0 : size * .68 * 1.3 + 4;
-      const tight = rehearsing || innerHeight - fixed - nextLine - prevLine < line;
-      strip.classList.toggle("tight", tight);
-      const rows = Math.max(1, Math.min(3, Math.floor((innerHeight - fixed - nextLine - (tight ? 0 : prevLine)) / line)));
+      const rows = Math.max(1, Math.min(3, Math.floor((innerHeight - fixed - nextLine) / line)));
       pages.current = readingPages(text, rows);
       const kept = shownFrom.current?.line === at.line ? shownFrom.current.word : undefined;
       const view = readingWindow(readingRows(text), rows, shownWord, line, kept);
@@ -309,8 +306,8 @@ export default function Prompter() {
       return <span key={`w${key++}`} {...mark(k)} className={live ? i <= shownWord ? "ptsaid" : k <= shownWord && shownWord < i ? "ptnow" : "" : ""}>{w}</span>;
     }));
   };
-  // Rehearsing keeps the header to one row (the mic announcement, Stop, the share switch);
-  // the script chip and the pace move down beside the paragraph count.
+  // The header keeps to one row (the share switch, and the mic announcement with Stop while
+  // rehearsing); the script chip and the pace sit in the footer beside the paragraph count.
   const chip = c && !checking && name && (() => {
         // "Team X demo · 2/4 Demo ▾": the script, where you are, and the menu to switch.
         const where = script.sections.length === 1 && script.sections[0].minutes === 0 && !text.trimStart().startsWith("#") ? "" : ` · ${c.section + 1}/${script.sections.length} ${script.sections[c.section]?.title ?? ""}`;
@@ -321,15 +318,8 @@ export default function Prompter() {
   return <div ref={root}>{markerEl}<div className={`pt${rehearsing ? " rehearsing" : ""}${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
     <div className="pth">
       <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}><GripVertical/></button>
-      {!rehearsing && chip}
-      {menu && <div className="ptmenu" role="menu" data-control>
-        {menu.map(n => <button key={n} type="button" role="menuitemradio" aria-checked={n === name} onClick={() => { setMenu(null); if (n !== name) void ipc.prompterScript(n).catch(e => setCloseError(String(e))); }}><i>{n === name ? "✓" : ""}</i>{n}</button>)}
-        <div className="sep" />
-        <button type="button" role="menuitem" className="more" onClick={() => { setMenu(null); void ipc.openScripts().catch(() => {}); }}><i />{s.ptOpenScripts}</button>
-      </div>}
       {editable && <span className="ptedhint">{note || s.ptEditing}</span>}
       {rehearsing && <span className="ptreh" role="status"><i /><span title={s.rehearsing}>{s.rehearsing}</span><button type="button" data-control onClick={() => void ipc.rehearseStop().catch(() => {})}>{s.rehearsalStop}</button></span>}
-      {!rehearsing && paceEl}
       <button type="button" className={`ptvis${checking ? " checking" : ""}`} role="switch" aria-checked={shown} data-control title={s.ptShowInShare} onClick={() => { setCloseError(""); void ipc.setShareVisible(!shown).catch(error => setCloseError(String(error))); }}>
         <span className="h"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><path d="M2 10 10 2" /></svg>{checking ? s.ptChecking : s.ptHidden}</span>
         <span className="s"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><circle cx="6" cy="6" r="1.5" /></svg>{s.ptShown}</span>
@@ -352,8 +342,6 @@ export default function Prompter() {
       : <>
         <div className="ptlines" style={checking ? { visibility: "hidden" } : undefined}>
           {!c ? <div className="ptln cur">{name ? s.ptEmpty : s.ptNoScript}</div> : <>
-            {/* The end of the paragraph before: what you just said, for a glance back. */}
-            <div className="ptln prev" style={{ visibility: page.index > 0 || !lines[at.line - 1] ? "hidden" : undefined }}><span dir="ltr">{lines[at.line - 1] ? words(lines[at.line - 1], false) : " "}</span></div>
             <div className="ptln cur" ref={current}><div className="pttext">{words(c, true)}
               {/* The next two paragraphs continue on the same rows: a short paragraph never leaves you
                   waiting with nothing to read. */}
@@ -366,7 +354,13 @@ export default function Prompter() {
           <button type="button" data-control aria-label={s.ptPrevious} title={`${s.ptPrevious} · ${keyLabel(keys.Up)}`} disabled={!at.line && !page.index} onClick={() => move(-1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m8 2-4 4 4 4" /></svg></button>
           <span className="ptpage" title={s.ptParagraph.replace("{n}", String(at.line + 1))} aria-label={`${s.ptParagraph.replace("{n}", String(at.line + 1))} · ${page.index + 1}/${page.total}`}>{page.index + 1}/{page.total}</span>
           <button type="button" data-control aria-label={s.ptNext} title={`${page.index < page.total - 1 ? s.ptContinue : s.ptNext} · ${keyLabel(keys.Down)}`} disabled={at.line >= lines.length - 1 && page.index >= page.total - 1} onClick={() => move(1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg></button>
-        </div>{rehearsing && chip}<div className="ptprog"><i style={{ width: `${lines.length ? (at.line + (page.index + 1) / page.total) / lines.length * 100 : 0}%` }} /></div>{rehearsing && paceEl}<span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
+        </div>{chip}<div className="ptprog"><i style={{ width: `${lines.length ? (at.line + (page.index + 1) / page.total) / lines.length * 100 : 0}%` }} /></div>{paceEl}<span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
+        {/* The script menu opens upward from the chip in the footer. */}
+        {menu && <div className="ptmenu" role="menu" data-control>
+          {menu.map(n => <button key={n} type="button" role="menuitemradio" aria-checked={n === name} onClick={() => { setMenu(null); if (n !== name) void ipc.prompterScript(n).catch(e => setCloseError(String(e))); }}><i>{n === name ? "✓" : ""}</i>{n}</button>)}
+          <div className="sep" />
+          <button type="button" role="menuitem" className="more" onClick={() => { setMenu(null); void ipc.openScripts().catch(() => {}); }}><i />{s.ptOpenScripts}</button>
+        </div>}
       </>}
   </div></div>;
 }
