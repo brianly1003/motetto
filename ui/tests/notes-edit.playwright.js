@@ -184,7 +184,10 @@ async (page) => {
     const tr=await p.evaluate(()=>window.meeting);
     if(tr.transcript.split('\n')[0]!=='[00:16] Me: Pusher beams relies on FCM. today')failures.push(`line not saved: ${tr.transcript.split('\n')[0]}`);
     if(tr.transcript_heard.split('\n')[0]!=='[00:16] Me: Pusher beams relies on FCM.')failures.push('heard text lost');
-    if(await p.evaluate(()=>document.activeElement?.closest('.tline')?.dataset.line)!=='1')failures.push('Enter did not move to the next line');
+    if(await p.evaluate(()=>document.activeElement?.isContentEditable||document.activeElement?.closest('.tline')?.dataset.line!=='0'))failures.push('Enter did not leave the line selected');
+    // A second Enter edits the next line; Esc then leaves it selected again.
+    await p.keyboard.press('Enter'); await p.waitForTimeout(150);
+    if(await p.evaluate(()=>!document.activeElement?.isContentEditable||document.activeElement?.closest('.tline')?.dataset.line!=='1'))failures.push('A second Enter did not edit the next line');
     await p.keyboard.press('Escape'); await p.waitForTimeout(150);
     // 8. The edited dot shows what was heard; Revert restores it.
     const dot=await p.locator(row(0)+' .edot').boundingBox();

@@ -19,6 +19,8 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
   const playing = position === undefined ? -1 : lines.findLastIndex(line => line.ms !== null && line.ms <= position);
   const box = useRef<HTMLDivElement>(null);
   const history = useRef<{index: number; text: string}[]>([]);
+  // The line Enter just saved: a second Enter goes on to the next line instead of editing it again.
+  const saved = useRef(-1);
   // Playback never pulls the view or the highlight onto the line being edited. Opening at a cited
   // time, or a playing line leaving the view, puts the line at the top so what plays next shows
   // below it (owner 2026-10-21); a line already in view stays put.
@@ -126,10 +128,14 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
         if (target.isContentEditable || target.closest(".epop, .rmv") || event.metaKey || event.ctrlKey) return;
         const at = target.closest<HTMLElement>(".tline") ? Number(target.closest<HTMLElement>(".tline")!.dataset.line) : -1;
         const here = at >= 0 ? at : playing >= 0 ? playing : 0;
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); go(at < 0 ? here : here + (event.key === "ArrowDown" ? 1 : -1)); }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); saved.current = -1; go(at < 0 ? here : here + (event.key === "ArrowDown" ? 1 : -1)); }
         else if (event.key === " ") { event.preventDefault(); onTogglePlay?.(); }
         else if (event.key === "Enter" && event.altKey) { event.preventDefault(); const line = lines[here], next = lines.slice(here + 1).find(l => l.ms !== null)?.ms; if (line?.ms != null) onReplay?.(line.ms, next ?? line.ms + 8000); }
-        else if (event.key === "Enter" && (at >= 0 || target === box.current)) { event.preventDefault(); const w = words(here); if (w) caretAt(w, false); }
+        else if (event.key === "Enter" && (at >= 0 || target === box.current)) {
+          event.preventDefault();
+          if (at >= 0 && at === saved.current && editNext(at, 1)) return;
+          const w = words(here); if (w) caretAt(w, false);
+        }
       }}>
       {lines.map((line, index) => {
         const side = line.speaker === "You" ? "me" : "them", original = heardLines?.[index]?.text ?? line.text;
@@ -146,21 +152,21 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
               : <span className={`words${editable ? "" : " ro"}`} contentEditable={editable ? "plaintext-only" : undefined} suppressContentEditableWarning spellCheck={false}
                   role={editable ? "textbox" : undefined} aria-label={editable ? `${s.lineAt} ${line.time}, ${line.speaker}` : undefined}
                   dangerouslySetInnerHTML={{__html: esc(line.text)}}
-                  onFocus={() => setFocused(index)}
+                  onFocus={() => { saved.current = -1; setFocused(index); }}
                   onBlur={event => { setFocused(-1); void save(index, (event.currentTarget.textContent ?? "").replace(/\s+/g, " ").trim()); }}
                   onPaste={event => { event.preventDefault(); document.execCommand("insertText", false, event.clipboardData.getData("text/plain").replace(/\s+/g, " ")); }}
                   onDrop={event => event.preventDefault()}
                   onKeyDown={event => {
                     const el = event.currentTarget;
                     if (event.key === "Enter" && event.altKey) { event.preventDefault(); if (line.ms !== null) onReplay?.(line.ms, next ?? line.ms + 8000); return; }
-                    if (event.key === "Enter") { event.preventDefault(); el.blur(); const w = words(index + 1); if (w) caretAt(w, true); return; }
                     if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
                       const up = event.key === "ArrowUp";
                       if (atEdge(el, up)) { event.preventDefault(); el.blur(); if (!editNext(index, up ? -1 : 1)) caretAt(el, !up); }
                       return;
                     }
-                    // Esc leaves the line selected, so ↑↓ carry on from it.
-                    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); const back = handBack(el.closest<HTMLElement>(".tline")); el.blur(); back(); }
+                    // Enter and Esc save and leave the line selected, so Space plays and ↑↓ carry on from
+                    // it; after Enter, a second Enter edits the next line.
+                    if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); event.stopPropagation(); const back = handBack(el.closest<HTMLElement>(".tline")); el.blur(); back(); if (event.key === "Enter") saved.current = index; }
                   }}/>}
             <span className="tx-end">{line.marks.map(mark => <span className="flag" key={mark} title={`${s.marked} ${elapsedLabel(mark)}`}>⚑ {s.mark}</span>)}
               {edited && !removed && <span className="edw"><button className="edot" aria-label={`${s.lineEdited} ${original}`}/><span className="epop" role="tooltip"><span>{s.lineEdited} <q>{original}</q></span>{editable && <button className="doc-action" onMouseDown={event => event.preventDefault()} onClick={() => void save(index, original)}>{s.revert}</button>}</span></span>}
