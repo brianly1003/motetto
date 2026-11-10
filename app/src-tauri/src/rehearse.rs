@@ -197,7 +197,7 @@ pub fn stop(app: &tauri::AppHandle) -> Result<Rehearsal, String> {
     }
     // Quieter than you hear yourself is still a fine rehearsal: keep it as recorded.
     if let Err(error) = louder(&base) {
-        eprintln!("Rehearsal kept at its recorded level: {error}");
+        crate::trace::error(&format!("Rehearsal kept at its recorded level: {error}"));
     }
     Ok(rehearsal)
 }

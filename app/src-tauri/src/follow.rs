@@ -267,7 +267,9 @@ fn apple(app: &tauri::AppHandle, stop: &Stop) -> bool {
         open.store(true, Ordering::SeqCst);
         let _ = watch.join();
         if let Err(error) = result {
-            eprintln!("Motetto: following with Apple: {error}; Whisper follows instead");
+            crate::trace::error(&format!(
+                "following with Apple: {error}; Whisper follows instead"
+            ));
             return false;
         }
     }
@@ -307,7 +309,7 @@ pub fn start(app: tauri::AppHandle, mic: PathBuf, stop: Stop, own: bool) {
                 None => match crate::speech::Server::start(&stop) {
                     Ok(server) => mine.insert(Arc::new(Mutex::new(server))).clone(),
                     Err(error) => {
-                        eprintln!("Motetto: following needs the speech model: {error}");
+                        crate::trace::error(&format!("following needs the speech model: {error}"));
                         break;
                     }
                 },
@@ -321,7 +323,7 @@ pub fn start(app: tauri::AppHandle, mic: PathBuf, stop: Stop, own: bool) {
                 }
                 Ok(None) => step = 1000,
                 Err(error) => {
-                    eprintln!("Motetto: following: {error}");
+                    crate::trace::error(&format!("following: {error}"));
                     step = 2000;
                 }
             }

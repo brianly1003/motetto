@@ -15,7 +15,7 @@ pub const WHILE_PROMPTING: [&str; 6] = ["Down", "Up", "ShiftDown", "Backslash", 
 pub fn install(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let keys = app.state::<crate::settings::Store>().get()?.shortcuts;
     if let Err(error) = register(app, &keys) {
-        eprintln!("Motetto: {error}");
+        crate::trace::error(&error.to_string());
         let _ = app.emit("motetto://notice", error);
     }
     Ok(())

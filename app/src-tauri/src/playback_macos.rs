@@ -129,11 +129,14 @@ impl Engine {
     }
 
     fn play(&mut self, from_ms: f64) -> Result<(), String> {
-        // An audio device change can stop the engine between any two calls, and starting a node
-        // then raises an Objective-C exception, which would abort the app: catch it, start the
-        // engine again and retry once.
+        // An audio device change can stop the engine between any two calls, or leave it running
+        // with no IO ("player did not see an IO cycle"), and starting a node then raises an
+        // Objective-C exception, which would abort the app: catch it, restart the engine on the
+        // current device and retry once.
         let mut result = self.try_play(from_ms);
         if result.is_err() {
+            // SAFETY: worker-thread object; its nodes were stopped by try_play.
+            unsafe { self.engine.stop() };
             result = self.try_play(from_ms);
         }
         if result.is_err() {
@@ -150,12 +153,13 @@ impl Engine {
             unsafe { self.engine.startAndReturnError() }
                 .map_err(|e| e.localizedDescription().to_string())?;
         }
+        self.wait_for_io();
         let tracks = &self.tracks;
         // SAFETY: worker-thread objects. Frames stay inside each file (0..length); a later
         // part waits in player time, which follows the speed like the audio does. All nodes
         // start at one host time 50 ms ahead so Me and Them begin on the same sample. A thrown
         // exception leaves nothing half-owned: the nodes are stopped again by the caller.
-        objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
+        crate::trace::catch(|| unsafe {
             for track in tracks {
                 let length = track.file.length();
                 let skip = ((from_ms - track.offset_ms) / 1000.0 * track.rate).round() as i64;
@@ -182,15 +186,31 @@ impl Engine {
             for track in tracks {
                 track.node.playAtTime(Some(&start));
             }
-        }))
-        .map_err(|e| {
-            e.map_or("Audio playback failed".to_string(), |e| {
-                format!("Audio playback failed: {e:?}")
-            })
-        })?;
+        })
+        .map_err(|e| format!("Audio playback failed: {e}"))?;
         self.start_ms = from_ms;
         self.playing = true;
         Ok(())
+    }
+
+    /// Waits up to 500 ms for the output to render: a timed start throws until the engine has
+    /// seen an IO cycle, which a just-started or just-woken device may not have had yet.
+    fn wait_for_io(&self) {
+        // SAFETY: worker-thread object; lastRenderTime is nil or invalid until the first render.
+        let sample = || unsafe {
+            let output: &AVAudioNode = &self.engine.outputNode();
+            output
+                .lastRenderTime()
+                .filter(|t| t.isSampleTimeValid())
+                .map(|t| t.sampleTime())
+        };
+        let first = sample();
+        for _ in 0..50 {
+            if matches!((first, sample()), (Some(a), Some(b)) if b != a) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
 
@@ -260,15 +280,15 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// AVFoundation reports misuse by throwing (the harness died that way on an audio device
-    /// change, 2026-10-27); `catch` must turn it into an error, never abort the app. A player
-    /// node outside any engine throws on play.
+    /// AVFoundation reports misuse by throwing; `catch` must turn it into an error that names the
+    /// method that threw and the Rust line that caught it, never abort the app. A player node
+    /// outside any engine throws on play.
     #[test]
     fn objc_exception_is_an_error() {
         // SAFETY: a fresh node on the test thread; the throw is what is tested.
-        let thrown = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
-            AVAudioPlayerNode::new().play()
-        }));
-        assert!(thrown.is_err());
+        let thrown = crate::trace::catch(|| unsafe { AVAudioPlayerNode::new().play() });
+        let error = thrown.unwrap_err();
+        assert!(error.contains("in -[AVAudioPlayerNode play]"), "{error}");
+        assert!(error.contains("(playback_macos.rs:"), "{error}");
     }
 }

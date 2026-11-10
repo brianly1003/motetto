@@ -88,7 +88,7 @@ impl Server {
             child.id(),
             std::path::Path::new(command.get_program()),
         ) {
-            eprintln!("Motetto: no watcher for the speech server: {e}");
+            crate::trace::error(&format!("no watcher for the speech server: {e}"));
         }
         let empty_vad = Arc::new(AtomicBool::new(false));
         let detected = empty_vad.clone();

@@ -39,7 +39,7 @@ pub fn run(
     // SAFETY: the engine and its input node are made and used only on this thread; the tap is
     // installed before the engine starts and removed before it stops, and the block outlives it.
     // With no input device AVAudioEngine throws instead of failing: caught, and the meter hides.
-    let made = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
+    let made = crate::trace::catch(|| unsafe {
         let engine = AVAudioEngine::new();
         let input = engine.inputNode();
         let format = input.outputFormatForBus(0);
@@ -56,7 +56,7 @@ pub fn run(
                 Err(error.localizedDescription().to_string())
             }
         }
-    }));
+    });
     let engine = match made {
         Ok(Ok(engine)) => engine,
         Ok(Err(error)) => {
@@ -72,9 +72,9 @@ pub fn run(
     let _ = stop.recv();
     // SAFETY: the same thread that started the engine removes its tap and stops it; a throw
     // here (the device vanished) is caught so the thread still ends.
-    let _ = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
+    let _ = crate::trace::catch(|| unsafe {
         engine.inputNode().removeTapOnBus(0);
         engine.stop();
-    }));
+    });
     level.store(0, Ordering::Relaxed);
 }

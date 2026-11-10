@@ -265,15 +265,15 @@ pub fn run(
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     };
-    let result = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+    let result = crate::trace::catch(|| {
         // Finals too: at a pause Apple often adds or corrects the last words only there.
         follow(&audio, locale, &hint, stop, &mut |heard, _, _| {
             if let Some(window) = app.get_webview_window("prompter") {
                 let _ = window.emit("motetto://follow-heard", heard);
             }
         })
-    }))
-    .unwrap_or_else(|e| Err(format!("Apple recognition stopped: {e:?}")));
+    })
+    .unwrap_or_else(|e| Err(format!("Apple recognition stopped: {e}")));
     motetto_core::mics::unlisten(listener, id);
     result
 }

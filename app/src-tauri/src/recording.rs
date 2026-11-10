@@ -401,7 +401,7 @@ impl Awake {
             .stderr(std::process::Stdio::null())
             .spawn();
         if let Err(e) = &child {
-            eprintln!("Motetto: cannot keep the Mac awake while recording: {e}");
+            crate::trace::error(&format!("cannot keep the Mac awake while recording: {e}"));
         }
         Self(child.ok())
     }

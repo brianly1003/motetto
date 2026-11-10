@@ -170,6 +170,7 @@ pub fn run() {
             crate::settings_system::open_logs_folder
         ])
         .setup(|app| {
+            crate::trace::start(app.path().app_log_dir()?);
             // Clip previews from a run that ended with the panel open.
             crate::clip::clear_previews(app.handle());
             let config = app.path().app_config_dir()?;
@@ -219,12 +220,12 @@ pub fn run() {
                 &app.state::<crate::settings::Store>().get()?.keep_audio,
                 &app.state::<crate::settings::Store>().get()?.keep_video,
             ) {
-                eprintln!("Motetto couldn't apply audio retention: {error}");
+                crate::trace::error(&format!("Motetto couldn't apply audio retention: {error}"));
             }
             crate::meeting_actions::purge_daily(root.clone());
             // Nothing records or imports yet at launch, so any busy meeting was cut off by a quit or crash.
             if let Err(e) = library::recover_interrupted(&root) {
-                eprintln!("Motetto: couldn't check for interrupted meetings: {e}");
+                crate::trace::error(&format!("couldn't check for interrupted meetings: {e}"));
             }
             app.manage(crate::my_notes::Store::new(root.clone()));
             app.manage(crate::live::State::default());
@@ -406,7 +407,7 @@ pub fn run() {
             if !app.state::<crate::settings::Store>().get()?.onboarding_done {
                 // A window that can't open mustn't stop the app; the tray still offers setup.
                 if let Err(error) = crate::setup::open_window(app.handle()) {
-                    eprintln!("Motetto: couldn't open setup: {error}");
+                    crate::trace::error(&format!("couldn't open setup: {error}"));
                 }
                 crate::setup::resume(app.handle());
             }

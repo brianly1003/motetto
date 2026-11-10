@@ -48,6 +48,7 @@ mod setup;
 mod shortcuts;
 mod sidecars;
 mod speech;
+mod trace;
 mod transcript_edits;
 mod translations;
 mod tray;

@@ -40,7 +40,7 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), String> {
                     .change(|s| s.onboarding_step = 2);
                 // Rebuilt, so a hidden window opens at step 2 instead of the page it had.
                 if let Err(error) = crate::setup::open_setup(handle.clone()) {
-                    eprintln!("Motetto: couldn't open setup: {error}");
+                    crate::trace::error(&format!("couldn't open setup: {error}"));
                 }
             } else if event.action_id() == "tap" {
                 // The library remains a fallback when the platform cannot deliver action buttons.
@@ -67,7 +67,7 @@ pub fn send(app: &tauri::AppHandle, title: &str, body: &str) {
 pub fn quiet(app: &tauri::AppHandle, title: &str, body: &str) -> bool {
     let result = app.notification().builder().title(title).body(body).show();
     if let Err(error) = &result {
-        eprintln!("Motetto notification: {error}");
+        crate::trace::error(&format!("notification: {error}"));
     }
     result.is_ok()
 }
@@ -82,7 +82,7 @@ pub fn setup_slow(app: &tauri::AppHandle, title: &str) {
         .extra("open", "setup")
         .show()
     {
-        eprintln!("Motetto notification: {error}");
+        crate::trace::error(&format!("notification: {error}"));
     }
 }
 
@@ -99,7 +99,7 @@ pub fn event(app: &tauri::AppHandle, event: &Event) {
                 .extra("meeting_id", meeting_id)
                 .show()
             {
-                eprintln!("Motetto notification: {error}");
+                crate::trace::error(&format!("notification: {error}"));
                 desktop::show(app);
             }
         }

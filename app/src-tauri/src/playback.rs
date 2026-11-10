@@ -68,14 +68,15 @@ impl Player {
     /// abort the app: a throw closes the player and comes back as an error.
     #[cfg(target_os = "macos")]
     fn run(&mut self, command: Command) -> Result<f64, String> {
-        objc2::exception::catch(std::panic::AssertUnwindSafe(|| self.command(command)))
-            .unwrap_or_else(|e| {
-                // Stopping a broken engine can throw too.
-                let _ = objc2::exception::catch(std::panic::AssertUnwindSafe(|| self.open = None));
-                Err(e.map_or("Audio playback failed".to_string(), |e| {
-                    format!("Audio playback failed: {e:?}")
-                }))
-            })
+        crate::trace::catch(|| {
+            self.command(command)
+                .inspect_err(|e| crate::trace::error(e))
+        })
+        .unwrap_or_else(|e| {
+            // Stopping a broken engine can throw too.
+            let _ = crate::trace::catch(|| self.open = None);
+            Err(format!("Audio playback failed: {e}"))
+        })
     }
     #[cfg(target_os = "macos")]
     fn command(&mut self, command: Command) -> Result<f64, String> {

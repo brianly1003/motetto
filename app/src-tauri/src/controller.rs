@@ -641,7 +641,7 @@ impl<H: Host> Engine<H> {
                     match self.host.readiness(false) {
                         Ok(readiness) => self.apply(Command::ReadinessChanged(readiness), now),
                         Err(e) => {
-                            eprintln!("Motetto: not asking about the {app} call: {e}");
+                            crate::trace::error(&format!("not asking about the {app} call: {e}"));
                             return;
                         }
                     }

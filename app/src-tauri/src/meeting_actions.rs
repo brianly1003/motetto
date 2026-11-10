@@ -98,7 +98,7 @@ pub(crate) fn purge_daily(root: std::path::PathBuf) {
     std::thread::spawn(move || {
         loop {
             if let Err(error) = now_ms().and_then(|now| purge_expired(&root, now)) {
-                eprintln!("Motetto: {error}");
+                crate::trace::error(&error.to_string());
             }
             std::thread::sleep(std::time::Duration::from_secs(86_400));
         }

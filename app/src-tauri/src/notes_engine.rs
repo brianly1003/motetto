@@ -58,7 +58,9 @@ pub fn configure(data_dir: &Path) {
     };
     let bundled = tools::bundled("llama-server");
     if let Some(pid) = bundled.and_then(|b| left_behind(&text, &b, running_program)) {
-        eprintln!("Motetto: stopping notes engine {pid} left by an earlier run");
+        crate::trace::error(&format!(
+            "stopping notes engine {pid} left by an earlier run"
+        ));
         let _ = std::process::Command::new("kill")
             .arg(pid.to_string())
             .status();
@@ -208,7 +210,7 @@ fn start(model: &str) -> Result<Server, Failure> {
     // Also stopped if Motetto dies without quitting (crash, Force Quit); the pid file is the
     // fallback for the next launch.
     if let Err(e) = tools::stop_with_parent(child.id(), Path::new(command.get_program())) {
-        eprintln!("Motetto: no watcher for the notes engine: {e}");
+        crate::trace::error(&format!("no watcher for the notes engine: {e}"));
     }
     let (sender, ports) = std::sync::mpsc::channel();
     for stream in [

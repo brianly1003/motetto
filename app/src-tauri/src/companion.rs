@@ -253,7 +253,9 @@ pub fn keep_tucked_on_screen(window: &tauri::Window) {
         return;
     };
     if let Err(error) = keep_inside(&webview) {
-        eprintln!("Couldn't keep recording controls on screen: {error}");
+        crate::trace::error(&format!(
+            "Couldn't keep recording controls on screen: {error}"
+        ));
     }
 }
 

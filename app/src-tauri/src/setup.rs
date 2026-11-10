@@ -395,7 +395,7 @@ pub fn resume(app: &tauri::AppHandle) {
             inner.tier_run = true;
         }
         if let Err(error) = kick(app) {
-            eprintln!("Motetto: couldn't resume setup: {error}");
+            crate::trace::error(&format!("couldn't resume setup: {error}"));
         }
     }
 }
