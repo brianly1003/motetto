@@ -175,6 +175,7 @@ pub fn spawn(
                                     // The red frame outlines a window or an area while it records.
                                     crate::rec_frame::set(picture.as_ref().map(|p| p.target));
                                     let part_began = std::time::Instant::now();
+                                    let _awake = Awake::hold(picture.is_some());
                                     let result = motetto_core::capture::record_with_levels(
                                         base,
                                         stop.clone(),
@@ -373,6 +374,39 @@ fn picture_preset(
             .and_then(|s| s.picture.as_deref())
             .unwrap_or(&settings.screen_preset),
     )
+}
+
+/// Keeps the Mac awake while a part records: idle sleep would stop capture partway through a
+/// long call, and with a picture, display sleep would stop its frames. macOS's own `caffeinate`,
+/// which exits by itself if Motetto dies (`-w`); dropping this ends it.
+#[cfg(target_os = "macos")]
+struct Awake(Option<std::process::Child>);
+
+#[cfg(target_os = "macos")]
+impl Awake {
+    fn hold(display: bool) -> Self {
+        let child = std::process::Command::new("/usr/bin/caffeinate")
+            .arg(if display { "-di" } else { "-i" })
+            .args(["-w", &std::process::id().to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Err(e) = &child {
+            eprintln!("Motetto: cannot keep the Mac awake while recording: {e}");
+        }
+        Self(child.ok())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Awake {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 /// The tracks a setup records, as (mic, system); without a setup both, as before.
@@ -648,6 +682,28 @@ fn live_captions(settings: Option<&crate::settings::Settings>) -> bool {
 mod tests {
     use super::*;
     use motetto_core::events::Stop;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_recording_part_keeps_the_mac_awake_until_it_ends() {
+        let running = |pid: u32| {
+            std::process::Command::new("ps")
+                .args(["-o", "comm=", "-p", &pid.to_string()])
+                .output()
+                .is_ok_and(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim()
+                        .ends_with("caffeinate")
+                })
+        };
+        for display in [false, true] {
+            let awake = Awake::hold(display);
+            let pid = awake.0.as_ref().expect("caffeinate started").id();
+            assert!(running(pid), "caffeinate is not running");
+            drop(awake);
+            assert!(!running(pid), "caffeinate outlived the part");
+        }
+    }
 
     #[test]
     fn live_captions_follow_the_setting() {
