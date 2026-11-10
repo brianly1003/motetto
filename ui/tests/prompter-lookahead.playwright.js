@@ -1,4 +1,4 @@
-// Following your voice never runs out of words, and the text only moves when you near the end
+// Following your voice never runs out of words (a short paragraph's rows fill with the next one), and the text only moves when you near the end
 // of the bottom row: never when the highlight (which trails your voice) enters a row.
 async (page) => {
   const result = [];
@@ -26,7 +26,8 @@ async (page) => {
     await p.waitForSelector('[data-word]');
     const visible = () => p.locator('.ptln.cur').evaluate(el => {
       const r = el.getBoundingClientRect();
-      return [...el.querySelectorAll('[data-word]')].filter(w => { const b = w.getBoundingClientRect(); return getComputedStyle(w).visibility !== 'hidden' && b.top >= r.top - 1 && b.bottom <= r.bottom + 1; }).map(w => w.textContent);
+      // The paragraph's words, then the next paragraph flowing on in the same rows.
+      return [...el.querySelectorAll('[data-word], [data-after]')].filter(w => { const b = w.getBoundingClientRect(); return getComputedStyle(w).visibility !== 'hidden' && b.top >= r.top - 1 && b.bottom <= r.bottom + 1; }).map(w => w.textContent);
     });
     // Say the paragraph a few words at a time; after each step a word beyond the next one shows.
     const said = 'good morning team today i want to demo how our infrastructure handles a critical security challenge insider threats and data sabotage in real world scenarios an employee preparing to leave the company might attempt to destroy or corrupt critical database records while their access is still'.split(' ');
@@ -48,7 +49,9 @@ async (page) => {
       if (n < said.length - 3 && after.length < 2) throw Error(`${theme}: only ${after.length} word(s) visible after "${now}"`);
       // The next line always shows what comes next, lighter and smaller than the rows you read.
       const next = await p.locator('.ptahead').evaluate(e => ({ text: e.textContent, shown: getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none', size: parseFloat(getComputedStyle(e).fontSize) }));
-      if (!next.shown || !next.text.trim()) throw Error(`${theme}: no next line after "${said[n - 1]}"`);
+      // At the paragraph's end the next one may instead flow on in the rows themselves.
+      const flowing = await p.locator('.ptln.cur').evaluate(el => { const r = el.getBoundingClientRect(); return [...el.querySelectorAll('[data-after]')].some(w => { const b = w.getBoundingClientRect(); return b.top >= r.top - 1 && b.bottom <= r.bottom + 1; }); });
+      if (!flowing && (!next.shown || !next.text.trim())) throw Error(`${theme}: no next line after "${said[n - 1]}"`);
       if (next.size >= 22) throw Error(`${theme}: the next line is not smaller (${next.size}px)`);
       if (/^their/.test(now)) await p.screenshot({ path: `.playwright-out/prompter-lookahead-${theme}.png` });
     }

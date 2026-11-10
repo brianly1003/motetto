@@ -33,8 +33,8 @@ const ROLL_AT = 3;
 
 /**
  * What the strip shows while you read `word`, given the first word of the rows shown before
- * (`start`). The text keeps still while you read; only when the highlight is near the end of the
- * bottom row does it roll down one row, so the next line is there as your eyes reach it.
+ * (`start`). The text keeps still while you read; only when the highlight is near the end of a
+ * row does it roll down one row, so the row after it is there as your eyes reach it.
  * `from`/`to` are the first shown word and the first hidden one after them (the row above is
  * hidden: clipped, its letters' tails would show); `last` means the paragraph's end is shown.
  */
@@ -43,7 +43,10 @@ export function readingWindow(rows: ReadingRow[], perPage: number, word: number,
   const next = rows[row + 1];
   const need = perPage > 1 && next && next.word - word <= ROLL_AT ? row + 1 : row;
   const before = start === undefined ? 0 : Math.max(0, rows.findLastIndex(r => r.word <= start));
-  const first = Math.min(row, Math.max(before, need - perPage + 1));
+  // The row coming up lands second from the top, not at the bottom: with three rows you see one
+  // said row, the one you read and a whole row ahead, so a highlight that trails your voice
+  // never leaves you reading past the last shown word.
+  const first = Math.min(row, Math.max(before, need - Math.min(1, perPage - 1)));
   const shown = Math.min(perPage, rows.length - first);
   return {
     page: Math.floor(row / perPage), total: Math.ceil(rows.length / perPage),

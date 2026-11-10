@@ -2,7 +2,7 @@
 // same computed styles for every part (the window's shadow is the system's, so not compared).
 async (page) => {
   const text = "# Opening (1m)\nThanks for having us. In the next fifteen minutes I'll show how Team X gets a weekly report in under a minute.\n\nThe short version: fewer spreadsheets, and numbers everyone trusts.\n\n# Demo (5m)\nThis is the reports page. These three cards are live numbers from the last seven days.\n\n[click New report] Let's make a new report for the sales team.\n\nI pick the metrics, and the chart builds itself while I talk.\n\n# Pricing (3m)\nPricing is per workspace, not per seat, so the whole team can join.\n\n# Questions (6m)\nThat's the tour. What would you like to see in more detail?";
-  const parts = ['.pt', '.pth', '.ptgrab', '.ptchip', '.ptchip b', '.ptreh', '.ptreh > i', '.ptreh button', '.ptpace', '.ptpace > i', '.ptvis .h', '.ptvis .s', '.ptedit', '.ptclose', '.ptlines', '.ptln.prev', '.ptln.cur', '.ptln.cur [data-word]', '.ptsaid', '.ptnow', '.ptcue', '.ptln.ptahead', '.ptfoot', '.ptnav button', '.ptpage', '.ptprog', '.ptprog > i'];
+  const parts = ['.pt', '.pth', '.ptgrab', '.ptchip', '.ptchip b', '.ptchip .chev', '.ptreh', '.ptreh > i', '.ptreh button', '.ptpace', '.ptpace > i', '.ptvis .h', '.ptvis .s', '.ptedit', '.ptclose', '.ptlines', '.ptln.prev', '.ptln.cur', '.ptln.cur [data-word]', '.ptsaid', '.ptnow', '.ptcue', '.ptln.ptahead', '.ptfoot', '.ptnav button', '.ptpage', '.ptprog', '.ptprog > i'];
   const props = ['font-family', 'font-size', 'font-weight', 'line-height', 'color', 'background-color', 'border-top', 'border-radius', 'padding', 'gap', 'letter-spacing', 'text-decoration-line', 'opacity'];
   const styles = p => p.evaluate(([parts, props]) => Object.fromEntries(parts.map(s => {
     const el = document.querySelector(s); if (!el || !el.getClientRects().length) return [s, null];
@@ -52,7 +52,7 @@ async (page) => {
     }
     // The chip opens the script menu (▾) only when presenting: a rehearsal belongs to one script.
     for (const [who, p] of [['mockup', m], ['app', a]])
-      if (/▾/.test(await p.locator('.ptchip').first().innerText()) === rehearsing) diff.push(`${who}: chip ▾ ${rehearsing ? 'while rehearsing' : 'missing'}`);
+      if ((await p.locator('.ptchip').first().locator('.chev').count() > 0) === rehearsing) diff.push(`${who}: chip ▾ ${rehearsing ? 'while rehearsing' : 'missing'}`);
     // No focus rings anywhere, the mockup's included.
     const ring = p => p.locator('.ptnav button').first().evaluate(b => { b.disabled = false; b.focus({ focusVisible: true }); const cs = getComputedStyle(b); return `${cs.boxShadow} | outline ${cs.outlineStyle}`; });
     const [mockRing, appRing] = [await ring(m), await ring(a)];

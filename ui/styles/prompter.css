@@ -23,7 +23,7 @@ html:has(.pt), body:has(.pt), html:has(.pttuck), body:has(.pttuck) { background:
 button.ptchip { border: 0; font: inherit; white-space: nowrap; cursor: pointer; flex: 0 1 auto; }
 button.ptchip:hover { background: var(--line); }
 .ptchip b { font-weight: 500; }
-.ptchip .chev { vertical-align: -2px; margin-left: 3px; }
+.ptchip .chev { vertical-align: -2px; color: var(--ink-2); }
 .ptmenu { position: absolute; top: 30px; left: 34px; z-index: 5; width: 230px; max-height: calc(100vh - 40px); overflow: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 5px; display: grid; gap: 1px; font-size: 12.5px; }
 .ptmenu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--ink-1); display: flex; gap: 8px; align-items: center; font: inherit; cursor: pointer; }
 .ptmenu button:hover { background: var(--surface-2); }
@@ -41,28 +41,38 @@ button.ptchip:hover { background: var(--line); }
 .ptvis.checking[aria-checked="false"] .h { color: var(--attention); }
 .ptedit { flex: none; border: 0; background: transparent; color: var(--ink-2); border-radius: 5px; padding: 0 6px; height: 18px; font: inherit; cursor: pointer; }
 .ptedit:hover { background: var(--surface-3); color: var(--ink-1); }
-.ptlines { margin-top: 8px; font-family: var(--font-doc); display: grid; gap: 4px; }
-.ptln { line-height: 1.3; color: var(--ink-3); font-size: calc(var(--pt-size, 22px) * .68); }
+/* The reading text is the narrow UI face, not the book serif: about a third more words per row,
+   so what you are about to say is already on screen while the highlight catches up. */
+.ptlines { margin-top: 6px; font-family: var(--font-ui); letter-spacing: -.011em; display: grid; gap: 3px; }
+.ptln { line-height: 1.28; color: var(--ink-3); font-size: calc(var(--pt-size, 22px) * .68); }
 .ptln.prev { opacity: .45; }
 /* The lines around stay one line; the current one at most three, so nothing runs off the strip. */
 .ptln:not(.cur) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ptln.cur { overflow: hidden; overflow-anchor: none; flex: none; }
 .pttext { position: relative; padding: 2px 0; }
-.pttext [data-word] { display: inline-block; vertical-align: top; }
+.pttext :is([data-word], [data-after]) { display: inline-block; vertical-align: top; }
+/* The paragraphs still to come, flowing on in the rows: readable, a step quieter than the one you
+   are on, after a small pilcrow. */
+.ptln.cur [data-after] { color: color-mix(in srgb, var(--ink-1) 60%, transparent); font-weight: 400; }
+.ptln.cur .ptpara { color: var(--ink-3); font-size: .7em; margin-top: .3em; }
 .pt.tight .ptln.prev { display: none; }
-.ptln.cur { color: var(--ink-1); font-size: var(--pt-size, 22px); }
+.ptln.cur { color: var(--ink-1); font-size: var(--pt-size, 22px); font-weight: 500; }
 .ptln.cur .ptsaid { color: var(--voice-me); }
-.ptln.cur .ptnow { color: var(--voice-me); text-decoration: underline 2px; text-underline-offset: 4px; }
+/* The word being said is underlined on a soft tint (a ring, so it never pushes the words around). */
+.ptln.cur .ptnow { color: var(--voice-me); border-radius: 4px; background: color-mix(in srgb, var(--voice-me) 14%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--voice-me) 14%, transparent); text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 /* What comes next, readable while the highlight catches up: lighter, a little smaller, and
    fading toward the bottom, so it reads as "next" and never competes with the current rows. */
-.ptln.cur [data-word] { transition: color .3s ease-out; }
-.ptln.ptahead { min-height: 1.3em; font-size: calc(var(--pt-size, 22px) * .82); color: color-mix(in srgb, var(--ink-3) 80%, transparent); text-overflow: clip;
+.ptln.cur [data-word] { transition: color .3s ease-out, background-color .3s ease-out, box-shadow .3s ease-out; }
+.ptln.ptahead { min-height: 1.28em; font-weight: 400; font-size: calc(var(--pt-size, 22px) * .82); color: color-mix(in srgb, var(--ink-3) 80%, transparent); text-overflow: clip;
   -webkit-mask-image: linear-gradient(180deg, #000 0, #000 30%, rgba(0, 0, 0, .12) 100%); mask-image: linear-gradient(180deg, #000 0, #000 30%, rgba(0, 0, 0, .12) 100%); }
 /* The paragraph before shows its end (what you just said), cut at the start. */
 .ptln.prev { direction: rtl; text-align: left; }
-.ptcue { font-family: var(--font-ui); font-size: .72em; border: 1px solid var(--line-2); border-radius: 5px; padding: 0 .4em; color: var(--voice-them); white-space: nowrap; }
-.ptfoot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.ptprog { flex: 1; height: 2px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+/* A cue is a small tag on the row, not a word: it takes little width and no extra height. */
+.ptcue { font-family: var(--font-ui); font-size: .6em; font-weight: 500; letter-spacing: 0; line-height: 1.7; margin-top: .2em; border-radius: var(--radius-pill); padding: 0 .6em; background: color-mix(in srgb, var(--voice-them) 12%, transparent); color: var(--voice-them); white-space: nowrap; }
+.ptfoot { display: flex; align-items: center; gap: 10px; margin-top: 4px; min-width: 0; }
+/* Progress is a hairline along the strip's bottom edge, leaving the footer to the controls. */
+.ptprog { position: absolute; left: 14px; right: 14px; bottom: 4px; height: 2px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+.ptfoot .ptprog + .ptfollow, .ptfoot .ptpace { margin-left: auto; }
 .ptprog i { display: block; height: 100%; background: var(--voice-me); transition: width .3s; }
 .ptfollow { font-size: 11px; color: var(--ink-3); }
 .ptfollow.wait { color: var(--attention); }
@@ -85,7 +95,10 @@ button.ptchip:hover { background: var(--line); }
 .pttuck svg { width: 14px; height: 14px; }
 @media (prefers-reduced-motion: reduce) { .pt, .ptprog i { transition: none; } }
 .ptreh { display: inline-flex; align-items: center; gap: 6px; color: var(--rec); min-width: 0; }
-.ptreh i { width: 7px; height: 7px; border-radius: 50%; background: var(--rec); }
+.ptreh i { width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: ptlive 1.6s ease-in-out infinite; }
+/* A ring that breathes out from the dot (not its opacity, which stays readable). */
+@keyframes ptlive { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rec) 45%, transparent); } to { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .ptreh i { animation: none; } }
 .ptreh button { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 12px; font-weight: 500; border: 1px solid var(--line-2); background: var(--surface-1); color: inherit; border-radius: 7px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
 
 .ptclose { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 5px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
@@ -103,18 +116,16 @@ button.ptchip:hover { background: var(--line); }
 .ptpage { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .ptfollow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Rehearsal keeps its microphone announcement and Stop beside the share visibility switch. */
-.pt.rehearsing .pth { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 24px 24px; gap: 2px 8px; }
-.pt.rehearsing .ptgrab { grid-area: 1 / 1; }
-.pt.rehearsing :is(.ptchip, .ptedhint) { grid-area: 1 / 2; }
-.pt.rehearsing .ptpace { grid-area: 1 / 3; margin-left: 0; justify-self: end; }
-.pt.rehearsing .ptedit { grid-area: 1 / 4; margin-left: 0; justify-self: end; }
-.pt.rehearsing .ptclose { grid-area: 1 / 5; margin-left: 0; justify-self: end; }
-.pt.rehearsing .ptreh { grid-area: 2 / 1 / 3 / 3; }
-.pt.rehearsing .ptvis { grid-area: 2 / 3 / 3 / 6; margin-left: 0; justify-self: end; }
-.pt.col.rehearsing :is(.ptchip, .ptedhint) { grid-column: 2 / 4; }
-.pt.col.rehearsing .ptreh { grid-area: 2 / 1 / 3 / 6; }
-.pt.col.rehearsing .ptpace { grid-area: 3 / 1 / 4 / 3; justify-self: start; }
-.pt.col.rehearsing .ptvis { grid-row: 3 / 4; }
+/* Rehearsal: one header row (handle, the mic announcement with Stop, the share switch, edit,
+   close); the script chip and the pace sit in the footer, so the text gets a third row. */
+.pt.rehearsing .ptreh { flex: 1 1 auto; }
+.pt.rehearsing .ptvis { margin-left: auto; }
+.pt.rehearsing .ptedit, .pt.rehearsing .ptclose { margin-left: 0; }
+.ptfoot .ptchip { flex: 0 1 auto; background: transparent; padding: 0; font-size: 11px; color: var(--ink-2); }
+.ptfoot .ptpace { flex: none; font-size: 11px; color: var(--ink-2); }
+.ptfoot .ptpace + .ptfollow { flex: 0 1 auto; }
+.pt.col.rehearsing .pth { flex-wrap: wrap; }
+.pt.col.rehearsing .ptreh { order: 2; flex-basis: 100%; }
+.pt.col .ptfoot .ptchip { display: none; }
 
 .pt.noahead .ptahead { display: none; }

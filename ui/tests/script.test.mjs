@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseScript, follow, pace, withLine, nameFrom} from '../lib/script.ts';
+import {parseScript, follow, glide, pace, toPause, withLine, nameFrom} from '../lib/script.ts';
 const demo = parseScript('# Opening (1m)\nThanks for having us today.\n\nThe short version is simple.\n\n# Demo (5m)\nThis is the reports page.\n\n[click New] Make one for sales.\n\nPick the metrics and watch.');
 test('sections, cues and lines',()=>{
  const s = parseScript('# Demo (5m)\nThis is it.\n\n[click New] Make one.');
@@ -152,4 +152,37 @@ test('words you skip are passed when 2 after them line up',()=>{
 });
 test('2 words further than 5 ahead do not move it',()=>{
  assert.deepEqual(follow(skip.lines, onEmp, 'the pipeline'), {...onEmp, waiting: true});
+});
+
+test('glide: the highlight moves on at your pace between what the recogniser hears',()=>{
+ // 3 words a second for 3 s, last moved 1 s ago: 3 words, held at 2.
+ const steady = [0, 1000, 2000, 3000].map(t => ({t, i: t / 1000 * 3}));
+ assert.equal(glide(steady, 3900, 4000, false), 2);
+ // Just moved: where you were heard.
+ assert.equal(glide(steady, 3000, 3000, false), 0);
+ assert.equal(glide(steady, 3000, 3400, false), 1);
+ // Too little to measure (under 2 s): 150 words a minute, 2.5 x 0.4 s = 1.
+ assert.equal(glide([{t: 0, i: 0}, {t: 800, i: 2}], 800, 1200, false), 1);
+ // A burst from the recogniser counts as 4 words a second at most: 4 x 0.25 s = 1.
+ assert.equal(glide([{t: 0, i: 0}, {t: 2000, i: 30}], 2000, 2250, false), 1);
+});
+test('glide: never on one stray match, a pause or an ad-lib',()=>{
+ const steady = [0, 1000, 2000, 3000].map(t => ({t, i: t / 1000 * 3}));
+ assert.equal(glide([], 0, 0, false), 0);
+ assert.equal(glide([{t: 0, i: 5}], 0, 100, false), 0);
+ assert.equal(glide(steady, 2000, 4000, false), 0);
+ assert.equal(glide(steady, 3900, 4000, true), 0);
+ assert.equal(glide(steady, 9000, 9100, false), 0);
+});
+test('toPause: the glide waits at the end of a sentence or clause',()=>{
+ const t = 'Access privileges are still active. Our objective today is to show how, quickly, we detect it.';
+ // Next to say "privileges" (1): up to "active" (4).
+ assert.equal(toPause(t, 1), 3);
+ // Just said "active.": "Our" starts a new sentence, so nothing until the voice is heard in it.
+ assert.equal(toPause(t, 5), 0);
+ // Inside "Our objective today is to show how,": up to "how" (11).
+ assert.equal(toPause(t, 6), 5);
+ // A cue is not said and a CJK full stop is a pause too.
+ assert.equal(toPause('[click] Make one more. Then', 1), 1);
+ assert.equal(toPause('我们开始。今天', 1), 2);
 });

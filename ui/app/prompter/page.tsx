@@ -1,11 +1,11 @@
 "use client";
 // The script prompter strip (SPEC 14.3, DESIGN 4.18, mockup Script screen). Rust owns the window:
 // it lets the mouse through except over the rectangles this page reports, and runs the share check.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as ipc from "@/lib/ipc";
 import { useSession } from "@/lib/useSession";
 import { strings as s } from "@/lib/strings";
-import { follow, keyLabel, pace, parseScript, tokens, type At } from "@/lib/script";
+import { follow, glide, keyLabel, pace, parseScript, toPause, tokens, type At, type Mark } from "@/lib/script";
 import { scriptWriter } from "@/lib/scriptWriter";
 import { readingPages, readingRows, readingWindow, type ReadingPage } from "@/lib/prompter";
 import type { Heard } from "@/lib/bindings/Heard";
@@ -55,8 +55,11 @@ export default function Prompter() {
   const shownWords = useRef<{ line: number; words: Set<number> } | null>(null);
   const nextRef = useRef<HTMLDivElement>(null);
   function move(direction: number) {
+    byHand();
+    // From the passage on screen, which the glide may have reached ahead of your voice.
+    const from = shownWord;
     setAt(a => {
-      const index = Math.max(0, pages.current.findLastIndex(p => p.word <= a.word));
+      const index = Math.max(0, pages.current.findLastIndex(p => p.word <= (a.line === at.line ? from : a.word)));
       const next = pages.current[index + direction];
       // Stepping by hand shows that passage exactly, from its first row.
       if (next) { shownFrom.current = { line: a.line, word: next.word }; return { ...a, word: next.word }; }
@@ -83,7 +86,7 @@ export default function Prompter() {
     const list = await ipc.scriptsList().catch(() => []);
     const text = await ipc.scriptRead(chosen).catch(() => "");
     writer.current = scriptWriter(chosen, text, (Array.isArray(list) ? list : []).find(info => info.name === chosen)?.modified_ms ?? null, ipc.scriptSave);
-    setName(chosen); setText(text); setAt({ line: 0, word: 0 });
+    setName(chosen); setText(text); byHand(); setAt({ line: 0, word: 0 });
     loading.current = false;
   }
   useEffect(() => {
@@ -113,6 +116,7 @@ export default function Prompter() {
   const setKey = useRef<(key: string) => void>(() => {});
   setKey.current = key => {
     if (key === "Down" || key === "Up") move(key === "Down" ? 1 : -1);
+    if (key === "ShiftDown") byHand();
     if (key === "ShiftDown") setAt(a => { const next = script.sections.find(x => x.first > a.line); return next ? { line: next.first, word: 0 } : a; });
     if (key === "Backslash") setPaused(p => !p);
     if (key === "Equal" || key === "Minus") setSize(v => {
@@ -124,16 +128,45 @@ export default function Prompter() {
   // Following your voice: Rust sends what it heard in the last 4 s of the mic (follow.rs),
   // with the next script words as its hint.
   const [heard, setHeard] = useState<Heard | null>(null);
+  // `at` is where your voice was heard (it drives following, hints and keys); the highlight shows
+  // `lead` words further, where you most likely are now.
+  const [lead, setLead] = useState(0);
+  const trail = useRef<Mark[]>([]);
+  const heardAt = useRef({ text: "", t: 0 });
+  // A move by hand starts over: no glide until your voice is followed again.
+  function byHand() { setLead(0); trail.current = []; }
+  const offsets = useMemo(() => { let n = 0; return lines.map(l => { const o = n; n += l.words.length; return o; }); }, [lines]);
+  const shownWord = Math.min(at.word + lead, Math.max(at.word, (lines[at.line]?.words.length ?? 1) - 1));
   useEffect(() => {
     const off = ipc.listen<Heard>("motetto://follow-heard", setHeard);
     return () => { void off.then(fn => fn()); };
   }, []);
   useEffect(() => {
-    if (heard) setLastHeard(Date.now());
+    const now = Date.now();
+    if (heard) setLastHeard(now);
     if (!heard || paused || editing || !lines.length) return;
     setSlow(heard.inference_ms > 2000);
-    setAt(a => { const next = follow(lines, a, heard.text); setWaiting(next.waiting); return { line: next.line, word: next.word }; });
+    if (heard.text !== heardAt.current.text) heardAt.current = { text: heard.text, t: now };
+    const next = follow(lines, at, heard.text);
+    setWaiting(next.waiting);
+    if (next.line === at.line && next.word === at.word) return;
+    // The highlight never steps back: words it glided past stay said until your voice passes them.
+    setLead(next.line === at.line ? Math.max(0, at.word + lead - next.word) : 0);
+    trail.current = [...trail.current.filter(p => now - p.t <= 8000), { t: now, i: (offsets[next.line] ?? 0) + next.word }];
+    setAt({ line: next.line, word: next.word });
   }, [heard]);
+  // Between what the recogniser sends, the highlight glides on at your reading pace, as in the
+  // mockup: at most 2 words past the last one heard and never past the end of the sentence or
+  // clause you are in (you pause there; the voice moves you on).
+  useEffect(() => {
+    if (paused || editing) return;
+    const last = toPause(lines[at.line]?.text ?? "", at.word);
+    const tick = setInterval(() => {
+      const ahead = Math.min(last, glide(trail.current, heardAt.current.t, Date.now(), waiting));
+      setLead(l => ahead > l ? ahead : l);
+    }, 100);
+    return () => clearInterval(tick);
+  }, [paused, editing, waiting, at.line, at.word, lines]);
   useEffect(() => {
     // Spoken words only (no cues), from where you are.
     const ahead = lines.slice(at.line, at.line + 3).flatMap(l => l.words).slice(at.word).join(" ");
@@ -204,7 +237,7 @@ export default function Prompter() {
       const rows = Math.max(1, Math.min(3, Math.floor((innerHeight - fixed - nextLine - (tight ? 0 : prevLine)) / line)));
       pages.current = readingPages(text, rows);
       const kept = shownFrom.current?.line === at.line ? shownFrom.current.word : undefined;
-      const view = readingWindow(readingRows(text), rows, at.word, line, kept);
+      const view = readingWindow(readingRows(text), rows, shownWord, line, kept);
       shownFrom.current = { line: at.line, word: view.start };
       const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
       // Words coming into the rows you read rise in one after another; a paragraph's first
@@ -216,6 +249,12 @@ export default function Prompter() {
         if (shown) { showing.add(word); if (was?.line === at.line && !was.words.has(word)) fresh.push(span); }
         if (word >= view.to) later.push(span.textContent ?? "");
       });
+      // The next paragraphs flow on after this one (below the rows until its end is in view); what
+      // falls below the rows goes to the next line.
+      const firstTop = text.querySelector<HTMLElement>("[data-word]")?.offsetTop ?? 0, bottom = view.top + rows * line - line / 2;
+      const after = [...text.querySelectorAll<HTMLElement>("[data-after]")];
+      // Only once this paragraph's end is in view, so it never suggests skipping unread words.
+      if (view.last) after.forEach(span => { if (span.offsetTop - firstTop >= bottom) later.push(span.textContent ?? ""); });
       shownWords.current = { line: at.line, words: showing };
       if (!calm) fresh.forEach((span, i) => span.animate(
         [{ opacity: 0, transform: "translateY(.3em)", filter: "blur(3px)" }, { opacity: 1, transform: "none", filter: "none" }],
@@ -238,7 +277,8 @@ export default function Prompter() {
       else viewport.scrollTop = view.top;
       // A new paragraph rises from the next line, where its opening showed, instead of jumping.
       const from = slideFrom.current;
-      slideFrom.current = next && view.last ? { line: at.line, offset: next.getBoundingClientRect().top - viewport.getBoundingClientRect().top } : null;
+      const opening = after[0] ?? next;
+      slideFrom.current = opening && view.last ? { line: at.line, offset: opening.getBoundingClientRect().top - viewport.getBoundingClientRect().top } : null;
       if (from?.line === at.line - 1 && view.top === 0 && from.offset > 0 && !calm)
         text.animate([{ transform: `translateY(${from.offset}px)`, opacity: .35 }, { transform: "none", opacity: 1 }], { duration: 460, easing: "cubic-bezier(.2, .7, .2, 1)" });
       const { page: index, total, last } = view;
@@ -249,7 +289,7 @@ export default function Prompter() {
     window.addEventListener("resize", measure);
     void document.fonts.ready.then(measure);
     return () => { active = false; watch.disconnect(); window.removeEventListener("resize", measure); };
-  }, [at.line, at.word, text, size, layout, editable, leaking, checking, rehearsing, shown, through, marker]);
+  }, [at.line, shownWord, text, size, layout, editable, leaking, checking, rehearsing, shown, through, marker]);
   const c = lines[at.line];
   const p = pace(script.sections, at.line, Math.round((now - started) / 1000));
   const followText = !recording ? s.ptFollowOff.replace("{down}", keyLabel(keys.Down)).replace("{up}", keyLabel(keys.Up)) : paused ? s.ptPaused.replace("{key}", keyLabel(keys.Backslash)) : slow ? s.ptFollowSlow : s.ptFollowing;
@@ -257,24 +297,31 @@ export default function Prompter() {
   const markerEl = marker && <div className="ptmarker" aria-hidden="true">{Array.from({ length: 16 }, (_, i) => <i key={i} className={(Math.floor(i / 4) + i % 4) % 2 ? "b" : ""} />)}</div>;
 
   if (layout === "Tucked") return <div ref={root}>{markerEl}<button type="button" className="pttuck" data-control aria-label={s.ptShowScript} title={s.ptShowScript} onClick={() => void ipc.prompterLayout("Strip")}><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M2 3h10M2 7h10M2 11h6" /></svg></button></div>;
-  const words = (line: NonNullable<typeof c>, live: boolean) => {
+  // `after`: a paragraph still to come, flowing on after the current one; its words are not
+  // counted as reading rows (data-word), only shown.
+  const words = (line: NonNullable<typeof c>, live: boolean, after = false) => {
+    const mark = (k: number) => after ? { "data-after": "" } : { "data-word": k };
     let i = 0, key = 0;
     // Keep the complete paragraph laid out; its viewport advances without discarding words.
-    return line.text.split(/(\[[^\]]*\])/).flatMap(part => part.startsWith("[") ? [<span key={`c${key++}`} data-word={i} className="ptcue">{part.slice(1, -1)}</span>] : part.split(/(\s+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/u).filter(Boolean).map(w => {
+    return line.text.split(/(\[[^\]]*\])/).flatMap(part => part.startsWith("[") ? [<span key={`c${key++}`} {...mark(i)} className="ptcue">{part.slice(1, -1)}</span>] : part.split(/(\s+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/u).filter(Boolean).map(w => {
       if (/^\s+$/.test(w)) return w;
       const k = i; i += tokens(w).length;
-      return <span key={`w${key++}`} data-word={k} className={live ? i <= at.word ? "ptsaid" : k <= at.word && at.word < i ? "ptnow" : "" : ""}>{w}</span>;
+      return <span key={`w${key++}`} {...mark(k)} className={live ? i <= shownWord ? "ptsaid" : k <= shownWord && shownWord < i ? "ptnow" : "" : ""}>{w}</span>;
     }));
   };
-  return <div ref={root}>{markerEl}<div className={`pt${rehearsing ? " rehearsing" : ""}${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
-    <div className="pth">
-      <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}><GripVertical/></button>
-      {c && !checking && name && (() => {
+  // Rehearsing keeps the header to one row (the mic announcement, Stop, the share switch);
+  // the script chip and the pace move down beside the paragraph count.
+  const chip = c && !checking && name && (() => {
         // "Team X demo · 2/4 Demo ▾": the script, where you are, and the menu to switch.
         const where = script.sections.length === 1 && script.sections[0].minutes === 0 && !text.trimStart().startsWith("#") ? "" : ` · ${c.section + 1}/${script.sections.length} ${script.sections[c.section]?.title ?? ""}`;
         return rehearsing ? <span className="ptchip"><b>{name}</b>{where}</span>
           : <button type="button" className="ptchip" data-control aria-haspopup="menu" aria-expanded={menu !== null} title={s.ptSwitch} onClick={() => void (menu ? setMenu(null) : ipc.scriptsList().then(list => setMenu(Array.isArray(list) ? list.map(info => info.name) : [])).catch(() => setMenu([])))}><b>{name}</b>{where}<ChevronDown/></button>;
-      })()}
+      })();
+  const paceEl = <span className={`ptpace${p.behind ? " behind" : ""}`} title={p.behind ? s.ptBehind : s.ptOnPlan}>{p.totalS > 0 && <i />}{fmt(Math.round((now - started) / 1000))}{p.totalS ? ` / ${fmt(p.totalS)}` : ""}</span>;
+  return <div ref={root}>{markerEl}<div className={`pt${rehearsing ? " rehearsing" : ""}${layout === "Column" ? " col" : ""}${through && !marker && !checking ? " through" : ""}${shown ? " shown" : ""}${leaking ? " leaking" : ""}${editable ? " editing" : ""}`} style={{ "--pt-size": `${size}px` } as React.CSSProperties} role="region" aria-label={name ?? s.scripts}>
+    <div className="pth">
+      <button type="button" className="ptgrab" data-control data-tauri-drag-region title={s.ptDrag} aria-label={s.ptDrag}><GripVertical/></button>
+      {!rehearsing && chip}
       {menu && <div className="ptmenu" role="menu" data-control>
         {menu.map(n => <button key={n} type="button" role="menuitemradio" aria-checked={n === name} onClick={() => { setMenu(null); if (n !== name) void ipc.prompterScript(n).catch(e => setCloseError(String(e))); }}><i>{n === name ? "✓" : ""}</i>{n}</button>)}
         <div className="sep" />
@@ -282,7 +329,7 @@ export default function Prompter() {
       </div>}
       {editable && <span className="ptedhint">{note || s.ptEditing}</span>}
       {rehearsing && <span className="ptreh" role="status"><i /><span title={s.rehearsing}>{s.rehearsing}</span><button type="button" data-control onClick={() => void ipc.rehearseStop().catch(() => {})}>{s.rehearsalStop}</button></span>}
-      <span className={`ptpace${p.behind ? " behind" : ""}`} title={p.behind ? s.ptBehind : s.ptOnPlan}>{p.totalS > 0 && <i />}{fmt(Math.round((now - started) / 1000))}{p.totalS ? ` / ${fmt(p.totalS)}` : ""}</span>
+      {!rehearsing && paceEl}
       <button type="button" className={`ptvis${checking ? " checking" : ""}`} role="switch" aria-checked={shown} data-control title={s.ptShowInShare} onClick={() => { setCloseError(""); void ipc.setShareVisible(!shown).catch(error => setCloseError(String(error))); }}>
         <span className="h"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><path d="M2 10 10 2" /></svg>{checking ? s.ptChecking : s.ptHidden}</span>
         <span className="s"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M1 6s1.8-3.5 5-3.5S11 6 11 6s-1.8 3.5-5 3.5S1 6 1 6Z" /><circle cx="6" cy="6" r="1.5" /></svg>{s.ptShown}</span>
@@ -307,16 +354,19 @@ export default function Prompter() {
           {!c ? <div className="ptln cur">{name ? s.ptEmpty : s.ptNoScript}</div> : <>
             {/* The end of the paragraph before: what you just said, for a glance back. */}
             <div className="ptln prev" style={{ visibility: page.index > 0 || !lines[at.line - 1] ? "hidden" : undefined }}><span dir="ltr">{lines[at.line - 1] ? words(lines[at.line - 1], false) : " "}</span></div>
-            <div className="ptln cur" ref={current}><div className="pttext">{words(c, true)}</div></div>
+            <div className="ptln cur" ref={current}><div className="pttext">{words(c, true)}
+              {/* The next two paragraphs continue on the same rows: a short paragraph never leaves you
+                  waiting with nothing to read. */}
+              {lines.slice(at.line + 1, at.line + 3).map((l, n) => <Fragment key={at.line + 1 + n}> <span className="ptpara" data-after aria-hidden="true">¶</span> {words(l, false, true)}</Fragment>)}</div></div>
             {/* Filled as you read (measure above): what comes next, lighter and fading out. */}
-            <div className="ptln ptahead" ref={nextRef} aria-hidden="true" data-next={lines[at.line + 1]?.text.replace(/\[([^\]]*)\]/g, "$1") ?? ""} />
+            <div className="ptln ptahead" ref={nextRef} aria-hidden="true" data-next={lines[at.line + 3]?.text.replace(/\[([^\]]*)\]/g, "$1") ?? ""} />
           </>}
         </div>
         <div className="ptfoot"><div className="ptnav" role="group" aria-label={s.ptReadControls}>
           <button type="button" data-control aria-label={s.ptPrevious} title={`${s.ptPrevious} · ${keyLabel(keys.Up)}`} disabled={!at.line && !page.index} onClick={() => move(-1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m8 2-4 4 4 4" /></svg></button>
           <span className="ptpage" title={s.ptParagraph.replace("{n}", String(at.line + 1))} aria-label={`${s.ptParagraph.replace("{n}", String(at.line + 1))} · ${page.index + 1}/${page.total}`}>{page.index + 1}/{page.total}</span>
           <button type="button" data-control aria-label={s.ptNext} title={`${page.index < page.total - 1 ? s.ptContinue : s.ptNext} · ${keyLabel(keys.Down)}`} disabled={at.line >= lines.length - 1 && page.index >= page.total - 1} onClick={() => move(1)}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg></button>
-        </div><div className="ptprog"><i style={{ width: `${lines.length ? (at.line + (page.index + 1) / page.total) / lines.length * 100 : 0}%` }} /></div><span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
+        </div>{rehearsing && chip}<div className="ptprog"><i style={{ width: `${lines.length ? (at.line + (page.index + 1) / page.total) / lines.length * 100 : 0}%` }} /></div>{rehearsing && paceEl}<span className={`ptfollow${paused || slow || !recording ? " wait" : ""}`} data-waiting={waiting || undefined}>{followText}</span></div>
       </>}
   </div></div>;
 }

@@ -124,6 +124,30 @@ export function follow(lines: Line[], at: At, heard: string): At & {waiting: boo
     : {line, word: word + 1, waiting: false};
 }
 
+/** Where following put you by voice: when (`t`, ms) and how far into the script (`i`, words). */
+export type Mark = {t: number; i: number};
+/** Words a second to read at before there is enough to measure: 150 a minute. */
+const READ_RATE = 2.5;
+/** Furthest the highlight goes past the last heard word, so a wrong guess stays small. */
+const GLIDE_MAX = 2;
+
+/**
+ * Words the highlight glides past the last word heard, between what the recogniser sends: at your
+ * reading pace (the last 8 s of `trail`, 1.5-4 words a second) for the time since following last
+ * moved, at most 2. No allowance for the recogniser's own lag: replayed on a real rehearsal, one
+ * of 0.6 s put the highlight ahead of the voice 30% of the reading time, none 7%. Only while you
+ * read in step: 2+ moves by voice in the last 4 s, the heard words changed in the last 1.5 s
+ * (`heardAt`) and not waiting on an ad-lib.
+ */
+export function glide(trail: Mark[], heardAt: number, now: number, waiting: boolean) {
+  if (waiting || now - heardAt > 1500) return 0;
+  const recent = trail.filter(p => now - p.t <= 8000);
+  if (recent.filter(p => now - p.t <= 4000).length < 2) return 0;
+  const first = recent[0], last = recent[recent.length - 1], span = (last.t - first.t) / 1000;
+  const rate = span >= 2 ? Math.max(1.5, Math.min(4, (last.i - first.i) / span)) : READ_RATE;
+  return Math.max(0, Math.min(GLIDE_MAX, Math.floor(rate * (now - last.t) / 1000)));
+}
+
 /**
  * A heard word against a script word: equal, a near miss ("handle" for "handles", 4+ letters),
  * a long word heard a little wrong (6+ letters, at most 1 letter in 4 differs: "repairing" for
@@ -211,4 +235,19 @@ export function withLine(text: string, k: number, to: string) {
     return rows.join("\n");
   }
   return text;
+}
+
+/**
+ * Words the highlight may glide on from `word` (the next word to say in `text`) before the end of
+ * its sentence or clause: people pause at a full stop or comma, so the highlight waits there for
+ * your voice, and starts a new clause only once you are heard in it (0 at a clause's first word).
+ */
+export function toPause(text: string, word: number) {
+  let start = 0;
+  for (const clause of text.replace(/\[[^\]]*\]/g, ' ').split(/(?<=[.,;:!?\u2026\u3002\uff0c\u3001\uff1b\uff1a\uff01\uff1f])/u)) {
+    const end = start + tokens(clause).length;
+    if (word < end) return word === start ? 0 : end - 1 - word;
+    start = end;
+  }
+  return 0;
 }

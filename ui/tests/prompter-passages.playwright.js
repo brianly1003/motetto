@@ -11,7 +11,7 @@ async (page) => {
         const text = '# Demo (2m)\n' + Array.from({ length: 18 }, (_, n) => `Read the complete passage ${n + 1} carefully before continuing.`).join(' ') + ' Finish every remaining word.\n\nThe next paragraph starts here.';
         let id = 0; const callbacks = {}, listeners = {};
         window.emit = (event, payload) => (listeners[event] || []).forEach(k => callbacks[k]?.({ payload }));
-        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener(event, id) { listeners[event] = (listeners[event] || []).filter(k => k !== id); } };
         window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'prompter' }, currentWebview: { windowLabel: 'prompter', label: 'prompter' } }, transformCallback(cb) { callbacks[++id] = cb; return id; }, unregisterCallback() {}, invoke: async (cmd, args) => {
           if (cmd === 'plugin:event|listen') { (listeners[args.event] ||= []).push(args.handler); return args.handler; }
           if (cmd === 'get_state') return { state: { type: 'Idle' }, share_visible: false, elapsed_ms: 0, companion: { visible: false, size: 'Pill' } };
@@ -24,6 +24,8 @@ async (page) => {
         } };
       }, { size, layout });
       await p.goto('http://127.0.0.1:3014/prompter/');
+      // The dev server's badge sits over the strip's footer buttons.
+      await p.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
       await p.waitForFunction(() => +(document.querySelector('.ptpage')?.textContent.split('/')[1] || 0) > 1);
       const pages = +(await p.locator('.ptpage').textContent()).split('/')[1];
       const seen = new Set();

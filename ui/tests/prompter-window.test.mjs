@@ -29,6 +29,12 @@ test('the paragraph end in view says so, so the next paragraph can preview',()=>
 test('one row at a time when only one fits',()=>{
  assert.deepEqual(view(10, 0, 1), {start: 8, top: 30, to: 16, last: false});
 });
+test('with three rows the row you read stays second, a whole row ahead in view',()=>{
+ // Near the end of row 1 it rolls so row 1 is on top and rows 2-3 are ahead.
+ assert.deepEqual(view(13, 0, 3), {start: 8, top: 30, to: 32, last: false});
+ // Entering row 2 keeps still: row 1 above for a glance back, row 3 ahead.
+ assert.deepEqual(view(17, 8, 3), {start: 8, top: 30, to: 32, last: false});
+});
 test('the page counter follows the row being read',()=>{
  const v = readingWindow(rows, 2, 17, 30, 8);
  assert.deepEqual([v.page, v.total], [1, 3]);
