@@ -202,6 +202,76 @@ pub fn set_speaker_names(
     Ok(summary)
 }
 
+/// Replaces the meeting's own spellings (the whole list is sent), then respells the transcript's
+/// heard forms right away, so a fix shows without transcribing again. Returns the meeting.
+#[tauri::command]
+pub fn set_meeting_spellings(
+    app: tauri::AppHandle,
+    id: String,
+    spellings: Vec<crate::settings::Spelling>,
+) -> Result<library::Meeting, String> {
+    let meeting = crate::library_commands::edit(&app, &id, |root| {
+        let old = library::spelling_pairs(&library::summary(root, &id)?);
+        let summary = crate::bookmarks::set_meeting_spellings(root, &id, &spellings)?;
+        crate::transcript_edits::respell(root, &id, &old, &library::spelling_pairs(&summary))?;
+        library::read(root, &id)
+    })?;
+    let _ = app.emit("motetto://library-changed", ());
+    Ok(meeting)
+}
+
+/// Replaces the spellings for all meetings (Settings › Spellings) from a meeting's side panel, each
+/// cleaned like a meeting's (at most 500), then respells that meeting from the list before and
+/// after, so a removed pair goes back there too. Returns the meeting; other meetings take the list
+/// when they are transcribed again.
+#[tauri::command]
+pub fn set_global_spellings(
+    app: tauri::AppHandle,
+    id: String,
+    spellings: Vec<crate::settings::Spelling>,
+) -> Result<library::Meeting, String> {
+    let mut cleaned: Vec<crate::settings::Spelling> = vec![];
+    for row in &spellings {
+        let spelling = motetto_core::config::clean_term(&row.spelling).unwrap_or_default();
+        if spelling.is_empty()
+            || cleaned
+                .iter()
+                .any(|s| s.spelling.to_lowercase() == spelling.to_lowercase())
+        {
+            continue;
+        }
+        cleaned.push(crate::settings::Spelling {
+            spelling,
+            heard: motetto_core::config::clean_heard(&row.heard),
+        });
+    }
+    // As in Settings: a run that started with the old list must not see it change halfway.
+    if app
+        .state::<Library>()
+        .busy
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(
+            "Wait until the recording or import finishes before changing spellings for all meetings."
+                .into(),
+        );
+    }
+    let store = app.state::<crate::settings::Store>();
+    let meeting = crate::library_commands::edit(&app, &id, |root| {
+        if crate::bookmarks::locked(root, &id)? {
+            return Err(crate::bookmarks::LOCKED.into());
+        }
+        let summary = library::summary(root, &id)?;
+        let old = library::spelling_pairs(&summary);
+        store.change(|settings| settings.spellings = cleaned)?;
+        crate::transcript_edits::respell(root, &id, &old, &library::spelling_pairs(&summary))?;
+        library::read(root, &id)
+    })?;
+    let _ = app.emit("motetto://library-changed", ());
+    let _ = app.emit("motetto://settings-changed", ());
+    Ok(meeting)
+}
+
 #[tauri::command]
 pub fn set_locked(
     app: tauri::AppHandle,

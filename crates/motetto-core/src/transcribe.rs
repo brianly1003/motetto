@@ -157,7 +157,7 @@ pub fn transcript_parts_hinted(
     hints: &[String],
     report: &(dyn Fn(TranscribeProgress) + Sync),
 ) -> Result<Transcript, Box<dyn Error>> {
-    let prompt = run_prompt(config::terms(), hints);
+    let prompt = run_prompt(config::spoken_terms(), hints);
     PROMPT.with(|p| *p.borrow_mut() = prompt);
     struct Clear;
     impl Drop for Clear {
@@ -289,6 +289,8 @@ fn transcribe_parts(
     let vad = config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty());
     let mut segments = vec![];
     let mut heard: Vec<(String, usize)> = vec![];
+    // The speech heard on each side, on the call's timeline, to cut a line at the other's turn.
+    let (mut me_speech, mut them_speech) = (vec![], vec![]);
     let mut track = 0;
     for (sources, offset_ms) in parts {
         // The mic needs the system track decoded for echo cancellation; each track is decoded once.
@@ -386,17 +388,31 @@ fn transcribe_parts(
             );
             run.begin(track, WHISPER);
             println!("Transcribing {src} with {model}...");
-            let rows = whisper(&model, &wav16, &stem, quiet, true)?;
+            let rows = whisper(&model, &wav16, &stem, quiet, true, None)?;
             let track_language = fs::read_to_string(format!("{stem}.json"))
                 .ok()
                 .and_then(|json| detected(&json));
             let _ = fs::remove_file(format!("{stem}.json"));
+            let repeats = loop_pieces(&rows, speech.as_deref());
+            let retries: usize = repeats.iter().map(|(_, pieces)| pieces.len()).sum();
+            let splits = speech
+                .as_ref()
+                .map_or(0, |speech| split_pieces(&rows, speech));
+            run.units(track, CHECK, (retries + splits) as f64);
+            if retries + splits > 0 {
+                run.begin(track, CHECK);
+            }
+            let rows = unloop(
+                &model,
+                &wav16,
+                &stem,
+                rows,
+                &repeats,
+                track_language.as_deref(),
+                quiet,
+            )?;
             let rows = match &speech {
-                Some(speech) => {
-                    run.units(track, CHECK, split_pieces(&rows, speech) as f64);
-                    run.begin(track, CHECK);
-                    split_joined(&model, &wav16, &stem, rows, speech, quiet)?
-                }
+                Some(speech) => split_joined(&model, &wav16, &stem, rows, speech, quiet)?,
                 None => rows, // without VAD whisper keeps the silence and splits there itself
             };
             let spans = track_language
@@ -441,6 +457,13 @@ fn transcribe_parts(
                     None => heard.push((language, chars)),
                 }
             }
+            if let Some(speech) = &speech {
+                let side = match speaker {
+                    Speaker::Me => &mut me_speech,
+                    _ => &mut them_speech,
+                };
+                side.extend(speech.iter().map(|(s, e)| (s + offset_ms, e + offset_ms)));
+            }
             for ((start_ms, end_ms, text), label) in rows.into_iter().zip(speakers) {
                 segments.push(Segment {
                     start_ms: start_ms.saturating_add(*offset_ms),
@@ -457,8 +480,14 @@ fn transcribe_parts(
             track += 1;
         }
     }
+    let text = merge(segments);
+    let text = if me_speech.is_empty() || them_speech.is_empty() {
+        text
+    } else {
+        crate::speakers::interleave(&text, None, &me_speech, &them_speech).map_or(text, |t| t.0)
+    };
     Ok(Transcript {
-        text: merge(segments),
+        text,
         language: languages(heard),
     })
 }
@@ -524,7 +553,9 @@ fn whisper(
     stem: &str,
     quiet: bool,
     progress: bool,
+    language: Option<&str>,
 ) -> Result<Vec<Row>, Box<dyn Error>> {
+    let language = language.map(str::to_owned).or_else(config::call_language);
     let mut whisper = crate::tools::command("whisper-cli");
     whisper.args([
         "-m",
@@ -532,7 +563,7 @@ fn whisper(
         "-f",
         wav16,
         "-l",
-        config::call_language().as_deref().unwrap_or("auto"),
+        language.as_deref().unwrap_or("auto"),
         "-np",
         "-ocsv",
         "-oj", // only for result.language; the caller deletes it
@@ -556,7 +587,10 @@ fn whisper(
     // Names whisper can't know (new products, people, project codes) bias it toward the right
     // spelling; tested not to push English words into a Vietnamese call.
     // whisper keeps only the last ~224 prompt tokens; long lists lose their start.
-    if let Some(prompt) = PROMPT.with(|p| p.borrow().clone()).or_else(config::terms) {
+    if let Some(prompt) = PROMPT
+        .with(|p| p.borrow().clone())
+        .or_else(config::spoken_terms)
+    {
         whisper.args(["--prompt", &prompt]);
     }
     if quiet {
@@ -600,8 +634,8 @@ const JOINED_GAP_MS: u64 = 5_000;
 /// sorts the later words before the other side's reply (2026-10-23). A row that holds a silence
 /// of 5 s or more by Silero (typing and clicks are not speech) is transcribed again in pieces
 /// cut in the middle of each silence; the other rows, nearly all, stay as whisper wrote them.
-/// Optional like diarizing: if the speech check or a piece fails, or a piece comes back empty,
-/// the row stays whole. Cancel still stops the job.
+/// Optional like diarizing: if the speech check or a piece fails, or every piece comes back
+/// empty, the row stays whole. Cancel still stops the job.
 fn split_joined(
     model: &str,
     wav16: &str,
@@ -618,18 +652,191 @@ fn split_joined(
             out.push((start, end, text));
             continue;
         }
-        let pieces = trimmed(start, end, &cuts, speech);
-        match pieces_of(model, wav16, stem, &pieces, quiet, &mut count) {
-            Ok(Some(rows)) => out.extend(rows),
-            Ok(None) => out.push((start, end, text)),
-            Err(e) => {
-                crate::tools::check()?;
-                eprintln!("Kept a long row whole in {wav16}: {e}");
-                out.push((start, end, text));
+        // Piece by piece: a piece that comes back empty (an echo blip before a long silence)
+        // adds nothing, and the others still split the row. Only when every piece comes back
+        // empty, or one fails, does the row stay whole, so no words are lost.
+        let mut again: Vec<Row> = vec![];
+        for piece in trimmed(start, end, &cuts, speech) {
+            match pieces_of(model, wav16, stem, &[piece], None, quiet, &mut count) {
+                Ok(Some(rows)) => again.extend(without_plugs(rows)),
+                Ok(None) => {}
+                Err(e) => {
+                    crate::tools::check()?;
+                    eprintln!("Kept a long row whole in {wav16}: {e}");
+                    again.clear();
+                    break;
+                }
             }
+        }
+        if again.is_empty() {
+            out.push((start, end, text));
+        } else {
+            out.extend(again);
         }
     }
     Ok(out)
+}
+
+/// Rows written alike this many times in a row are whisper looping, not someone repeating.
+const REPEATS: usize = 3;
+
+/// Whisper can loop on one sentence at a normal pace, so `echo::loops` (faster than anyone speaks)
+/// misses it: "Cái vụ mà hôm bữa em nói..." came out 7 times over 30 s of other speech.
+/// The runs (first and last index) of `REPEATS` or more rows in a row with the same
+/// words, 4 words or more (people do say "alo, alo, alo").
+fn repeat_spans(rows: &[Row]) -> Vec<(usize, usize)> {
+    let key = |text: &str| -> Vec<String> {
+        text.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let keys: Vec<Vec<String>> = rows.iter().map(|(_, _, t)| key(t)).collect();
+    let mut spans = vec![];
+    let mut first = 0;
+    for i in 1..=keys.len() {
+        if i < keys.len() && keys[i] == keys[first] {
+            continue;
+        }
+        if i - first >= REPEATS && keys[first].len() >= 4 {
+            spans.push((first, i - 1));
+        }
+        first = i;
+    }
+    spans
+}
+
+/// A looping run is transcribed again in pieces cut at pauses this long: one 60 s piece of quiet
+/// turns came back as a channel plug, its 18 s burst as the real words.
+const LOOP_GAP_MS: u64 = 1_000;
+/// The least a retried piece holds before the next burst starts a new one.
+const LOOP_PIECE_MS: u64 = 6_000;
+
+/// Each looping run (first and last row) with the pieces to transcribe it again in: its speech
+/// bursts by Silero, or the whole run without the speech check.
+type LoopPieces = Vec<((usize, usize), Vec<(u64, u64)>)>;
+
+fn loop_pieces(rows: &[Row], speech: Option<&[(u64, u64)]>) -> LoopPieces {
+    repeat_spans(rows)
+        .into_iter()
+        .map(|(first, last)| {
+            let (start, end) = (rows[first].0, rows[last].1);
+            let pieces = match speech {
+                Some(speech) => {
+                    let cuts = cuts_at(start, end, speech, LOOP_GAP_MS);
+                    let mut pieces: Vec<(u64, u64)> = vec![];
+                    for (s, e) in trimmed(start, end, &cuts, speech)
+                        .into_iter()
+                        .filter(|(s, e)| speech.iter().any(|(a, b)| a < e && b > s))
+                    {
+                        // Bursts join until a piece holds LOOP_PIECE_MS, never across a long
+                        // silence: alone, a 1 s burst came back as a stock outro or in English.
+                        match pieces.last_mut() {
+                            Some(last)
+                                if last.1 - last.0 < LOOP_PIECE_MS
+                                    && s < last.1 + JOINED_GAP_MS =>
+                            {
+                                last.1 = e
+                            }
+                            _ => pieces.push((s, e)),
+                        }
+                    }
+                    pieces
+                }
+                None => vec![(start, end)],
+            };
+            ((first, last), pieces)
+        })
+        .collect()
+}
+
+/// Each looping run transcribed again, piece by piece: without the loop in its context, whisper
+/// wrote the real words. Each piece is decoded in the track's `language`: a burst
+/// of a second or two left to guess came back English ("Thank you.") on a Vietnamese call. A
+/// piece that comes back empty, loops or is a channel plug
+/// adds nothing; when no piece adds anything, or a piece fails, the run's sentence is kept once.
+/// Cancel still stops the job.
+fn unloop(
+    model: &str,
+    wav16: &str,
+    stem: &str,
+    rows: Vec<Row>,
+    runs: &LoopPieces,
+    language: Option<&str>,
+    quiet: bool,
+) -> Result<Vec<Row>, Box<dyn Error>> {
+    if runs.is_empty() {
+        return Ok(rows);
+    }
+    let mut count = Pieces::new(runs.iter().map(|(_, p)| p.len()).sum());
+    let mut out = Vec::with_capacity(rows.len());
+    let mut next = 0;
+    for &((first, last), ref pieces) in runs {
+        out.extend_from_slice(&rows[next..first]);
+        next = last + 1;
+        let mut again: Vec<Row> = vec![];
+        for &piece in pieces {
+            match pieces_of(model, wav16, stem, &[piece], language, quiet, &mut count) {
+                Ok(Some(found)) if repeat_spans(&found).is_empty() => {
+                    again.extend(without_plugs(found));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    crate::tools::check()?;
+                    eprintln!("Kept a looping line once in {wav16}: {e}");
+                    again.clear();
+                    break;
+                }
+            }
+        }
+        if again.is_empty() {
+            out.push(rows[first].clone());
+        } else {
+            out.extend(again);
+        }
+    }
+    out.extend_from_slice(&rows[next..]);
+    Ok(out)
+}
+
+/// A retried piece's rows without a channel plug, also one whisper split over two rows ("Hãy
+/// subscribe cho kênh Ghiền" + "Mì Gõ Để không bỏ lỡ những video hấp dẫn" over quiet talk). Only
+/// for retried pieces: there the plug replaces speech whisper could not make out.
+fn without_plugs(rows: Vec<Row>) -> Vec<Row> {
+    let outros = with_next(&rows, crate::echo::credit);
+    rows.into_iter()
+        .zip(outros)
+        .filter_map(|(row, outro)| (!outro && !plug(&row.2)).then_some(row))
+        .collect()
+}
+
+/// Rows that match `test` alone or read together with the row after them (both rows marked).
+fn with_next(rows: &[Row], test: impl Fn(&str) -> bool) -> Vec<bool> {
+    let mut marked: Vec<bool> = rows.iter().map(|(_, _, t)| test(t)).collect();
+    for i in 1..rows.len() {
+        if !marked[i - 1] && !marked[i] && test(&format!("{} {}", rows[i - 1].2, rows[i].2)) {
+            marked[i - 1] = true;
+            marked[i] = true;
+        }
+    }
+    marked
+}
+
+/// A channel plug ("like, share và đăng ký kênh", "cảm ơn các bạn đã theo dõi") whisper writes
+/// over a quiet stretch.
+/// `echo::credit` also wants a video, so this wider check applies only to retried pieces.
+fn plug(text: &str) -> bool {
+    let text = text.to_lowercase();
+    crate::echo::credit(&text)
+        || [
+            "đăng ký kênh",
+            "subscribe",
+            "ủng hộ kênh",
+            "các bạn đã theo dõi",
+            "video tiếp theo",
+        ]
+        .iter()
+        .any(|w| text.contains(w))
 }
 
 /// How many whisper runs `split_joined` will make: each row with long silences, once per piece.
@@ -693,7 +900,15 @@ fn relanguage(
         let end = rows
             .get(last + 1)
             .map_or(run[run.len() - 1].1 + 1_000, |next| next.0);
-        match pieces_of(model, wav16, stem, &[(run[0].0, end)], quiet, &mut count) {
+        match pieces_of(
+            model,
+            wav16,
+            stem,
+            &[(run[0].0, end)],
+            None,
+            quiet,
+            &mut count,
+        ) {
             Ok(Some(again)) if !mostly_in(&again, track) => out.extend(again),
             Ok(_) => out.extend_from_slice(run),
             Err(e) => {
@@ -743,6 +958,11 @@ fn mostly_in(rows: &[Row], track: &str) -> bool {
 /// The middle of every silence of `JOINED_GAP_MS` or more between the speech heard in
 /// `start..end`.
 fn cuts(start: u64, end: u64, speech: &[(u64, u64)]) -> Vec<u64> {
+    cuts_at(start, end, speech, JOINED_GAP_MS)
+}
+
+/// The middle of every silence of `gap` ms or more between the speech heard in `start..end`.
+fn cuts_at(start: u64, end: u64, speech: &[(u64, u64)], gap: u64) -> Vec<u64> {
     let mut heard: Vec<_> = speech
         .iter()
         .filter(|(s, e)| *e > start && *s < end)
@@ -752,7 +972,7 @@ fn cuts(start: u64, end: u64, speech: &[(u64, u64)]) -> Vec<u64> {
     let mut cuts = vec![];
     let mut last = None::<u64>;
     for (s, e) in heard {
-        if let Some(last) = last.filter(|last| s.saturating_sub(*last) >= JOINED_GAP_MS) {
+        if let Some(last) = last.filter(|last| s.saturating_sub(*last) >= gap) {
             let middle = (last + s) / 2;
             if middle > start && middle < end {
                 cuts.push(middle);
@@ -802,6 +1022,7 @@ fn pieces_of(
     wav16: &str,
     stem: &str,
     pieces: &[(u64, u64)],
+    language: Option<&str>,
     quiet: bool,
     count: &mut Pieces,
 ) -> Result<Option<Vec<Row>>, Box<dyn Error>> {
@@ -811,7 +1032,7 @@ fn pieces_of(
         let piece_stem = format!("{stem}.piece{i}");
         let piece_wav = format!("{piece_stem}.16k.wav");
         let rows = slice::write(Path::new(wav16), Path::new(&piece_wav), from, to)
-            .and_then(|()| whisper(model, &piece_wav, &piece_stem, quiet, false));
+            .and_then(|()| whisper(model, &piece_wav, &piece_stem, quiet, false, language));
         let _ = fs::remove_file(&piece_wav);
         let _ = fs::remove_file(format!("{piece_stem}.csv"));
         let _ = fs::remove_file(format!("{piece_stem}.json"));
@@ -913,7 +1134,7 @@ fn merge(mut segments: Vec<Segment>) -> String {
         keep
     });
     segments.sort_by_key(|s| s.start_ms);
-    segments
+    paragraphs(segments)
         .iter()
         .map(|s| {
             format!(
@@ -927,12 +1148,41 @@ fn merge(mut segments: Vec<Segment>) -> String {
         .collect()
 }
 
+/// Rows of one speaker less than this apart join into one paragraph...
+const PARAGRAPH_GAP_MS: u64 = 2_000;
+/// ...until it spans this long, so a line still plays from near its words.
+const PARAGRAPH_MS: u64 = 30_000;
+
+/// With a spelling prompt whisper writes a row per sentence, so one person's turn reads as eight
+/// short lines; rows in time order join while the same speaker goes on after a short pause. A row
+/// from anyone else in between ends the paragraph.
+fn paragraphs(segments: Vec<Segment>) -> Vec<Segment> {
+    let mut out: Vec<Segment> = Vec::with_capacity(segments.len());
+    for s in segments {
+        match out.last_mut() {
+            Some(p)
+                if p.speaker == s.speaker
+                    && p.microphone == s.microphone
+                    && p.system == s.system
+                    && s.start_ms <= p.end_ms + PARAGRAPH_GAP_MS
+                    && s.end_ms.saturating_sub(p.start_ms) <= PARAGRAPH_MS =>
+            {
+                p.end_ms = p.end_ms.max(s.end_ms);
+                p.text = format!("{} {}", p.text.trim_end(), s.text.trim_start());
+            }
+            _ => out.push(s),
+        }
+    }
+    out
+}
+
 /// Rows shaped like a YouTube outro (`echo::credit`) that are mostly not speech. whisper writes
 /// the outro over music: Silero heard speech in 9 % and 21 % of the two rows on 2026-10-25,
 /// while someone reading it aloud is speech nearly all through, so their line stays. Without
 /// VAD, or if the check fails, every outro row goes: an invented line is the likelier case.
 fn invented_credits(rows: &[Row], speech: Option<&[(u64, u64)]>) -> Vec<bool> {
-    let credits: Vec<bool> = rows.iter().map(|row| crate::echo::credit(&row.2)).collect();
+    // An outro split over two rows counts as one.
+    let credits = with_next(rows, crate::echo::credit);
     if !credits.contains(&true) {
         return credits;
     }
@@ -975,6 +1225,71 @@ fn parse_csv(csv: &str) -> Vec<(u64, u64, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_plug_split_over_two_rows_goes_from_a_retried_piece() {
+        let row = |s: u64, t: &str| (s, s + 5_000, t.to_owned());
+        let rows = vec![
+            row(0, "Em sợ cho tới tháng sau"),
+            row(5_000, "Hãy subscribe cho kênh Ghiền"),
+            row(10_000, "Mì Gõ Để không bỏ lỡ những video hấp dẫn"),
+            row(15_000, "Cảm ơn các bạn đã theo dõi và hẹn gặp lại."),
+            row(20_000, "Ok, để em suy nghĩ"),
+        ];
+        let kept: Vec<String> = without_plugs(rows.clone())
+            .into_iter()
+            .map(|r| r.2)
+            .collect();
+        assert_eq!(kept, ["Em sợ cho tới tháng sau", "Ok, để em suy nghĩ"]);
+        // The main pass's outro check reads a split outro as one too.
+        assert_eq!(
+            with_next(&rows, crate::echo::credit),
+            [false, true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn a_sentence_written_three_times_in_a_row_is_a_loop() {
+        let row = |s: u64, t: &str| (s, s + 3_000, t.to_owned());
+        let rows = [
+            row(0, "Ừ bây giờ còn cái nữa là..."),
+            row(3_000, "Cái vụ mà hôm bữa em nói"),
+            row(6_000, "cái vụ mà hôm bữa, em nói."),
+            row(9_000, "Cái vụ mà hôm bữa em nói"),
+            row(12_000, "ok"),
+            row(15_000, "alo alo"),
+            row(18_000, "alo alo"),
+            row(21_000, "alo alo"),
+            row(24_000, "Two times only here"),
+            row(27_000, "Two times only here"),
+        ];
+        assert_eq!(repeat_spans(&rows), [(1, 3)]);
+    }
+
+    #[test]
+    fn a_loop_is_retried_in_bursts_of_six_seconds_or_more() {
+        let rows: Vec<Row> = (0..4)
+            .map(|i| (i * 10_000, (i + 1) * 10_000, "Tôi bị lộ quá, ạ!".to_owned()))
+            .collect();
+        // Bursts with pauses over 1 s; the quiet 25-38 s stretch is no piece.
+        let speech = [
+            (500, 2_000),
+            (3_500, 5_000),
+            (7_000, 9_000),
+            (20_000, 25_000),
+            (38_000, 39_000),
+        ];
+        let runs = loop_pieces(&rows, Some(&speech));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, (0, 3));
+        assert_eq!(
+            runs[0].1,
+            [(300, 9_200), (19_800, 25_200), (37_800, 39_200)]
+        );
+        assert_eq!(loop_pieces(&rows, None)[0].1, [(0, 40_000)]);
+        assert!(plug("Cảm ơn các bạn đã theo dõi và hẹn gặp lại."));
+        assert!(!plug("Em sợ cho tới tháng sau"));
+    }
 
     #[test]
     fn mic_mode_reads_unknown_as_standard() {
@@ -1212,6 +1527,39 @@ mod tests {
         assert_eq!(Speaker::Them.voice(0), Speaker::Voice(2));
         assert_eq!(Speaker::Unknown.voice(0), Speaker::Voice(1));
         assert_eq!(Speaker::Voice(3).label(), "Speaker 3: ");
+    }
+
+    #[test]
+    fn one_speakers_short_rows_join_into_a_paragraph() {
+        let seg = |start_ms: u64, end_ms: u64, speaker, text: &str| Segment {
+            start_ms,
+            end_ms,
+            microphone: speaker == Speaker::Me,
+            system: speaker == Speaker::Them,
+            speaker,
+            text: text.into(),
+        };
+        let merged = merge(vec![
+            seg(0, 2_010, Speaker::Them, "Thì lúc này,"),
+            seg(2_150, 3_690, Speaker::Them, "nhưng mà là yes."),
+            // 3.9 s later: a new paragraph.
+            seg(7_580, 9_520, Speaker::Them, "Anh hiểu không?"),
+            seg(10_420, 12_600, Speaker::Them, "Ừ, nó sẽ trả..."),
+            // Someone else in between ends it.
+            seg(12_700, 13_500, Speaker::Me, "Ừ."),
+            seg(13_600, 15_000, Speaker::Them, "Cái API."),
+            // A paragraph stops before it spans 30 s.
+            seg(15_500, 43_000, Speaker::Them, "Long."),
+            seg(44_500, 46_000, Speaker::Them, "After."),
+        ]);
+        assert_eq!(
+            merged,
+            "[00:00] Them: Thì lúc này, nhưng mà là yes.\n\
+             [00:07] Them: Anh hiểu không? Ừ, nó sẽ trả...\n\
+             [00:12] Me: Ừ.\n\
+             [00:13] Them: Cái API. Long.\n\
+             [00:44] Them: After.\n"
+        );
     }
 
     #[test]

@@ -92,13 +92,22 @@ pub(crate) fn retranscribe(
         None => library::summary(root, id)?.mic_mode,
     };
     let edits = learned(&folder)?;
+    // This meeting's spellings, then the names fixed in its lines: whisper weighs the end most.
+    // Spellings only: a heard form in the prompt makes whisper write it.
+    let summary = library::summary(root, id)?;
+    let mut hints: Vec<String> = summary
+        .meeting_spellings
+        .iter()
+        .map(|s| s.spelling.clone())
+        .collect();
+    hints.extend(edits.hints());
     motetto_core::tools::reset();
     stage(Stage::Transcribing { progress: None });
     let heard = motetto_core::transcribe::transcript_parts_hinted(
         &parts,
         mic_mode,
         true,
-        &edits.hints(),
+        &hints,
         &|progress| {
             stage(Stage::Transcribing {
                 progress: Some(progress),
@@ -117,7 +126,12 @@ pub(crate) fn retranscribe(
         None => None,
     };
     stage(Stage::Saving);
-    let edited = Some(edits.apply(&transcript)).filter(|edited| *edited != transcript);
+    // The user's edits back on the new lines, then the spelling guard: heard forms respelled.
+    let edited = crate::learned_edits::respell(
+        &edits.apply(&transcript),
+        &library::spelling_pairs(&summary),
+    );
+    let edited = Some(edited).filter(|edited| *edited != transcript);
     save_transcript(&folder, &transcript, edited, fixed)?;
     let mut summary = library::summary(root, id)?;
     summary.language = heard.language;
@@ -225,7 +239,7 @@ pub(crate) fn regenerate(
     let staging = staging(&folder)?;
     let result = (|| -> Result<(), String> {
         let started = std::time::Instant::now();
-        let spellings = library::used_spellings();
+        let spellings = library::used_spellings_for(&meeting.summary);
         let notes = if folder.join("my-notes.md").exists() {
             library::text(&folder.join("my-notes.md"))?
         } else {
@@ -236,12 +250,13 @@ pub(crate) fn regenerate(
             of: 1,
             progress: None,
         });
-        let wrote = motetto_core::summarize::notes(
+        let wrote = motetto_core::summarize::notes_spelled(
             &staging.join("notes").to_string_lossy(),
             &transcript,
             &notes,
             language.as_deref(),
             write_in,
+            &library::meeting_terms(&meeting.summary),
             stage,
         )
         .map_err(|e| e.to_string())?;

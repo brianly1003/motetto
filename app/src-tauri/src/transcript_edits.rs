@@ -60,6 +60,57 @@ fn save(root: &Path, id: &str, index: usize, text: &str) -> Result<String, Strin
     write(&dir, &heard, lines.join("\n"))
 }
 
+/// The spelling guard on a written transcript, after the spellings changed from `old` to `new`
+/// pairs: a line only the guard had changed (its heard text respelled with `old`) is respelled
+/// from what was heard with `new`, so a removed spelling or heard form goes back; a line the user
+/// edited keeps the edit and takes `new` on top. Into the edited copy (transcript.txt stays as
+/// heard). True when a line changed.
+pub fn respell(
+    root: &Path,
+    id: &str,
+    old: &[(String, String)],
+    new: &[(String, String)],
+) -> Result<bool, String> {
+    let dir = library::folder(root, id)?;
+    if crate::bookmarks::locked(root, id)? || !dir.join("transcript.txt").exists() {
+        return Ok(false);
+    }
+    let heard = library::text(&dir.join("transcript.txt"))?;
+    let before = current(&dir)?;
+    let after = respelled(&heard, &before, old, new);
+    if after == before {
+        return Ok(false);
+    }
+    write(&dir, &heard, after)?;
+    Ok(true)
+}
+
+fn respelled(
+    heard: &str,
+    shown: &str,
+    old: &[(String, String)],
+    new: &[(String, String)],
+) -> String {
+    use crate::learned_edits::respell;
+    let (heard_lines, shown_lines): (Vec<_>, Vec<_>) =
+        (heard.split('\n').collect(), shown.split('\n').collect());
+    if heard_lines.len() != shown_lines.len() {
+        return respell(shown, new);
+    }
+    heard_lines
+        .iter()
+        .zip(&shown_lines)
+        .map(|(h, e)| {
+            if e == h || *e == respell(h, old) {
+                respell(h, new)
+            } else {
+                respell(e, new)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // Moves lines to another call voice: each line's `Speaker N` becomes `Speaker {voice}`, its time
 // and words kept. Only call voices move; You (the microphone) is never relabelled.
 fn move_lines(root: &Path, id: &str, indices: &[usize], voice: u32) -> Result<String, String> {
@@ -216,6 +267,27 @@ pub fn move_transcript_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_removed_spelling_goes_back_but_a_hand_edit_stays() {
+        let pair = |h: &str, sp: &str| (h.to_owned(), sp.to_owned());
+        let heard = "[00:01] Them: nó trả lời là jest\n[00:02] Me: clam cái promotion\n[00:03] Me: clam nữa";
+        let old = [pair("jest", "yes"), pair("clam", "claim")];
+        // Line 3 was edited by hand after the guard ran.
+        let shown = "[00:01] Them: nó trả lời là yes\n[00:02] Me: claim cái promotion\n[00:03] Me: claim nữa nhé";
+        // `claim` removed: its line goes back to what was heard; the hand edit stays.
+        assert_eq!(
+            respelled(heard, shown, &old, &old[..1]),
+            "[00:01] Them: nó trả lời là yes\n[00:02] Me: clam cái promotion\n[00:03] Me: claim nữa nhé"
+        );
+        // Adding a pair applies everywhere, also on top of a hand edit.
+        let more = [
+            pair("jest", "yes"),
+            pair("clam", "claim"),
+            pair("nhé", "nha"),
+        ];
+        assert!(respelled(heard, shown, &old, &more).ends_with("claim nữa nha"));
+    }
     #[test]
     fn an_out_of_order_transcript_is_put_in_time_order_in_both_copies() {
         let root = std::env::temp_dir().join(format!("motetto-order-{}", std::process::id()));

@@ -3,6 +3,7 @@ import type { DeletedKind } from "./DeletedKind";
 import type { MeetingKind } from "./MeetingKind";
 import type { MicMode } from "./MicMode";
 import type { ScreenFacts } from "./ScreenFacts";
+import type { Spelling } from "./Spelling";
 import type { TitleSource } from "./TitleSource";
 
 export type MeetingSummary = { id: string, title: string, created_ms: number, status: string, 
@@ -68,4 +69,10 @@ mic_mode: MicMode,
  * transcript files keep `Speaker N`; screens, Copy and the notes prompt show the name, and
  * voices sharing a name read as one person.
  */
-speaker_names: Record<number, string>, };
+speaker_names: Record<number, string>, 
+/**
+ * This meeting's own spellings, on top of Settings › Spellings: Transcribe again and Write
+ * the notes again use them after the global list. Cleaned like `TERMS`, at most 100: all respell the transcript, and
+ * whisper's prompt takes as many as it holds.
+ */
+meeting_spellings: Array<Spelling>, };

@@ -1,3 +1,4 @@
+import type { Spelling } from './bindings/Spelling';
 import type { Meeting } from "./bindings/Meeting";
 import type { MeetingSummary } from "./bindings/MeetingSummary";
 import type { SearchHit } from "./bindings/SearchHit";
@@ -219,6 +220,10 @@ export const renameMeeting = (id: string, title: string) => invoke<MeetingSummar
 export const setLocked = (id: string, locked: boolean) => invoke<MeetingSummary>("set_locked", { id, locked });
 /** Names the meeting's voices (SPEC 7.11): the whole map each time, so Undo sends the earlier one. */
 export const setSpeakerNames = (id: string, names: Record<number, string>) => invoke<MeetingSummary>("set_speaker_names", { id, names });
+/** Saves a meeting's own spellings and respells its transcript's heard forms; returns the meeting. */
+export const setMeetingSpellings = (id: string, spellings: Spelling[]) => invoke<Meeting>("set_meeting_spellings", { id, spellings });
+/** Saves the spellings for all meetings from a meeting's panel and respells that meeting; returns it. */
+export const setGlobalSpellings = (id: string, spellings: Spelling[]) => invoke<Meeting>("set_global_spellings", { id, spellings });
 export const setUnconfirmed = (id: string, lines: string[]) => invoke<MeetingSummary>("set_unconfirmed", { id, lines });
 
 import type { MeetingMedia } from './bindings/MeetingMedia';

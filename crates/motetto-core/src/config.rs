@@ -67,6 +67,7 @@ fn desktop_var_with(
                 .filter_map(|r| {
                     let spelling = r.get("spelling")?.as_str()?;
                     let heard = r.get("heard").and_then(|v| v.as_str()).unwrap_or("");
+                    let heard = heard_in_prompt(heard);
                     Some(if heard.is_empty() {
                         spelling.to_owned()
                     } else {
@@ -123,6 +124,57 @@ pub fn terms() -> Option<String> {
     var("TERMS").and_then(|t| clean_terms(&t))
 }
 
+/// `TERMS` for the speech model: the spellings only, without their heard forms. Given
+/// `yes (Z / jest)`, whisper wrote "jest" where it had heard "yes" without the prompt.
+pub fn spoken_terms() -> Option<String> {
+    terms().map(|t| spelling_only(&t))
+}
+
+/// `check (chắc / chết), FCM` as `check, FCM`: each term up to its heard forms.
+pub fn spelling_only(terms: &str) -> String {
+    terms
+        .split(", ")
+        .map(|term| term.split(" (").next().unwrap_or(term).trim())
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The most heard forms one spelling keeps.
+const HEARD_FORMS: usize = 8;
+
+/// A spelling's heard forms as the user typed them (`chắc, chết; chéc`): each cleaned like
+/// `TERMS`, repeats dropped (ignoring case), at most `HEARD_FORMS`, joined `; ` for the screen.
+pub fn clean_heard(raw: &str) -> String {
+    let mut forms: Vec<String> = vec![];
+    for form in raw.split([',', ';', '/', '\n']).filter_map(clean_term) {
+        if !forms
+            .iter()
+            .any(|f| f.to_lowercase() == form.to_lowercase())
+        {
+            forms.push(form);
+        }
+    }
+    forms.truncate(HEARD_FORMS);
+    forms.join("; ")
+}
+
+/// Heard forms inside one prompt term, `chắc / chết / chéc`: a comma there would split the term.
+pub fn heard_in_prompt(heard: &str) -> String {
+    heard
+        .split([',', ';', '/'])
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+/// One spelling or heard form cleaned like `TERMS`; a comma (which would split it) and any line
+/// break or tab become a space.
+pub fn clean_term(raw: &str) -> Option<String> {
+    clean_terms(&raw.replace([',', '\n', '\r', '\t'], " "))
+}
+
 pub(crate) fn clean_terms(raw: &str) -> Option<String> {
     let terms: Vec<String> = raw
         .split(',')
@@ -173,6 +225,31 @@ pub fn var(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_speech_model_gets_spellings_without_heard_forms() {
+        assert_eq!(
+            spelling_only("check (chắc / chết), FCM, yes (Z / jest)"),
+            "check, FCM, yes"
+        );
+        assert_eq!(spelling_only(""), "");
+    }
+
+    #[test]
+    fn a_spelling_keeps_several_heard_forms_as_one_term() {
+        assert_eq!(
+            clean_heard("chắc, chết; CHẾT/ chéc,,<b>"),
+            "chắc; chết; chéc; b"
+        );
+        assert_eq!(clean_heard(&"x,".repeat(20)), "x");
+        assert_eq!(heard_in_prompt("chắc; chết; chéc"), "chắc / chết / chéc");
+        // A global spelling typed with commas stays one term.
+        let rows = serde_json::json!([{"spelling": "check", "heard": "chắc, chết"}, {"spelling": "FCM", "heard": ""}]);
+        assert_eq!(
+            desktop_var_with("TERMS", |key| (key == "spellings").then(|| rows.clone())).as_deref(),
+            Some("check (chắc / chết), FCM")
+        );
+    }
 
     #[test]
     fn desktop_overrides_are_local_only_and_empty_spellings_turn_off_terms() {

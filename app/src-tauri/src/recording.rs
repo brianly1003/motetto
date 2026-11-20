@@ -623,6 +623,7 @@ fn create(
                 deleted_kind: Default::default(),
                 mic_mode,
                 speaker_names: Default::default(),
+                meeting_spellings: vec![],
                 has_video: false,
             },
         )?;

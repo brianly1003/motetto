@@ -227,7 +227,7 @@ fn transcribe_slice(
         // a peak check; a live mic's room noise passes it (measured 2026-10-19), but
         // skipping by RMS level saved no request on a real call. Needs a VAD to do better.
         if samples.iter().any(|sample| sample.abs() > 0.005) {
-            let prompt = motetto_core::config::terms();
+            let prompt = motetto_core::config::spoken_terms();
             let _slicing = Slicing::begin();
             let heard = server
                 .lock()

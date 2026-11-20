@@ -79,6 +79,11 @@ pub struct MeetingSummary {
     #[serde(default)]
     #[ts(type = "Record<number, string>")]
     pub speaker_names: std::collections::BTreeMap<u32, String>,
+    /// This meeting's own spellings, on top of Settings › Spellings: Transcribe again and Write
+    /// the notes again use them after the global list. Cleaned like `TERMS`, at most 100: all respell the transcript, and
+    /// whisper's prompt takes as many as it holds.
+    #[serde(default)]
+    pub meeting_spellings: Vec<crate::settings::Spelling>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -397,6 +402,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         deleted_kind: Default::default(),
         mic_mode: Default::default(),
         speaker_names: Default::default(),
+        meeting_spellings: vec![],
         has_video: false,
     }
 }
@@ -530,6 +536,7 @@ pub fn import(
         deleted_kind: Default::default(),
         mic_mode: Default::default(),
         speaker_names: Default::default(),
+        meeting_spellings: vec![],
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -647,6 +654,37 @@ pub(crate) fn used_spellings() -> Vec<String> {
     motetto_core::config::terms()
         .map(|terms| terms.split(", ").map(str::to_owned).collect())
         .unwrap_or_default()
+}
+
+/// A meeting's own spellings as prompt terms: `check (chắc / chết)`, or the spelling alone.
+pub(crate) fn meeting_terms(summary: &MeetingSummary) -> Vec<String> {
+    summary
+        .meeting_spellings
+        .iter()
+        .map(|s| {
+            if s.heard.is_empty() {
+                s.spelling.clone()
+            } else {
+                format!(
+                    "{} ({})",
+                    s.spelling,
+                    motetto_core::config::heard_in_prompt(&s.heard)
+                )
+            }
+        })
+        .collect()
+}
+
+/// The heard forms to fix after whisper in this meeting: the global spellings' and its own.
+pub(crate) fn spelling_pairs(summary: &MeetingSummary) -> Vec<(String, String)> {
+    crate::learned_edits::spelling_pairs(&used_spellings_for(summary).join(", "))
+}
+
+/// What a run used: the global spellings, then the meeting's own.
+pub(crate) fn used_spellings_for(summary: &MeetingSummary) -> Vec<String> {
+    let mut used = used_spellings();
+    used.extend(meeting_terms(summary));
+    used
 }
 
 #[cfg(test)]
@@ -808,6 +846,7 @@ mod tests {
                     deleted_kind: Default::default(),
                     mic_mode: Default::default(),
                     speaker_names: Default::default(),
+                    meeting_spellings: vec![],
                     has_video: false,
                 },
             )
@@ -879,6 +918,7 @@ mod tests {
                 deleted_kind: Default::default(),
                 mic_mode: Default::default(),
                 speaker_names: Default::default(),
+                meeting_spellings: vec![],
                 has_video: false,
             };
             save(&root, &summary).unwrap();

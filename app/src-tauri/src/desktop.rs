@@ -45,6 +45,8 @@ pub fn run() {
             crate::meeting_actions::rename_meeting,
             crate::meeting_actions::set_locked,
             crate::meeting_actions::set_speaker_names,
+            crate::meeting_actions::set_meeting_spellings,
+            crate::meeting_actions::set_global_spellings,
             crate::meeting_actions::set_unconfirmed,
             library_commands::search_meetings,
             library_commands::open_action_items,

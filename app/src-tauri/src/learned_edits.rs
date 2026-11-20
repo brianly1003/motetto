@@ -191,6 +191,55 @@ fn skeleton(s: &[char]) -> Vec<char> {
     out
 }
 
+/// The `heard → spelling` pairs of a spelling list (`check (chắc / chết), FCM`): every heard form
+/// that differs from its spelling, longest first so `ô tô` goes before a shorter form inside it.
+pub fn spelling_pairs(terms: &str) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = vec![];
+    for term in terms.split(", ") {
+        let Some((spelling, heard)) = term.split_once(" (") else {
+            continue;
+        };
+        let spelling = spelling.trim();
+        for form in heard.trim_end_matches(')').split(" / ").map(str::trim) {
+            if !form.is_empty()
+                && form.to_lowercase() != spelling.to_lowercase()
+                && !pairs
+                    .iter()
+                    .any(|(h, _)| h.to_lowercase() == form.to_lowercase())
+            {
+                pairs.push((form.to_owned(), spelling.to_owned()));
+            }
+        }
+    }
+    pairs.sort_by_key(|(heard, _)| std::cmp::Reverse(heard.chars().count()));
+    pairs
+}
+
+/// The spelling guard after whisper: every heard form in each line's text (never its
+/// `[mm:ss] Speaker: ` prefix) replaced by its spelling, whole words in any case. Line for line,
+/// so it fits the edited copy.
+pub fn respell(transcript: &str, pairs: &[(String, String)]) -> String {
+    if pairs.is_empty() {
+        return transcript.to_owned();
+    }
+    transcript
+        .split('\n')
+        .map(|line| {
+            let head = prefix(line);
+            if head.is_empty() {
+                return line.to_owned();
+            }
+            let text = pairs
+                .iter()
+                .fold(line[head.len()..].to_owned(), |text, (heard, spelling)| {
+                    replace_phrase(&text, heard, spelling)
+                });
+            format!("{head}{text}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Every whole-phrase, case-insensitive match of `heard` in `text` replaced by `spelling`; a match
 /// inside a longer word is left alone.
 fn replace_phrase(text: &str, heard: &str, spelling: &str) -> String {
@@ -275,6 +324,24 @@ mod tests {
             "[00:02] Them: we use Pusher Beams\n[00:04] Them: Pusher Beams works\n\
              [00:05] Me: \n[00:14] Them: their done"
         );
+    }
+
+    #[test]
+    fn spellings_replace_their_heard_forms_in_line_text_only() {
+        let pairs = spelling_pairs(
+            "check (chắc / chết), FCM, yes (Z / jest), auto (ô tô / tô), claim (clam / CLAM)",
+        );
+        let at = |h: &str| pairs.iter().position(|(heard, _)| heard == h).unwrap();
+        assert!(at("ô tô") < at("tô"), "a longer form goes first");
+        assert_eq!(pairs.len(), 7);
+        let text = "[00:00] Speaker 2: Nó trả lời là jest, Jest của bé.\n\
+                    [00:02] Me: chắc chắn clam ô tô, không phải tôi\n[00:03] Them: Zoom";
+        assert_eq!(
+            respell(text, &pairs),
+            "[00:00] Speaker 2: Nó trả lời là yes, yes của bé.\n\
+             [00:02] Me: check chắn claim auto, không phải tôi\n[00:03] Them: Zoom"
+        );
+        assert_eq!(respell(text, &[]), text);
     }
 
     #[test]

@@ -34,8 +34,14 @@ pub fn find(
     let mic = parts
         .iter()
         .any(|(sources, _)| sources.iter().any(|s| s.ends_with(".mic.wav")));
+    let speech = saved_speech(parts);
     if people == Some(1) {
-        return Ok(one_voice(heard, edited, mic));
+        return Ok(with_turns(
+            one_voice(heard, edited, mic),
+            heard,
+            edited,
+            &speech,
+        ));
     }
     let mut turns = vec![];
     for (sources, offset) in parts {
@@ -48,7 +54,65 @@ pub fn find(
             turns.extend(found.into_iter().map(|t| t.shifted(*offset)));
         }
     }
-    Ok(relabel(heard, edited, &turns, mic))
+    Ok(with_turns(
+        relabel(heard, edited, &turns, mic),
+        heard,
+        edited,
+        &speech,
+    ))
+}
+
+/// Speech (ms intervals) heard on the mic and in the call audio.
+type Sides = (Vec<(u64, u64)>, Vec<(u64, u64)>);
+
+/// `found` (or the transcript as it was) with long lines cut where the other side took a turn;
+/// None when neither changed anything.
+fn with_turns(
+    found: Option<Found>,
+    heard: &str,
+    edited: Option<&str>,
+    speech: &Option<Sides>,
+) -> Option<Found> {
+    let Some((me, them)) = speech else {
+        return found;
+    };
+    let (text, copy) = found
+        .as_ref()
+        .map_or((heard, edited), |f| (f.heard.as_str(), f.edited.as_deref()));
+    match interleave(text, copy, me, them) {
+        Some((heard, edited)) => Some(Found {
+            heard,
+            edited,
+            voices: found.map_or(1, |f| f.voices),
+        }),
+        None => found,
+    }
+}
+
+/// The speech heard on each side (mic, call audio) of a saved recording, on the meeting's
+/// timeline, from the copies the transcription left: the mic's denoised or echo-cancelled copy
+/// when there is one, so the call heard through loudspeakers doesn't count as the user. None
+/// without the speech model, a copy or a microphone track: lines are then not cut.
+fn saved_speech(parts: &[(Vec<String>, u64)]) -> Option<Sides> {
+    let vad = crate::config::var("WHISPER_VAD_MODEL").filter(|v| !v.is_empty())?;
+    let (mut me, mut them) = (vec![], vec![]);
+    for (sources, offset) in parts {
+        for source in sources {
+            let stem = source.strip_suffix(".wav")?;
+            let (copies, side) = if source.ends_with(".mic.wav") {
+                (vec!["clean", "aec", "16k"], &mut me)
+            } else {
+                (vec!["16k"], &mut them)
+            };
+            let copy = copies
+                .iter()
+                .map(|c| format!("{stem}.{c}.wav"))
+                .find(|c| Path::new(c).exists())?;
+            let speech = crate::slice::speech(Path::new(&copy), &vad).ok()?;
+            side.extend(speech.into_iter().map(|(s, e)| (s + offset, e + offset)));
+        }
+    }
+    (!me.is_empty() && !them.is_empty()).then_some((me, them))
 }
 
 /// The transcript with each named voice's `Speaker N: ` label replaced by its name (`names` maps
@@ -230,6 +294,210 @@ fn relabel(heard: &str, edited: Option<&str>, turns: &[Turn], mic: bool) -> Opti
         heard: arrange(heard),
         voices,
     })
+}
+
+/// Speech of the other side at least this long, with gaps under `TURN_GAP_MS` bridged, is a turn
+/// that can cut a line; shorter is a backchannel ("ừ") or echo. Each side of a cut also needs this
+/// much of the line's own speech.
+const TURN_MS: u64 = 1_500;
+const TURN_GAP_MS: u64 = 500;
+/// A line's own speech ends at its first silence this long (whisper splits there itself).
+const LINE_GAP_MS: u64 = 5_000;
+/// A line whose speech opens with less than this, then this long a silence, starts after it: an
+/// echo or a click that whisper stamped as the line's start. Past `BLIP_LONGEST_GAP_MS` the
+/// speech after it is taken for another line's.
+const BLIP_MS: u64 = 1_000;
+const BLIP_GAP_MS: u64 = LINE_GAP_MS;
+const BLIP_LONGEST_GAP_MS: u64 = 15_000;
+/// The furthest a line is taken to run.
+const LONGEST_TURN_MS: u64 = 120_000;
+
+/// Whisper writes a side's speech until its next pause as one line, so when the two sides take
+/// quick turns, one side's 40 s line holds the other's reply in the middle: "[00:00] Them" ran
+/// over "[00:18] Me". Each line of one side is cut where the other side took a turn
+/// (`me` and `them`: the speech heard on each side, ms on the meeting's timeline) while it was
+/// quiet, its text at the same share of its speech, as Find speakers cuts a line between voices;
+/// a line that opens with a blip starts after it. Both copies change together, line for line.
+/// None when nothing changes.
+/// the text share is approximate (a sentence off); word timings from whisper would place it.
+pub fn interleave(
+    heard: &str,
+    edited: Option<&str>,
+    me: &[(u64, u64)],
+    them: &[(u64, u64)],
+) -> Option<(String, Option<String>)> {
+    let heard_lines: Vec<&str> = heard.split('\n').collect();
+    let edited_lines: Option<Vec<&str>> = edited
+        .map(|e| e.split('\n').collect::<Vec<_>>())
+        .filter(|e| e.len() == heard_lines.len());
+    let mine = |line: &str| prefix(line).ends_with("] Me: ");
+    let timed: Vec<(usize, u64, bool)> = heard_lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !prefix(line).is_empty())
+        .filter_map(|(i, line)| Some((i, millis(prefix(line))?, mine(line))))
+        .collect();
+    let (me_turns, them_turns) = (turns(me), turns(them));
+    // Per line: (start of each piece, the share of its speech before each cut).
+    let mut plans: Vec<Option<(Vec<u64>, Vec<f64>)>> = vec![None; heard_lines.len()];
+    for (n, &(index, start, is_me)) in timed.iter().enumerate() {
+        let (own, other) = if is_me {
+            (me, &them_turns)
+        } else {
+            (them, &me_turns)
+        };
+        let limit = timed[n + 1..]
+            .iter()
+            .find(|t| t.2 == is_me)
+            .map_or(start + LONGEST_TURN_MS, |t| t.1.max(start + 1))
+            .min(start + LONGEST_TURN_MS);
+        let first = opening(own, start, limit);
+        let end = speech_end(own, first, limit);
+        let mut cuts = vec![];
+        let mut from = first;
+        for &(turn, _) in other.iter().filter(|t| t.0 > first && t.0 < end) {
+            if heard_in(own, from, turn) >= TURN_MS
+                && heard_in(own, turn, end) >= TURN_MS
+                && heard_in(own, turn, turn + 1_000) < 500
+            {
+                cuts.push(turn);
+                from = turn;
+            }
+        }
+        let total = heard_in(own, first, end).max(1) as f64;
+        let shares: Vec<f64> = cuts
+            .iter()
+            .map(|&c| heard_in(own, first, c) as f64 / total)
+            .collect();
+        let texts = [
+            Some(heard_lines[index]),
+            edited_lines.as_ref().map(|e| e[index]),
+        ];
+        let splits = texts
+            .iter()
+            .flatten()
+            .all(|line| split_text(&line[prefix(line).len()..], &shares).is_some());
+        let (cuts, shares) = if splits {
+            (cuts, shares)
+        } else {
+            (vec![], vec![])
+        };
+        let starts: Vec<u64> = std::iter::once(first)
+            .chain(cuts.iter().map(|&c| piece_start(own, c, end)))
+            .collect();
+        if starts.len() > 1 || stamp(first) != stamp(start) {
+            plans[index] = Some((starts, shares));
+        }
+    }
+    if plans.iter().all(Option::is_none) {
+        return None;
+    }
+    let build = |source: &[&str]| -> Vec<String> {
+        source
+            .iter()
+            .zip(&plans)
+            .flat_map(|(line, plan)| match plan {
+                None => vec![(*line).to_owned()],
+                Some((starts, shares)) => {
+                    let head = prefix(line);
+                    let label = &head[head.find("] ").map_or(0, |e| e + 2)..];
+                    let text = &line[head.len()..];
+                    split_text(text, shares)
+                        .unwrap_or_else(|| vec![text.to_owned()])
+                        .into_iter()
+                        .zip(starts)
+                        .map(|(text, at)| format!("{}{label}{text}", stamp(*at)))
+                        .collect()
+                }
+            })
+            .collect()
+    };
+    let new_heard = build(&heard_lines);
+    let order = time_order(&new_heard);
+    let arrange = |rows: Vec<String>| {
+        order
+            .iter()
+            .map(|&i| rows[i].clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Some((
+        arrange(new_heard),
+        edited_lines.as_deref().map(|e| arrange(build(e))),
+    ))
+}
+
+/// Speech regions with gaps under `TURN_GAP_MS` bridged, those of `TURN_MS` or more.
+fn turns(speech: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    let mut sorted = speech.to_vec();
+    sorted.sort_unstable();
+    let mut joined: Vec<(u64, u64)> = vec![];
+    for (s, e) in sorted {
+        match joined.last_mut() {
+            Some(last) if s < last.1 + TURN_GAP_MS => last.1 = last.1.max(e),
+            _ => joined.push((s, e)),
+        }
+    }
+    joined.retain(|(s, e)| e - s >= TURN_MS);
+    joined
+}
+
+/// How much of `start..end` is speech.
+fn heard_in(speech: &[(u64, u64)], start: u64, end: u64) -> u64 {
+    speech
+        .iter()
+        .map(|&(s, e)| e.min(end).saturating_sub(s.max(start)))
+        .sum()
+}
+
+/// Where the speech from `start` stops: before its first silence of `LINE_GAP_MS`, or at `limit`.
+fn speech_end(speech: &[(u64, u64)], start: u64, limit: u64) -> u64 {
+    let mut last: Option<u64> = None;
+    let mut sorted: Vec<_> = speech
+        .iter()
+        .filter(|(s, e)| *e > start && *s < limit)
+        .collect();
+    sorted.sort_unstable();
+    for &(s, e) in sorted {
+        if let Some(l) = last.filter(|l| s.saturating_sub(*l) >= LINE_GAP_MS) {
+            return l;
+        }
+        last = Some(last.map_or(e, |l| l.max(e)));
+    }
+    last.map_or(limit, |l| l.min(limit))
+}
+
+/// Where the line's own speech in `start..end` really opens: past blips under `BLIP_MS` followed by
+/// `BLIP_GAP_MS` of silence, when speech follows them in the line.
+fn opening(speech: &[(u64, u64)], start: u64, end: u64) -> u64 {
+    let mut inside: Vec<_> = speech
+        .iter()
+        .filter(|(s, e)| *e > start && *s < end)
+        .copied()
+        .collect();
+    inside.sort_unstable();
+    let mut at = start;
+    for pair in inside.windows(2) {
+        let ((s, e), (next, _)) = (pair[0], pair[1]);
+        if e - s.max(start) >= BLIP_MS
+            || !(BLIP_GAP_MS..=BLIP_LONGEST_GAP_MS).contains(&next.saturating_sub(e))
+        {
+            break;
+        }
+        at = next;
+    }
+    at
+}
+
+/// A later piece's time: its first stretch of own speech of `BLIP_MS` or more after `cut`, else
+/// the cut.
+fn piece_start(speech: &[(u64, u64)], cut: u64, end: u64) -> u64 {
+    speech
+        .iter()
+        .filter(|(s, e)| *s >= cut && *s < end && e - s >= BLIP_MS)
+        .map(|(s, _)| *s)
+        .min()
+        .unwrap_or(cut)
 }
 
 /// The rows' indices in time order: stable, so rows with the same time keep their order, and a row
@@ -477,6 +745,36 @@ mod tests {
                 .unwrap()
                 .heard,
             "[00:01] Speaker 1: a\n[00:02] Speaker 1: b"
+        );
+    }
+
+    #[test]
+    fn a_long_line_is_cut_where_the_other_side_took_a_turn() {
+        // Them talks 0-18 s, Me 18-22 s, Them again 22.5-40 s; whisper made Them one line and
+        // stamped Me at an echo blip at 8 s.
+        let heard = "[00:00] Them: One two. Three four. Five six. Seven eight.\n\
+                     [00:08] Me: My turn now.\n[01:00] Them: later";
+        let edited = heard.replace("Seven", "SEVEN");
+        let me = [(8_300, 8_900), (18_000, 22_000)];
+        let them = [(0, 17_900), (22_500, 40_000), (60_000, 61_000)];
+        let (h, e) = interleave(heard, Some(&edited), &me, &them).unwrap();
+        assert_eq!(
+            h,
+            "[00:00] Them: One two. Three four.\n[00:18] Me: My turn now.\n\
+             [00:22] Them: Five six. Seven eight.\n[01:00] Them: later"
+        );
+        assert_eq!(e.unwrap(), h.replace("Seven", "SEVEN"));
+        // Already in turns: nothing changes.
+        assert_eq!(interleave(&h, None, &me, &them), None);
+        // A backchannel under TURN_MS doesn't cut.
+        assert_eq!(
+            interleave(
+                "[00:00] Them: a b. c d.",
+                None,
+                &[(9_000, 9_800)],
+                &[(0, 8_900), (10_000, 20_000)]
+            ),
+            None
         );
     }
 
