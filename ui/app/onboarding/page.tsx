@@ -130,8 +130,8 @@ export default function Onboarding(){
   const tier=chosen??setup?.tier??hw?.suggested??'Best';
   const tierInfo=catalog?.tiers.find(t=>t.id===tier);
   const file=(id?:string)=>catalog?.files.find(f=>f.id===id);
-  const rows=tierInfo&&catalog?([['Speech model',file(tierInfo.speech)],['Voice detection',file(catalog.vad)],['Notes model (in the background)',file(tierInfo.notes)]] as const).filter(([,f])=>f):[];
-  const tierBytes=(id:TierId)=>{const t=catalog?.tiers.find(x=>x.id===id);return t?[t.speech,catalog!.vad,t.notes].reduce((sum,f)=>sum+(file(f)?.bytes??0),0):0;};
+  const rows=tierInfo&&catalog?([['Speech model',file(tierInfo.speech)],['Voice detection',file(catalog.vad)],['Notes model (in the background)',file(tierInfo.notes)],['Speaker turns (in the background)',file(catalog.speakers[0])],['Speaker voices (in the background)',file(catalog.speakers[1])]] as const).filter(([,f])=>f):[];
+  const tierBytes=(id:TierId)=>{const t=catalog?.tiers.find(x=>x.id===id);return t?[t.speech,catalog!.vad,t.notes,...catalog!.speakers].reduce((sum,f)=>sum+(file(f)?.bytes??0),0):0;};
   const allVerified=rows.length>0&&rows.every(([,f])=>f!.on_disk);
   const phase=setup?.phase.type??'Idle';
   const running=phase==='Downloading'||phase==='SpeedTest';

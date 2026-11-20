@@ -866,7 +866,7 @@ fn onset(levels: &[f32]) -> usize {
 /// label instead of losing the meeting.
 fn voices(src: &str, wav16: &Path, track: Speaker, rows: &[(u64, u64, String)]) -> Vec<Speaker> {
     let spans: Vec<(u64, u64)> = rows.iter().map(|(s, e, _)| (*s, *e)).collect();
-    let turns = match diarize::turns(wav16) {
+    let turns = match diarize::turns(Path::new(src), Some(wav16), None) {
         Ok(Some(turns)) => turns,
         Ok(None) => return vec![track; rows.len()],
         Err(e) => {

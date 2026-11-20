@@ -301,6 +301,12 @@ pub enum Stage {
         of: u32,
         progress: Option<NotesProgress>,
     },
+    /// Find speakers: the speaker models downloading on first use, `percent` of both files.
+    GettingSpeakerModels {
+        percent: u8,
+    },
+    /// Find speakers: the diarizer reading the saved call audio.
+    FindingSpeakers,
     Saving,
 }
 /// How far a transcription is: `percent` of the expected time, and the seconds left once this
@@ -368,6 +374,7 @@ impl Event {
                 progress: Some(progress),
                 ..
             } => (progress.percent.unwrap_or(0), progress.eta_s),
+            Stage::GettingSpeakerModels { percent } => (*percent, None),
             _ => (0, None),
         };
         Event::Stage {

@@ -25,7 +25,11 @@ adopted: { [key in string]: string },
 /**
  * Resolved and written only by Rust after verification; empty means not ready.
  */
-speech_path: string, vad_path: string, notes_path: string, call_language: string, part_chars: number, keep_audio: string, screen_offer_on_ask: boolean, screen_source: string, screen_on_own_share: string, screen_preset: string, screen_cursor: boolean, keep_video: string, recording_reminder: boolean, 
+speech_path: string, vad_path: string, notes_path: string, 
+/**
+ * The speaker pair (segmentation, voices); both set or both empty.
+ */
+speakers_segmentation_path: string, speakers_voices_path: string, call_language: string, part_chars: number, keep_audio: string, screen_offer_on_ask: boolean, screen_source: string, screen_on_own_share: string, screen_preset: string, screen_cursor: boolean, keep_video: string, recording_reminder: boolean, 
 /**
  * Settings › Screen: Motetto's windows show in screen shares when a session starts (SPEC 14.1).
  */

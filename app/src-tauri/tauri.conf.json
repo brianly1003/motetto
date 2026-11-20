@@ -35,7 +35,8 @@
       "binaries/whisper-server",
       "binaries/whisper-cli",
       "binaries/whisper-vad-speech-segments",
-      "binaries/llama-server"
+      "binaries/llama-server",
+      "binaries/sherpa-onnx-offline-speaker-diarization"
     ],
     "resources": ["resources/speed-sample.wav", "resources/LICENSES.md"],
     "macOS": {

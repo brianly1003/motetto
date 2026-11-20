@@ -21,6 +21,7 @@ pub mod session;
 pub mod share_check;
 pub mod shorten;
 pub mod slice;
+pub mod speakers;
 pub mod summarize;
 pub mod transcribe;
 pub mod translate;

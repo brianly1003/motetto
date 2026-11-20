@@ -2,4 +2,4 @@
 import type { NotesProgress } from "./NotesProgress";
 import type { TranscribeProgress } from "./TranscribeProgress";
 
-export type Stage = { "type": "Recording" } | { "type": "Transcribing", progress: TranscribeProgress | null, } | { "type": "Summarizing", part: number, of: number, progress: NotesProgress | null, } | { "type": "Merging", of: number, progress: NotesProgress | null, } | { "type": "Saving" };
+export type Stage = { "type": "Recording" } | { "type": "Transcribing", progress: TranscribeProgress | null, } | { "type": "Summarizing", part: number, of: number, progress: NotesProgress | null, } | { "type": "Merging", of: number, progress: NotesProgress | null, } | { "type": "GettingSpeakerModels", percent: number, } | { "type": "FindingSpeakers" } | { "type": "Saving" };

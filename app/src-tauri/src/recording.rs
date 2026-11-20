@@ -622,6 +622,7 @@ fn create(
                 facts,
                 deleted_kind: Default::default(),
                 mic_mode,
+                speaker_names: Default::default(),
                 has_video: false,
             },
         )?;

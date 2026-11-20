@@ -62,4 +62,10 @@ deleted_kind: DeletedKind,
  * meeting was recorded, or in Transcribe again. Meetings saved before it was kept are
  * Standard, as they were transcribed.
  */
-mic_mode: MicMode, };
+mic_mode: MicMode, 
+/**
+ * Names given to the voices Find speakers told apart, by number (`Speaker 3` is 3). The
+ * transcript files keep `Speaker N`; screens, Copy and the notes prompt show the name, and
+ * voices sharing a name read as one person.
+ */
+speaker_names: Record<number, string>, };

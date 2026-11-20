@@ -10,6 +10,7 @@ mod companion;
 mod controller;
 mod desktop;
 mod download;
+mod find_speakers;
 mod follow;
 #[cfg(target_os = "macos")]
 mod follow_macos;

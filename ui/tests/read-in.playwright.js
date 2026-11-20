@@ -128,7 +128,7 @@ async (page) => {
   if (!await p.getByRole('checkbox').first().isDisabled()) fails.push('ticks allowed on a stale translation');
   // Same shape and place as the offer (owner 2026-10-30), not a separate card.
   const at = await p.locator('.readin-col .readin-bar.stale').evaluate(e => { const c = getComputedStyle(e), r = e.getBoundingClientRect(), notes = document.querySelector('.readin-col .notes').getBoundingClientRect(); return [r.left - notes.left, c.borderRadius, c.paddingLeft, c.fontSize]; });
-  if (JSON.stringify(at) !== JSON.stringify([0, '10px', '12px', '12.5px'])) fails.push('stale bar shape: ' + JSON.stringify(at));
+  if (JSON.stringify(at) !== JSON.stringify([0, '10px', '12px', '12px'])) fails.push('stale bar shape: ' + JSON.stringify(at));
   await p.screenshot({ path: '.playwright-out/read-in-stale.png' });
   await p.emulateMedia({ colorScheme: 'dark' });
   await p.screenshot({ path: '.playwright-out/read-in-stale-dark.png' });

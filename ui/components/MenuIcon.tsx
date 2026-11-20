@@ -10,6 +10,7 @@ const paths = {
   folder: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/>,
   again: <><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5v3h-3"/></>,
   wave: <path d="M3 6.5v3M5.5 4.5v7M8 2.5v11M10.5 5v6M13 6.5v3"/>,
+  people: <><circle cx="6" cy="5.5" r="2.2"/><path d="M2.4 13.2c.4-2.3 1.8-3.5 3.6-3.5s3.2 1.2 3.6 3.5"/><circle cx="11.2" cy="6.2" r="1.8"/><path d="M11 9.8c1.4.1 2.4 1.1 2.7 3.1"/></>,
   items: <><rect x="2.8" y="2.8" width="10.4" height="10.4" rx="2.6"/><path d="m5.6 8.1 1.7 1.7 3.2-3.4"/></>,
   trash: <path d="M2.8 4.5h10.4M6.3 4.5V3h3.4v1.5M4.3 4.5l.7 8.5h6l.7-8.5"/>,
   script: <path d="M3 4h10M3 8h10M3 12h6"/>,

@@ -14,7 +14,7 @@ button.ptchip { border: 0; font: inherit; white-space: nowrap; cursor: pointer; 
 button.ptchip:hover { background: var(--line); }
 .ptchip b { font-weight: 500; }
 .ptchip .chev { vertical-align: -2px; color: var(--ink-2); }
-.ptmenu { position: absolute; bottom: 34px; left: 90px; z-index: 5; width: 230px; max-height: calc(100vh - 52px); overflow: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 5px; display: grid; gap: 1px; font-size: 12.5px; }
+.ptmenu { position: absolute; bottom: 34px; left: 90px; z-index: 5; width: 230px; max-height: calc(100vh - 52px); overflow: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 5px; display: grid; gap: 1px; font-size: 12px; }
 .ptmenu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--ink-1); display: flex; gap: 8px; align-items: center; font: inherit; cursor: pointer; }
 .ptmenu button:hover { background: var(--surface-2); }
 .ptmenu button i { width: 12px; flex: none; font-style: normal; color: var(--voice-me); }

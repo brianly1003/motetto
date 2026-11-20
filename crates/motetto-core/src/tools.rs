@@ -17,11 +17,12 @@ static BUNDLED_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// The programs the desktop ships next to the app; with a bundled folder set they never come
 /// from PATH.
-pub const BUNDLED: [&str; 4] = [
+pub const BUNDLED: [&str; 5] = [
     "whisper-server",
     "whisper-cli",
     "whisper-vad-speech-segments",
     "llama-server",
+    "sherpa-onnx-offline-speaker-diarization",
 ];
 
 /// Desktop only: run the `BUNDLED` programs from `dir`.

@@ -117,6 +117,9 @@ pub struct Settings {
     pub speech_path: String,
     pub vad_path: String,
     pub notes_path: String,
+    /// The speaker pair (segmentation, voices); both set or both empty.
+    pub speakers_segmentation_path: String,
+    pub speakers_voices_path: String,
     pub call_language: String,
     pub part_chars: u32,
     pub keep_audio: String,
@@ -171,6 +174,8 @@ impl Default for Settings {
             adopted: BTreeMap::new(),
             speech_path: String::new(),
             vad_path: String::new(),
+            speakers_segmentation_path: String::new(),
+            speakers_voices_path: String::new(),
             notes_path: String::new(),
             call_language: "detect".into(),
             part_chars: motetto_core::config::var("SUMMARY_CHUNK_CHARS")
@@ -422,6 +427,8 @@ fn keep_setup(s: &mut Settings, saved: Settings) {
     s.speech_path = saved.speech_path;
     s.vad_path = saved.vad_path;
     s.notes_path = saved.notes_path;
+    s.speakers_segmentation_path = saved.speakers_segmentation_path;
+    s.speakers_voices_path = saved.speakers_voices_path;
 }
 
 pub struct Store {
@@ -887,6 +894,7 @@ mod tests {
             ],
             tiers: vec![],
             vad: "v".into(),
+            speakers: vec![],
         };
         let speech = root.join("s.bin");
         let vad = root.join("v.bin");

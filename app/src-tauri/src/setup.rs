@@ -50,6 +50,12 @@ pub fn next(state: &SetupState, installed: &dyn Fn(&str) -> bool) -> Phase {
             id: tier.notes.clone(),
         };
     }
+    // Speakers last: optional, and small next to the notes model.
+    for id in &cat.speakers {
+        if !installed(id) {
+            return Phase::Downloading { id: id.clone() };
+        }
+    }
     Phase::Done
 }
 
@@ -115,6 +121,19 @@ pub fn refresh_paths(s: &mut Settings, cat: &Catalog, dir: &Path) {
     s.speech_path = speech;
     s.vad_path = vad;
     s.notes_path = notes;
+    // Both or neither: the diarizer needs the pair.
+    let pair: Vec<String> = cat.speakers.iter().map(|id| resolve(id)).collect();
+    let ready = pair.len() == 2 && pair.iter().all(|p| !p.is_empty());
+    s.speakers_segmentation_path = if ready {
+        pair[0].clone()
+    } else {
+        String::new()
+    };
+    s.speakers_voices_path = if ready {
+        pair[1].clone()
+    } else {
+        String::new()
+    };
 }
 
 /// A tier's files that are verified become the models in use; the old ones stay in use until then.
@@ -137,9 +156,7 @@ fn files(
     adopted: &BTreeMap<String, String>,
     tier: TierId,
 ) -> Vec<(String, u64, u64)> {
-    let tier = cat.tier(tier);
-    [&tier.speech, &cat.vad, &tier.notes]
-        .into_iter()
+    cat.tier_files(tier)
         .filter_map(|id| cat.file(id))
         .map(|f| {
             let bytes = if model_store::path(dir, adopted, f).is_some() {
@@ -757,6 +774,7 @@ pub async fn start_setup(app: tauri::AppHandle, tier: TierId) -> Result<(), Stri
             let wanted = cat.tier(tier);
             if let Phase::Downloading { id } = &inner.phase
                 && ![&wanted.speech, &wanted.notes, &cat.vad].contains(&id)
+                && !cat.speakers.contains(id)
                 && !inner.queue.contains(id)
             {
                 setup.stop.store(true, Ordering::SeqCst);
@@ -903,6 +921,7 @@ pub async fn delete_unused_models(app: tauri::AppHandle) -> Result<u64, String> 
             s.notes_model.clone(),
             cat.vad.clone(),
         ];
+        keep.extend(cat.speakers.iter().cloned());
         if let (false, Some(tier)) = (s.onboarding_done, s.tier) {
             let tier = cat.tier(tier);
             keep.extend([tier.speech.clone(), tier.notes.clone()]);
@@ -1005,6 +1024,16 @@ mod tests {
         assert_eq!(next(&best, &speech_and_vad), Phase::SpeedTest);
         let fast = state(TierId::Best, Some((2.0, TierId::Best)));
         assert_eq!(next(&fast, &speech_and_vad), downloading("notes-qwen3-8b"));
+        // Speakers come last, after the notes model.
+        let but_speakers = |id: &str| !id.starts_with("speakers-");
+        assert_eq!(
+            next(&fast, &but_speakers),
+            downloading("speakers-segmentation")
+        );
+        assert_eq!(
+            next(&fast, &|id| id != "speakers-voices"),
+            downloading("speakers-voices")
+        );
         assert_eq!(next(&fast, &|_| true), Phase::Done);
         // A result for another tier doesn't count: the new tier is tested again.
         let other = state(TierId::Balanced, Some((2.0, TierId::Best)));
@@ -1227,6 +1256,8 @@ mod tests {
                 file("s", FileKind::Speech, b"speech"),
                 file("v", FileKind::Vad, b"vad"),
                 file("n", FileKind::Notes, b"notes"),
+                file("g", FileKind::Speakers, b"segmentation"),
+                file("e", FileKind::Speakers, b"voices"),
             ],
             tiers: vec![crate::catalog::Tier {
                 id: TierId::Best,
@@ -1236,7 +1267,32 @@ mod tests {
                 suits_pc: String::new(),
             }],
             vad: "v".into(),
+            speakers: vec!["g".into(), "e".into()],
         }
+    }
+
+    #[test]
+    fn speaker_paths_need_both_files() {
+        let dir = folder("speakers");
+        let cat = tiny_catalog();
+        let mut s = Settings::default();
+        std::fs::write(dir.join("g.bin"), b"segmentation").unwrap();
+        refresh_paths(&mut s, &cat, &dir);
+        assert_eq!(
+            (
+                s.speakers_segmentation_path.as_str(),
+                s.speakers_voices_path.as_str()
+            ),
+            ("", "")
+        );
+        std::fs::write(dir.join("e.bin"), b"voices").unwrap();
+        refresh_paths(&mut s, &cat, &dir);
+        assert_eq!(
+            s.speakers_segmentation_path,
+            dir.join("g.bin").to_string_lossy()
+        );
+        assert_eq!(s.speakers_voices_path, dir.join("e.bin").to_string_lossy());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1300,7 +1356,13 @@ mod tests {
         assert_eq!(s.notes_path, "");
         assert_eq!(
             files(&cat, &dir, &s.adopted, TierId::Best),
-            vec![("s".into(), 6, 6), ("v".into(), 0, 3), ("n".into(), 0, 5)]
+            vec![
+                ("s".into(), 6, 6),
+                ("v".into(), 0, 3),
+                ("n".into(), 0, 5),
+                ("g".into(), 0, 12),
+                ("e".into(), 0, 6)
+            ]
         );
         std::fs::remove_dir_all(dir).unwrap();
     }

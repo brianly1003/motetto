@@ -12,7 +12,7 @@ export const libraryBytes = () => invoke<number>("library_bytes");
 export const getMeeting = (id: string) => invoke<Meeting>("get_meeting", { id });
 export const importAudio = () => invoke<MeetingSummary | null>("import_audio");
 // The meeting an import or Write the notes again is writing (id null while the file picker is open).
-export type Job = { id: string | null; import: boolean; transcribe: boolean };
+export type Job = { id: string | null; import: boolean; transcribe: boolean; speakers: boolean };
 export const importing = () => invoke<Job | null>("importing");
 export const cancelImport = () => invoke<void>("cancel_import");
 /** Stop on a meeting's steps page; Write the notes again and Transcribe again then fail with STOPPED. */
@@ -213,10 +213,12 @@ export const openActionItems = () => invoke<[MeetingSummary, string][]>("open_ac
 export const searchMeetings = (query: string) => invoke<SearchHit[]>("search_meetings", { query });
 
 /** `language`: Write the notes again in this code (or "same_as_call") instead of the Settings one. */
-export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "delete" | "restore" | "purge", language?: string, micMode?: MicMode) => invoke<void>("meeting_action", { id, action, language: language ?? null, micMode: micMode ?? null });
+export const meetingAction = (id: string, action: "reveal" | "regenerate" | "retranscribe" | "find_speakers" | "delete" | "restore" | "purge", language?: string, micMode?: MicMode, people?: number) => invoke<void>("meeting_action", { id, action, language: language ?? null, micMode: micMode ?? null, people: people ?? null });
 export const deletedMeetings = () => invoke<MeetingSummary[]>("deleted_meetings");
 export const renameMeeting = (id: string, title: string) => invoke<MeetingSummary>("rename_meeting", { id, title });
 export const setLocked = (id: string, locked: boolean) => invoke<MeetingSummary>("set_locked", { id, locked });
+/** Names the meeting's voices (SPEC 7.11): the whole map each time, so Undo sends the earlier one. */
+export const setSpeakerNames = (id: string, names: Record<number, string>) => invoke<MeetingSummary>("set_speaker_names", { id, names });
 export const setUnconfirmed = (id: string, lines: string[]) => invoke<MeetingSummary>("set_unconfirmed", { id, lines });
 
 import type { MeetingMedia } from './bindings/MeetingMedia';
@@ -239,6 +241,7 @@ export const playbackClose=(id:string)=>invoke<void>('playback_close',{id});
 export const setActionItemDone = (id:string, line:number, done:boolean, expected:string) => invoke<string>('set_action_item_done',{id,line,done,expected});
 export const saveNotes = (id:string, markdown:string, expected:string) => invoke<string>('save_notes',{id,markdown,expected});
 export const saveTranscriptLine = (id:string, index:number, text:string) => invoke<string>('save_transcript_line',{id,index,text});
+export const moveTranscriptLines = (id:string, indices:number[], voice:number) => invoke<string>('move_transcript_lines',{id,indices,voice});
 
 import type { Settings } from './bindings/Settings';
 export type CallApp=Settings['apps'][number];

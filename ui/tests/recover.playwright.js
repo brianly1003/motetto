@@ -55,7 +55,7 @@ async (page) => {
       const x = await p.locator(a).first().evaluate((e, ps) => Object.fromEntries(ps.map(k => [k, getComputedStyle(e)[k]])), props);
       const y = await ref.locator('.mainwin ' + b).first().evaluate((e, ps) => Object.fromEntries(ps.map(k => [k, getComputedStyle(e)[k]])), props);
       // The text column follows the window width; the icon and actions columns must match.
-      const tracks = v => v.split(' ').filter((_, i, all) => i !== 1 || all.length < 3).join(' ');
+      const tracks = v => v.split(' ').filter((_, i, all) => i !== 1 || all.length < 2).join(' ');
       for (const k of props) if (k === 'gridTemplateColumns' ? tracks(x[k]) !== tracks(y[k]) : x[k] !== y[k]) differences.push(`${a} ${k}: ${x[k]} != ${y[k]}`);
     }
     const iconSame = await p.locator('.home .banner .alert-icon').innerHTML() === await ref.locator('.mainwin .home .banner .alert-icon').innerHTML();

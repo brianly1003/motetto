@@ -1,4 +1,5 @@
 "use client";
+import { namedTranscript } from "@/lib/speakerNames";
 import { Alert } from "@/components/Alert";
 import { useEffect, useRef, useState } from "react";
 import type { Meeting } from "@/lib/bindings/Meeting";
@@ -8,7 +9,7 @@ import { WriteInSelect } from "@/components/ReadIn";
 import { renderNotes } from "@/lib/md";
 import { withoutTranscript } from "@/lib/document";
 import { strings as s } from "@/lib/strings";
-import { MenuItem, MenuSwitch } from "@/components/MenuIcon";
+import { MenuIcon, MenuItem, MenuSwitch } from "@/components/MenuIcon";
 import { KbdGroup } from "@/components/ui/Kbd";
 import { ChevronDown } from "@/components/ui/Icon";
 import { MicIcon } from "@/components/Microphone";
@@ -42,7 +43,9 @@ export const deleteBlocked = (m: { status: string; locked: boolean }) => !deleta
 export default function MeetingActions({ meeting, shown, reading, ask, hasAudio, clip, onChanged, onError, onToast, onRename, onDelete, onLock }: { meeting: Meeting; /** Save a clip: why it is unavailable (a string), or how to open it. */ clip?: { blocked: string | null; open: () => void }; shown?: string; reading?: string | null; ask?: { code: string } | null; hasAudio: boolean; onChanged: (deleted: boolean) => Promise<void>; onError: (message: string) => void; onToast?: (text: string) => void; onRename: () => void; onDelete: () => void; onLock: (locked: boolean) => void }) {
   const locked = meeting.summary.locked;
   const [menu, setMenu] = useState<"copy" | "more" | null>(null);
-  const [confirm, setConfirm] = useState<"regenerate" | "retranscribe" | null>(null);
+  const [confirm, setConfirm] = useState<"regenerate" | "retranscribe" | "find_speakers" | null>(null);
+  // Find speakers: how many other people were on the call; 0 is "Not sure".
+  const [people, setPeople] = useState(0);
   // Transcribe again's Microphone choice, starting from how this transcript was made.
   const [micMode, setMicMode] = useState<MicMode>(meeting.summary.mic_mode);
   useEffect(() => { setMicMode(meeting.summary.mic_mode); }, [meeting.summary.id, meeting.summary.mic_mode, confirm]);
@@ -74,17 +77,17 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
   }, [meeting.notes_md, shown]);
   // The transcript copies as saved, with your corrections: "[mm:ss] Me: …" and "Them:" per line.
   async function copy(kind: "items" | "markdown" | "plain" | "transcript") {
-    try { await navigator.clipboard.writeText(kind === "transcript" ? meeting.transcript.trim() : notesText(shown ?? meeting.notes_md, kind, meeting.notes_md)); setMessage(s.copied); setMenu(null); }
+    try { await navigator.clipboard.writeText(kind === "transcript" ? namedTranscript(meeting.transcript, meeting.summary.speaker_names ?? {}).trim() : notesText(shown ?? meeting.notes_md, kind, meeting.notes_md)); setMessage(s.copied); setMenu(null); }
     catch (error) { onError(String(error)); }
   }
-  async function run(action: "reveal" | "regenerate" | "retranscribe") {
+  async function run(action: "reveal" | "regenerate" | "retranscribe" | "find_speakers") {
     setBusy(true); setMenu(null);
     // The question is answered either way; a failure shows in the page's alert, not under it.
     // The menu is hidden while the job runs, so the parent shows what finished.
-    try { await meetingAction(meeting.summary.id, action, action === "regenerate" ? language : undefined, action === "retranscribe" ? micMode : undefined); if (action !== "reveal") await onChanged(false); if (action === "retranscribe") onToast?.(s.retranscribed); }
+    try { await meetingAction(meeting.summary.id, action, action === "regenerate" ? language : undefined, action === "retranscribe" ? micMode : undefined, action === "find_speakers" && people ? people : undefined); if (action !== "reveal") await onChanged(false); if (action === "retranscribe") onToast?.(s.retranscribed); if (action === "find_speakers") onToast?.(s.foundSpeakers); }
     catch (error) {
       // Stop on the steps page is not a failure: nothing was replaced (owner 2026-10-25).
-      if (String(error) === STOPPED) { await onChanged(false); onToast?.(action === "retranscribe" ? s.stoppedTranscript : s.stoppedNotes); }
+      if (String(error) === STOPPED) { await onChanged(false); onToast?.(action === "regenerate" ? s.stoppedNotes : s.stoppedTranscript); }
       else onError(String(error));
     }
     finally { setBusy(false); setConfirm(null); }
@@ -107,6 +110,7 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       <MenuItem icon="rename" label={s.rename} disabled={locked} title={locked ? s.lockedHint : undefined} onClick={() => { setMenu(null); onRename(); }}/>
       <MenuItem icon="again" label={s.regenerate} disabled={locked} title={locked ? s.lockedHint : undefined} onClick={() => askRegenerate()}/>
       <MenuItem icon="wave" label={s.retranscribe} disabled={locked || !hasAudio} title={locked ? s.lockedHint : !hasAudio ? s.noAudio : undefined} onClick={() => { setConfirm("retranscribe"); setMenu(null); }}/>
+      <MenuItem icon="people" label={s.findSpeakers} disabled={locked || !hasAudio || !meeting.transcript.trim()} title={locked ? s.lockedHint : !hasAudio ? s.noAudio : undefined} onClick={() => { setConfirm("find_speakers"); setMenu(null); }}/>
       {clip && <MenuItem icon="cut" label={s.clipMenu} disabled={!!clip.blocked} title={clip.blocked ?? undefined} onClick={() => { setMenu(null); clip.open(); }}/>}
       <MenuItem icon="folder" label={s.reveal} onClick={() => run("reveal")}/>
       <div className="sep"/>
@@ -114,8 +118,9 @@ export default function MeetingActions({ meeting, shown, reading, ask, hasAudio,
       <div className="sep"/>
       <MenuItem icon="trash" label={s.deleteMeeting} danger disabled={!!deleteBlocked(meeting.summary)} title={deleteBlocked(meeting.summary)} onClick={() => { setMenu(null); onDelete(); }}/>
     </div>}
-    {confirm && <Alert variant="warning" className="doc-confirm" role="alertdialog" title={confirm === "retranscribe" ? s.retranscribe : s.regenerate} actions={<><button className="doc-action" disabled={busy} onClick={() => run(confirm)}>{busy ? s.processing : confirm === "regenerate" && language !== "same_as_call" ? s.writeInGo.replace("{lang}", nativeName(language)) : s.confirm}</button><button className="doc-action ghost" disabled={busy} onClick={() => setConfirm(null)}>{s.cancel}</button></>}>
-      {confirm === "retranscribe" ? <>{corrections ? s.retranscribeEdited.replace("{n}", String(corrections)) : s.retranscribeConfirm}<label className="writein"><MicIcon/><span>{s.micModeMic}</span><select aria-label={s.micModeLabel} value={micMode} disabled={busy} onChange={event => setMicMode(event.target.value as MicMode)}>{MIC_MODES.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><span className="writein-help">{s.micModeRetx}</span></>
+    {confirm && <Alert variant="warning" className="doc-confirm" role="alertdialog" title={confirm === "retranscribe" ? s.retranscribe : confirm === "find_speakers" ? s.findSpeakers : s.regenerate} actions={<><button className="doc-action" disabled={busy} onClick={() => run(confirm)}>{busy ? s.processing : confirm === "regenerate" && language !== "same_as_call" ? s.writeInGo.replace("{lang}", nativeName(language)) : s.confirm}</button><button className="doc-action ghost" disabled={busy} onClick={() => setConfirm(null)}>{s.cancel}</button></>}>
+      {confirm === "find_speakers" ? <>{s.findSpeakersConfirm}<label className="writein"><MenuIcon name="people"/><span>{s.findSpeakersPeople}</span><select aria-label={s.findSpeakersPeopleLabel} value={people} disabled={busy} onChange={event => setPeople(Number(event.target.value))}><option value={0}>{s.findSpeakersNotSure}</option>{Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}</select></label><span className="writein-help">{s.findSpeakersPeopleHelp} {s.findSpeakersModels}</span></>
+        : confirm === "retranscribe" ? <>{corrections ? s.retranscribeEdited.replace("{n}", String(corrections)) : s.retranscribeConfirm}<label className="writein"><MicIcon/><span>{s.micModeMic}</span><select aria-label={s.micModeLabel} value={micMode} disabled={busy} onChange={event => setMicMode(event.target.value as MicMode)}>{MIC_MODES.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><span className="writein-help">{s.micModeRetx}</span></>
         : <>{s.regenerateConfirm}<WriteInSelect value={language} onChange={setLanguage} call={meeting.summary.language} disabled={busy}/><span className="writein-help">{s.writeInHelp}</span></>}
     </Alert>}
     <span className="sr-only" role="status">{message}</span>

@@ -22,6 +22,7 @@ fn stub_missing_programs() {
         "whisper-cli",
         "whisper-vad-speech-segments",
         "llama-server",
+        "sherpa-onnx-offline-speaker-diarization",
     ] {
         let path = dir.join(format!("{name}-{triple}{ext}"));
         if path.exists() {

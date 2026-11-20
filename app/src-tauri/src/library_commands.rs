@@ -30,6 +30,8 @@ pub(crate) struct Job {
     pub(crate) import: bool,
     /// Transcribe again rather than Write the notes again; the page shows its own steps.
     pub(crate) transcribe: bool,
+    /// Find speakers; its page shows its own steps.
+    pub(crate) speakers: bool,
 }
 
 impl Library {
@@ -80,9 +82,15 @@ pub(crate) fn library_bytes(state: tauri::State<'_, Library>) -> Result<u64, Str
 }
 #[tauri::command]
 pub(crate) fn get_meeting(
+    app: tauri::AppHandle,
     id: String,
     state: tauri::State<'_, Library>,
 ) -> Result<library::Meeting, String> {
+    // Rows out of time order (an older Find speakers) are put back in order first, under the
+    // edit lock; skipped while the meeting is recording or being written.
+    let _ = edit(&app, &id, |root| {
+        crate::transcript_edits::keep_in_time_order(root, &id)
+    });
     library::read(&state.root, &id)
 }
 #[tauri::command]
@@ -134,6 +142,7 @@ pub(crate) async fn import_file(
         id: None,
         import: true,
         transcribe: false,
+        speakers: false,
     }));
     refresh_tray(&app);
     let _ = app.emit("motetto://library-changed", ());
@@ -163,6 +172,7 @@ pub(crate) async fn import_file(
                     id: Some(id.into()),
                     import: true,
                     transcribe: false,
+                    speakers: false,
                 }));
                 let _ = worker.emit("motetto://library-changed", ());
             },

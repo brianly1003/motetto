@@ -196,7 +196,7 @@ export default function SettingsPage(){
           </Row>;
         };
         const used=[settings.speech_model,settings.notes_model];
-        const unused=catalog?.files.filter(f=>f.on_disk&&f.id!==catalog.vad&&!used.includes(f.id)).reduce((sum,f)=>sum+f.bytes,0)??0;
+        const unused=catalog?.files.filter(f=>f.on_disk&&f.id!==catalog.vad&&!catalog.speakers.includes(f.id)&&!used.includes(f.id)).reduce((sum,f)=>sum+f.bytes,0)??0;
         const mac=info?.platform!=='windows';
         const result=speed??settings.speed_test;
         const testTier:TierId|undefined=tierOf(settings.speech_model)??hw?.suggested;

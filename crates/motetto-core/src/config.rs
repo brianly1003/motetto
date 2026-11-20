@@ -45,6 +45,12 @@ fn desktop_var_with(
         // The *_path keys are resolved by the app after a model is verified; empty means not ready.
         "WHISPER_MODEL" => value("speech_path").and_then(|v| v.as_str().map(str::to_owned)),
         "WHISPER_VAD_MODEL" => value("vad_path").and_then(|v| v.as_str().map(str::to_owned)),
+        "DIARIZE_SEGMENTATION_MODEL" => {
+            value("speakers_segmentation_path").and_then(|v| v.as_str().map(str::to_owned))
+        }
+        "DIARIZE_EMBEDDING_MODEL" => {
+            value("speakers_voices_path").and_then(|v| v.as_str().map(str::to_owned))
+        }
         // The bundled engine ignores the name; any non-empty value only says "ready".
         "OLLAMA_MODEL" => value("notes_path").and_then(|v| {
             v.as_str()

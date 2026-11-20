@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build whisper.cpp and llama.cpp at the pinned tags and copy the four programs the desktop
+# Build whisper.cpp, llama.cpp and sherpa-onnx at the pinned tags and copy the five programs the desktop
 # bundles to app/src-tauri/binaries/{name}-{target-triple} (the names Tauri's externalBin wants).
 # Usage: scripts/build-sidecars.sh [target-triple]   (default: the host triple from rustc)
 # Needs git, cmake and a C++ toolchain. Windows runs it from Git Bash with the MSVC toolchain
@@ -56,6 +56,14 @@ install_program() {
 
 whisper=$(fetch whisper.cpp https://github.com/ggml-org/whisper.cpp "$WHISPER_CPP_TAG" "$WHISPER_CPP_COMMIT")
 llama=$(fetch llama.cpp https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_TAG" "$LLAMA_CPP_COMMIT")
+sherpa=$(fetch sherpa-onnx https://github.com/k2-fsa/sherpa-onnx "$SHERPA_ONNX_TAG" "$SHERPA_ONNX_COMMIT")
+# Speakers: the diarization program alone, CPU only, linked against sherpa-onnx's pinned static
+# ONNX Runtime (its CMake downloads that archive), so it is one file with no libraries beside it.
+speakers=sherpa-onnx-offline-speaker-diarization
+sherpa_flags=(-DSHERPA_ONNX_ENABLE_PYTHON=OFF -DSHERPA_ONNX_ENABLE_TESTS=OFF
+  -DSHERPA_ONNX_ENABLE_CHECK=OFF -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF
+  -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF -DSHERPA_ONNX_ENABLE_TTS=OFF -DSHERPA_ONNX_ENABLE_C_API=OFF
+  -DSHERPA_ONNX_ENABLE_BINARY=ON)
 whisper_programs=(whisper-server whisper-cli whisper-vad-speech-segments)
 # llama-server only serves plain HTTP on localhost and the app downloads models itself: no TLS.
 
@@ -67,6 +75,8 @@ case $triple in
     build "$llama" "$cache/build-llama" "${gpu[@]}" -DLLAMA_OPENSSL=OFF -- llama-server
     for p in "${whisper_programs[@]}"; do install_program "$cache/build-whisper" "$p" ""; done
     install_program "$cache/build-llama" llama-server ""
+    build "$sherpa" "$cache/build-sherpa" "${sherpa_flags[@]}" -- "$speakers"
+    install_program "$cache/build-sherpa" "$speakers" ""
     ;;
   *windows*)
     # A Vulkan build and a CPU build; the app picks one at run time.
@@ -79,6 +89,8 @@ case $triple in
       done
       install_program "$cache/build-llama-$variant" llama-server "-$variant"
     done
+    build "$sherpa" "$cache/build-sherpa" "${sherpa_flags[@]}" -- "$speakers"
+    install_program "$cache/build-sherpa" "$speakers" ""
     ;;
   *)
     echo "unsupported target $triple" >&2

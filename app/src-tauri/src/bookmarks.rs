@@ -32,8 +32,80 @@ pub fn save(root: &Path, value: &MeetingSummary) -> Result<(), String> {
         }
         value.locked = saved.locked;
         value.reach_ms = saved.reach_ms;
+        value.speaker_names = saved.speaker_names;
     }
     write(root, &value)
+}
+
+/// The highest voice number a name can be given to, and the longest name.
+const MOST_VOICES: u32 = 99;
+const NAME_CHARS: usize = 40;
+
+/// A speaker name made safe to stand in a `[mm:ss] Name: ` line (Copy, the notes prompt):
+/// letters, digits, spaces and `.'-&()` only, so no colon, bracket or line break; at most 40
+/// characters, spaces collapsed. Empty when nothing is left.
+pub fn clean_speaker_name(name: &str) -> String {
+    // Anything else becomes a space, so `Thị:Phương` or a line break between words keeps two words.
+    let kept: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || ".'-&()".contains(c) {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let joined = kept.split_whitespace().collect::<Vec<_>>().join(" ");
+    joined
+        .chars()
+        .take(NAME_CHARS)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+/// Replaces the meeting's speaker names (SPEC 7.11). A name that only says `Speaker N` again is
+/// dropped; You, Me, Them and another voice's `Speaker N` are refused, as they already mean
+/// someone. Undo sends the earlier names back.
+pub fn set_speaker_names(
+    root: &Path,
+    id: &str,
+    names: &std::collections::BTreeMap<u32, String>,
+) -> Result<MeetingSummary, String> {
+    let mut cleaned = std::collections::BTreeMap::new();
+    for (&voice, name) in names {
+        if !(1..=MOST_VOICES).contains(&voice) {
+            return Err("Unknown speaker".into());
+        }
+        let name = clean_speaker_name(name);
+        let lower = name.to_lowercase();
+        if name.is_empty() || lower == format!("speaker {voice}") {
+            continue;
+        }
+        if ["you", "me", "them"].contains(&lower.as_str())
+            || lower
+                .strip_prefix("speaker ")
+                .is_some_and(|n| n.parse::<u32>().is_ok())
+        {
+            return Err(format!(
+                "“{name}” already means someone here. Choose another name."
+            ));
+        }
+        cleaned.insert(voice, name);
+    }
+    let _guard = WRITER
+        .lock()
+        .map_err(|_| "Meeting storage is unavailable")?;
+    let mut value = library::summary(root, id)?;
+    if value.locked {
+        return Err(LOCKED.into());
+    }
+    if value.speaker_names != cleaned {
+        value.speaker_names = cleaned;
+        write(root, &value)?;
+    }
+    Ok(value)
 }
 
 /// SPEC 7.6: one line, at most 80 characters; an empty title is refused (the UI keeps the old one).
@@ -215,6 +287,61 @@ mod tests {
         assert!(set_unconfirmed(&root, "123", vec!["x".repeat(501)]).is_err());
         set_locked(&root, "123", true).unwrap();
         assert_eq!(set_unconfirmed(&root, "123", vec![]).unwrap_err(), LOCKED);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn speaker_names_are_cleaned_kept_from_workers_and_refused_when_locked() {
+        let root = std::env::temp_dir().join(format!(
+            "motetto-speakers-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("123")).unwrap();
+        fs::write(
+            root.join("123/meeting.json"),
+            r#"{"id":"123","title":"Call","created_ms":0,"status":"Ready"}"#,
+        )
+        .unwrap();
+        // An old meeting.json has none.
+        assert!(
+            library::summary(&root, "123")
+                .unwrap()
+                .speaker_names
+                .is_empty()
+        );
+        let names = |pairs: &[(u32, &str)]| -> std::collections::BTreeMap<u32, String> {
+            pairs.iter().map(|(n, v)| (*n, v.to_string())).collect()
+        };
+        let saved = set_speaker_names(
+            &root,
+            "123",
+            &names(&[
+                (2, "  Nguyễn  Thị: Phương\n[Anh] "),
+                (3, "Speaker 3"),
+                (4, ""),
+            ]),
+        )
+        .unwrap();
+        // No colon, bracket or line break survives; `Speaker 3` for voice 3 and empty mean unnamed.
+        assert_eq!(saved.speaker_names, names(&[(2, "Nguyễn Thị Phương Anh")]));
+        assert_eq!(clean_speaker_name(&"x".repeat(60)).len(), 40);
+        for taken in ["You", "them", "Speaker 5"] {
+            assert!(set_speaker_names(&root, "123", &names(&[(2, taken)])).is_err());
+        }
+        assert!(set_speaker_names(&root, "123", &names(&[(0, "Kevin")])).is_err());
+        // A worker saving the meeting it read earlier keeps the names given meanwhile.
+        let mut stale = library::summary(&root, "123").unwrap();
+        stale.speaker_names.clear();
+        save(&root, &stale).unwrap();
+        assert_eq!(
+            library::summary(&root, "123").unwrap().speaker_names,
+            names(&[(2, "Nguyễn Thị Phương Anh")])
+        );
+        set_locked(&root, "123", true).unwrap();
+        assert_eq!(
+            set_speaker_names(&root, "123", &names(&[])).unwrap_err(),
+            LOCKED
+        );
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

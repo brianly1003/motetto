@@ -43,7 +43,7 @@ pub fn login(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 /// Settings › About; the full texts ship in `resources/LICENSES.md`.
-const LICENCES: &str = "whisper.cpp (MIT) · llama.cpp (MIT) · Qwen3 / Qwen3.5 models (Apache-2.0) · Whisper models (MIT) · Silero VAD (MIT) · LibriVox sample (public domain) · Tauri (MIT or Apache-2.0) · Next.js (MIT)";
+const LICENCES: &str = "whisper.cpp (MIT) · llama.cpp (MIT) · Qwen3 / Qwen3.5 models (Apache-2.0) · Whisper models (MIT) · Silero VAD (MIT) · sherpa-onnx (Apache-2.0) · ONNX Runtime (MIT) · pyannote segmentation (MIT) · 3D-Speaker CAM++ (Apache-2.0) · LibriVox sample (public domain) · Tauri (MIT or Apache-2.0) · Next.js (MIT)";
 #[tauri::command]
 pub fn about(app: tauri::AppHandle) -> serde_json::Value {
     serde_json::json!({"version":app.package_info().version.to_string(),"licences":LICENCES,"platform":std::env::consts::OS})

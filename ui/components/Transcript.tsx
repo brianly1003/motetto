@@ -1,20 +1,54 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { transcriptLines } from "@/lib/transcript";
 import { elapsedLabel } from "@/lib/session";
 import { strings as s } from "@/lib/strings";
 import * as ipc from "@/lib/ipc";
 import { handBack } from "@/lib/focus";
 import { lineInClip, type ClipTrack } from "@/lib/clip";
+import { personOf, speakerLabel, voiceColor, voiceOf, type SpeakerNames } from "@/lib/speakerNames";
+import type { CSSProperties } from "react";
 
 const esc = (text: string) => text.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const READ_MS = 1500;
 
+// The time and name columns (the mockup's sizeColumns): as wide as the widest time and name, a name
+// at most 120 px. Text metrics need no page layout, so a 2,000-line transcript is laid out once, with
+// the widths already set. The fonts mirror `.tline .ts` (400 12px, tabular digits) and `.tline .who`
+// (500 12px; a voice's button adds its 12 px of padding).
+const metrics = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+function columnWidths(times: string[], labels: [string, boolean][]) {
+  if (!metrics) return null;
+  const root = getComputedStyle(document.documentElement);
+  const font = (weight: number, family: string) => `${weight} 12px ${root.getPropertyValue(family).trim() || "sans-serif"}`;
+  metrics.font = font(400, "--font-data");
+  const digit = Math.max(...[..."0123456789"].map(d => metrics.measureText(d).width));
+  const ts = Math.max(0, ...times.map(t => [...t].reduce((w, c) => w + (/\d/.test(c) ? digit : metrics.measureText(c).width), 0)));
+  metrics.font = font(500, "--font-ui");
+  const who = Math.min(120, Math.max(0, ...labels.map(([label, pill]) => metrics.measureText(label).width + (pill ? 12 : 0))));
+  return { "--ts-w": `${Math.ceil(ts) + 1}px`, "--who-w": `${Math.ceil(who) + 1}px` } as CSSProperties;
+}
+
+// A rename glows outward from its line for this many rows (about a screen), 40 ms apart; further
+// rows glow with the last, so a name far from where it began never waits. Only rows within reach
+// of the line glow at all: animating a thousand rows out of view stalls a long call.
+const GLOW_ROWS = 12, GLOW_REACH = 40;
+
 // As in the mockup: the time plays from its line; the words are the line's text, edited in place
 // (SPEC 7.11). The speaker and time never change; an emptied line is removed but keeps its place,
 // and what was heard stays one click away (Revert).
-export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position, running = false, clip}: {id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number; running?: boolean; /** Save a clip is open: lines outside the range step back, a time takes its line. */ clip?: {from: number; to: number; track: ClipTrack; total: number; onPick: (index: number) => void}}) {
-  const lines = transcriptLines(text, marks);
-  const heardLines = heard ? transcriptLines(heard, []) : null;
+// After Find speakers a `Speaker N` reads like You, in its voice's colour, and is a button that names
+// the voice (SpeakerPopover); `spot` fades every line but one person's, `renamed` glows the lines
+// that just took a name, from the clicked line outward.
+export default function Transcript({id, text, heard, marks, locked = false, onSeek, onReplay, onTogglePlay, onChange, onError, position, running = false, clip, names = {}, onSpeaker, spot = null, renamed}: {names?: SpeakerNames; onSpeaker?: (voice: number, anchor: HTMLElement) => void; spot?: number | null; renamed?: {voices: number[]; from: number}; id: string; text: string; heard: string; marks: number[]; locked?: boolean; onSeek?: (ms: number) => void; onReplay?: (start: number, end: number) => void; onTogglePlay?: () => void; onChange: (text: string, heard: string) => void; onError: (error: string) => void; position?: number; running?: boolean; /** Save a clip is open: lines outside the range step back, a time takes its line. */ clip?: {from: number; to: number; track: ClipTrack; total: number; onPick: (index: number) => void}}) {
+  const lines = useMemo(() => transcriptLines(text, marks), [text, marks]);
+  const heardLines = useMemo(() => heard ? transcriptLines(heard, []) : null, [heard]);
+  // Each line's next start, in one pass from the end (a search per line costs O(n²) on a long call).
+  const nextMs = useMemo(() => {
+    const out: (number | undefined)[] = new Array(lines.length);
+    let after: number | undefined;
+    for (let i = lines.length - 1; i >= 0; i--) { out[i] = after; if (lines[i].ms !== null) after = lines[i].ms!; }
+    return out;
+  }, [lines]);
   const [focused, setFocused] = useState(-1);
   const playing = position === undefined ? -1 : lines.findLastIndex(line => line.ms !== null && line.ms <= position);
   const box = useRef<HTMLDivElement>(null);
@@ -120,17 +154,22 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
     return () => document.removeEventListener("keydown", undo);
   });
 
+  const namesKey = JSON.stringify(names);
+  const columns = useMemo(() => columnWidths(
+    [...new Map(lines.map(l => [l.time.length, l.time])).values()],
+    [...new Map(lines.map(l => [voiceOf(l.speaker) ? speakerLabel(l.speaker, names) : l.speaker, voiceOf(l.speaker) > 0] as [string, boolean])).entries()]),
+  [text, namesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const editable = !locked;
   return <div className="transcript-edit">
-    <div ref={box} className="tlist" data-clip={clip ? "" : undefined} tabIndex={0} role="document" aria-label={locked ? s.transcriptLockedLabel : s.transcriptLabel}
+    <div ref={box} className={`tlist${spot !== null ? " spot" : ""}`} style={columns ?? undefined} data-clip={clip ? "" : undefined} tabIndex={0} role="document" aria-label={locked ? s.transcriptLockedLabel : s.transcriptLabel}
       onKeyDown={event => {
         const target = event.target as HTMLElement;
-        if (target.isContentEditable || target.closest(".epop, .rmv") || event.metaKey || event.ctrlKey) return;
+        if (target.isContentEditable || target.closest(".epop, .rmv") || (target.closest(".who.voice") && event.key !== " ") || event.metaKey || event.ctrlKey) return;
         const at = target.closest<HTMLElement>(".tline") ? Number(target.closest<HTMLElement>(".tline")!.dataset.line) : -1;
         const here = at >= 0 ? at : playing >= 0 ? playing : 0;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); saved.current = -1; go(at < 0 ? here : here + (event.key === "ArrowDown" ? 1 : -1)); }
         else if (event.key === " ") { event.preventDefault(); onTogglePlay?.(); }
-        else if (event.key === "Enter" && event.altKey) { event.preventDefault(); const line = lines[here], next = lines.slice(here + 1).find(l => l.ms !== null)?.ms; if (line?.ms != null) onReplay?.(line.ms, next ?? line.ms + 8000); }
+        else if (event.key === "Enter" && event.altKey) { event.preventDefault(); const line = lines[here], next = nextMs[here]; if (line?.ms != null) onReplay?.(line.ms, next ?? line.ms + 8000); }
         else if (event.key === "Enter" && (at >= 0 || target === box.current)) {
           event.preventDefault();
           if (at >= 0 && at === saved.current && editNext(at, 1)) return;
@@ -140,17 +179,24 @@ export default function Transcript({id, text, heard, marks, locked = false, onSe
       {lines.map((line, index) => {
         const side = line.speaker === "You" ? "me" : "them", original = heardLines?.[index]?.text ?? line.text;
         const removed = !line.text.trim() && !!original.trim(), edited = !!heardLines && line.text !== original;
-        const next = lines.slice(index + 1).find(l => l.ms !== null)?.ms;
+        const next = nextMs[index];
         const seek = onSeek && line.ms !== null ? () => onSeek(line.ms!) : undefined;
         const inclip = !!clip && lineInClip(lines, index, clip.total, clip.from, clip.to, clip.track);
         const pick = clip && line.ms !== null ? () => clip.onPick(index) : undefined;
-        return <div className={`tline ${side}${index === playing && index !== focused ? " playing" : ""}${edited ? " edited" : ""}${removed ? " removed" : ""}${inclip ? " inclip" : ""}`} key={index} data-line={index} tabIndex={-1}>
-          <button className="ts" disabled={clip ? !pick : !seek} onClick={clip ? pick : seek} aria-label={clip ? `${s.clipLine} ${line.time}` : `Play from ${line.time}`}>{line.time}</button><span className={`who ${side}`}>{line.speaker}</span>
+        const voice = voiceOf(line.speaker), who = speakerLabel(line.speaker, names), person = voice ? personOf(voice, names) : 0;
+        const lit = spot !== null && (spot ? person === spot : line.speaker === "You");
+        return <div className={`tline ${side}${index === playing && index !== focused ? " playing" : ""}${edited ? " edited" : ""}${removed ? " removed" : ""}${inclip ? " inclip" : ""}${lit ? " lit" : ""}`} key={index} data-line={index} tabIndex={-1}>
+          <button className="ts" disabled={clip ? !pick : !seek} onClick={clip ? pick : seek} aria-label={clip ? `${s.clipLine} ${line.time}` : `Play from ${line.time}`}>{line.time}</button>{voice
+            ? <button type="button" className={`who voice${renamed?.voices.includes(voice) && Math.abs(index - renamed.from) <= GLOW_REACH ? " renamed" : ""}`} style={{"--vc": voiceColor(person), "--d": `${Math.min(Math.abs(index - (renamed?.from ?? 0)), GLOW_ROWS) * 40}ms`} as CSSProperties}
+                aria-haspopup="dialog" disabled={!editable || !onSpeaker} title={editable && onSpeaker ? s.renameSpeaker.replace("{name}", who) : undefined}
+                onKeyDown={event => { if (event.key === " ") event.preventDefault(); }} onKeyUp={event => { if (event.key === " ") event.preventDefault(); }}
+                onClick={event => onSpeaker?.(voice, event.currentTarget)}><span>{who}</span></button>
+            : <span className={`who ${side}`}>{line.speaker}</span>}
           <span className="tx">
             {removed
               ? <span className="rmv"><s>{original}</s><span>{s.lineRemoved}</span>{editable && <button className="lnk" onClick={() => void save(index, original)}>{s.revert}</button>}</span>
               : <span className={`words${editable ? "" : " ro"}`} contentEditable={editable ? "plaintext-only" : undefined} suppressContentEditableWarning spellCheck={false}
-                  role={editable ? "textbox" : undefined} aria-label={editable ? `${s.lineAt} ${line.time}, ${line.speaker}` : undefined}
+                  role={editable ? "textbox" : undefined} aria-label={editable ? `${s.lineAt} ${line.time}, ${who}` : undefined}
                   dangerouslySetInnerHTML={{__html: esc(line.text)}}
                   onFocus={() => { saved.current = -1; setFocused(index); }}
                   onBlur={event => { setFocused(-1); void save(index, (event.currentTarget.textContent ?? "").replace(/\s+/g, " ").trim()); }}

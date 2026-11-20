@@ -2,4 +2,8 @@
 import type { ModelFile } from "./ModelFile";
 import type { Tier } from "./Tier";
 
-export type Catalog = { files: Array<ModelFile>, tiers: Array<Tier>, vad: string, };
+export type Catalog = { files: Array<ModelFile>, tiers: Array<Tier>, vad: string, 
+/**
+ * Segmentation then embedding model: every tier downloads both, after the notes model.
+ */
+speakers: Array<string>, };

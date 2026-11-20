@@ -73,6 +73,12 @@ pub struct MeetingSummary {
     /// Standard, as they were transcribed.
     #[serde(default)]
     pub mic_mode: motetto_core::transcribe::MicMode,
+    /// Names given to the voices Find speakers told apart, by number (`Speaker 3` is 3). The
+    /// transcript files keep `Speaker N`; screens, Copy and the notes prompt show the name, and
+    /// voices sharing a name read as one person.
+    #[serde(default)]
+    #[ts(type = "Record<number, string>")]
+    pub speaker_names: std::collections::BTreeMap<u32, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -390,6 +396,7 @@ fn unreadable(id: &str) -> MeetingSummary {
         facts: None,
         deleted_kind: Default::default(),
         mic_mode: Default::default(),
+        speaker_names: Default::default(),
         has_video: false,
     }
 }
@@ -522,6 +529,7 @@ pub fn import(
         facts: None,
         deleted_kind: Default::default(),
         mic_mode: Default::default(),
+        speaker_names: Default::default(),
         has_video: false,
     };
     let dir = root.join(&summary.id);
@@ -799,6 +807,7 @@ mod tests {
                     facts: None,
                     deleted_kind: Default::default(),
                     mic_mode: Default::default(),
+                    speaker_names: Default::default(),
                     has_video: false,
                 },
             )
@@ -869,6 +878,7 @@ mod tests {
                 facts: None,
                 deleted_kind: Default::default(),
                 mic_mode: Default::default(),
+                speaker_names: Default::default(),
                 has_video: false,
             };
             save(&root, &summary).unwrap();

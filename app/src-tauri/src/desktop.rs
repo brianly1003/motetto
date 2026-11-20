@@ -34,6 +34,7 @@ pub fn run() {
             crate::note_items::set_action_item_done,
             crate::note_items::save_notes,
             crate::transcript_edits::save_transcript_line,
+            crate::transcript_edits::move_transcript_lines,
             crate::translations::notes_translations,
             crate::translations::get_translation,
             crate::translations::translate_notes,
@@ -43,6 +44,7 @@ pub fn run() {
             crate::meeting_actions::deleted_meetings,
             crate::meeting_actions::rename_meeting,
             crate::meeting_actions::set_locked,
+            crate::meeting_actions::set_speaker_names,
             crate::meeting_actions::set_unconfirmed,
             library_commands::search_meetings,
             library_commands::open_action_items,
@@ -553,10 +555,18 @@ async fn undo_discard(app: tauri::AppHandle, id: String) -> Result<(), String> {
             "restore".into(),
             None,
             None,
+            None,
         )
         .await?;
-        crate::meeting_actions::meeting_action(app.clone(), id, "regenerate".into(), None, None)
-            .await
+        crate::meeting_actions::meeting_action(
+            app.clone(),
+            id,
+            "regenerate".into(),
+            None,
+            None,
+            None,
+        )
+        .await
     }
     .await;
     // The Pill has gone by now, so the library says what went wrong.

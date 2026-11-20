@@ -27,7 +27,7 @@ fn staging(folder: &Path) -> Result<std::path::PathBuf, String> {
 /// The audio a meeting kept, as transcribe parts: a recording's `parts.json` (each track by its
 /// file name in this folder, since stored paths can predate a folder move), or an import's
 /// `source.<extension>`. Empty when the audio was deleted.
-fn saved_audio(folder: &Path) -> Result<Vec<(Vec<String>, u64)>, String> {
+pub(crate) fn saved_audio(folder: &Path) -> Result<Vec<(Vec<String>, u64)>, String> {
     if folder.join("parts.json").exists() {
         let parts: Vec<(Vec<String>, u64)> =
             serde_json::from_str(&library::text(&folder.join("parts.json"))?)
@@ -141,7 +141,7 @@ fn learned(folder: &Path) -> Result<crate::learned_edits::Edits, String> {
 /// edited copy (the user's corrections put back), if any. A meeting cut off
 /// before its first transcript (Interrupted, notes stopped) has none to keep: reading it failed
 /// after the whole transcription, every time (2026-10-28).
-fn save_transcript(
+pub(crate) fn save_transcript(
     folder: &Path,
     transcript: &str,
     edited: Option<String>,
@@ -220,6 +220,7 @@ pub(crate) fn regenerate(
     if meeting.transcript.trim().is_empty() {
         return Err("This meeting has no transcript to summarize".into());
     }
+    let transcript = motetto_core::speakers::named(&transcript, &meeting.summary.speaker_names);
     motetto_core::tools::reset(); // a Stop pressed for an earlier job doesn't stop this one
     let staging = staging(&folder)?;
     let result = (|| -> Result<(), String> {

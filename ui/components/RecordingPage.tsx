@@ -209,3 +209,12 @@ export function RetranscribingPage({ id, stage }: { id: string; stage: Stage | n
   return <StepsPage title={s.retranscribing} at={stage?.type === "Saving" ? 1 : 0} bar={[95, 100]} measured={stage?.type === "Saving" ? undefined : measuredOf(stage)} tip={s.retranscribingTip} began={() => { const t = stageTimes(id); return [t.start, t.Saving]; }} stop={{ id, hint: s.stopTranscriptHint }}
     steps={[["Transcribing the saved audio", ""], ["Saving", ""]]}/>;
 }
+
+// Find speakers: the speaker models on first use, the diarizer over the saved call audio, then
+// the relabelled transcript is saved. Nothing is transcribed again.
+export function FindingSpeakersPage({ id, stage }: { id: string; stage: Stage | null }) {
+  const at = stage?.type === "Saving" ? 2 : stage?.type === "FindingSpeakers" ? 1 : 0;
+  const models = stage?.type === "GettingSpeakerModels" ? stage.percent : null;
+  return <StepsPage title={s.findingSpeakers} at={at} bar={[30, 95, 100]} measured={models === null ? undefined : { right: `${models}%`, line: "", share: models / 100 }} tip={s.findingSpeakersTip} began={() => { const t = stageTimes(id); return [t.start, t.FindingSpeakers, t.Saving]; }} stop={{ id, hint: s.stopTranscriptHint }}
+    steps={[[at === 0 ? "Getting the speaker models" : "Speaker models ready", ""], ["Listening for each voice", ""], ["Saving", ""]]}/>;
+}

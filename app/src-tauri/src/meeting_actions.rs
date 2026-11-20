@@ -190,6 +190,18 @@ pub fn rename_meeting(
     Ok(summary)
 }
 
+/// Names the meeting's voices; the whole map is sent, so Undo is the earlier map sent again.
+#[tauri::command]
+pub fn set_speaker_names(
+    app: tauri::AppHandle,
+    id: String,
+    names: std::collections::BTreeMap<u32, String>,
+) -> Result<library::MeetingSummary, String> {
+    let summary = crate::bookmarks::set_speaker_names(&app.state::<Library>().root, &id, &names)?;
+    let _ = app.emit("motetto://library-changed", ());
+    Ok(summary)
+}
+
 #[tauri::command]
 pub fn set_locked(
     app: tauri::AppHandle,
@@ -269,9 +281,16 @@ pub async fn meeting_action(
     action: String,
     language: Option<String>,
     mic_mode: Option<motetto_core::transcribe::MicMode>,
+    people: Option<usize>,
 ) -> Result<(), String> {
     if mic_mode.is_some() && action != "retranscribe" {
         return Err("A microphone mode applies only to Transcribe again".into());
+    }
+    if people.is_some() && action != "find_speakers" {
+        return Err("A number of people applies only to Find speakers".into());
+    }
+    if people.is_some_and(|n| !(1..=crate::find_speakers::MOST_PEOPLE).contains(&n)) {
+        return Err("Choose between 1 and 12 people".into());
     }
     // Write the notes again in a language picked for this meeting (SPEC 7.12).
     if let Some(code) = &language
@@ -303,7 +322,8 @@ pub async fn meeting_action(
     let root = state.root.clone();
     // Delete, restore, purge and reveal touch one folder, so other meetings stay manageable while a
     // call records or a file imports; the meeting being written does not (owner, 2026-10-20).
-    if action != "regenerate" && action != "retranscribe" {
+    let job = ["regenerate", "retranscribe", "find_speakers"].contains(&action.as_str());
+    if !job {
         let worker = app.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
             crate::library_commands::edit(&worker, &id, |root| run(root, &id, &action))
@@ -325,6 +345,7 @@ pub async fn meeting_action(
         id: Some(id.clone()),
         import: false,
         transcribe: action == "retranscribe",
+        speakers: action == "find_speakers",
     }));
     let _ = app.emit("motetto://library-changed", ());
     let worker = app.clone();
@@ -334,6 +355,8 @@ pub async fn meeting_action(
         };
         if action == "retranscribe" {
             crate::rewrite::retranscribe(&root, &id, mic_mode, &stage)
+        } else if action == "find_speakers" {
+            crate::find_speakers::run(&worker, &root, &id, people, &stage)
         } else {
             crate::rewrite::regenerate(&root, &id, language.as_deref(), &stage)
         }

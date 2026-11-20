@@ -10,6 +10,8 @@ pub enum FileKind {
     Speech,
     Vad,
     Notes,
+    /// The speaker-diarization pair: segmentation, then voice embeddings.
+    Speakers,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -42,6 +44,8 @@ pub struct Catalog {
     pub files: Vec<ModelFile>,
     pub tiers: Vec<Tier>,
     pub vad: String,
+    /// Segmentation then embedding model: every tier downloads both, after the notes model.
+    pub speakers: Vec<String>,
 }
 
 pub fn catalog() -> &'static Catalog {
@@ -61,14 +65,20 @@ impl Catalog {
             .find(|t| t.id == id)
             .expect("every tier is in models.json")
     }
-    /// Speech + notes + voice detection: what a tier downloads in total.
+    /// Speech + notes + voice detection + speakers: what a tier downloads in total.
     pub fn tier_bytes(&self, id: TierId) -> u64 {
-        let tier = self.tier(id);
-        [&tier.speech, &tier.notes, &self.vad]
-            .iter()
+        self.tier_files(id)
             .filter_map(|f| self.file(f))
             .map(|f| f.bytes)
             .sum()
+    }
+    /// Every file a tier needs, in download order after the speed test: speech, voice detection,
+    /// notes, speakers.
+    pub fn tier_files(&self, id: TierId) -> impl Iterator<Item = &String> {
+        let tier = self.tier(id);
+        [&tier.speech, &self.vad, &tier.notes]
+            .into_iter()
+            .chain(&self.speakers)
     }
 }
 
@@ -87,7 +97,7 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), c.files.len(), "ids are unique");
-        assert_eq!(c.files.len(), 7);
+        assert_eq!(c.files.len(), 9);
         for f in &c.files {
             assert!(f.url.starts_with("https://huggingface.co/"), "{}", f.id);
             assert!(f.url.ends_with(&format!("/{}", f.file)), "{}", f.id);
@@ -106,9 +116,13 @@ mod tests {
             assert_eq!(c.file(&t.notes).unwrap().kind, FileKind::Notes);
         }
         assert_eq!(c.file(&c.vad).unwrap().kind, FileKind::Vad);
+        assert_eq!(c.speakers.len(), 2);
+        for id in &c.speakers {
+            assert_eq!(c.file(id).unwrap().kind, FileKind::Speakers);
+        }
         assert_eq!(
             c.tier_bytes(TierId::Best),
-            1_081_140_203 + 5_027_783_488 + 885_098
+            1_081_140_203 + 5_027_783_488 + 885_098 + 5_992_913 + 28_281_164
         );
     }
 }
